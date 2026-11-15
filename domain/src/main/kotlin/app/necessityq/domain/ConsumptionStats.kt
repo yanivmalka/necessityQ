@@ -1,0 +1,188 @@
+package app.necessityq.domain
+
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
+import kotlin.math.abs
+import kotlin.math.pow
+import kotlin.math.roundToLong
+
+enum class Classification { ROUTINE, OCCASIONAL, ONE_OFF }
+
+/** Everything the statistics engine knows about one generic item for one household. */
+data class ItemStats(
+    val itemId: String,
+    val identity: ItemIdentity,
+    val purchaseDays: Int,
+    val firstPurchase: LocalDate,
+    val lastPurchase: LocalDate,
+    /** Recency-weighted median days between purchases, normalised to a typical-size purchase. */
+    val cadenceDays: Double?,
+    /** Median absolute deviation of the interval, in days. */
+    val spreadDays: Double?,
+    val typicalQuantity: Quantity?,
+    val lastQuantity: Quantity?,
+    val nextDue: LocalDate?,
+    val confidence: Double,
+    val classification: Classification,
+    /** Recency-weighted purchase frequency, used to rank quick-add chips. */
+    val frequencyScore: Double,
+) {
+    fun daysSinceLast(today: LocalDate): Long = ChronoUnit.DAYS.between(lastPurchase, today)
+
+    /** How far through the expected interval we are: 1.0 = due today. */
+    fun dueRatio(today: LocalDate): Double? {
+        val due = nextDue ?: return null
+        val expected = ChronoUnit.DAYS.between(lastPurchase, due).coerceAtLeast(1)
+        return daysSinceLast(today).toDouble() / expected
+    }
+}
+
+/**
+ * Transparent, explainable consumption statistics (no ML):
+ *
+ *  1. Purchases are grouped per item and per calendar day (two check-offs on the same day = one trip).
+ *  2. Each interval between trips is divided by the relative size of the purchase that started it,
+ *     so a double-size stock-up does not look like a slower cadence (ratio clamped to 0.5..3).
+ *  3. Cadence = recency-weighted median of the normalised intervals (recent trips weigh more).
+ *  4. Next due date = last trip + cadence × (last purchase size ÷ typical size).
+ *  5. Confidence grows with the number of intervals and shrinks with their variability.
+ */
+class ConsumptionStatsEngine(
+    private val zone: ZoneId = ZoneId.systemDefault(),
+    private val recencyDecay: Double = 0.8,
+    /** Only the most recent purchases inform the estimate, so habits can change. */
+    private val maxTrips: Int = 12,
+) {
+
+    fun compute(purchases: List<Purchase>, today: LocalDate): Map<String, ItemStats> =
+        purchases.groupBy { it.itemId }.mapValues { (itemId, list) -> computeItem(itemId, list, today) }
+
+    private data class Trip(val day: LocalDate, val baseAmount: Double?, val quantity: Quantity?)
+
+    fun computeItem(itemId: String, purchases: List<Purchase>, today: LocalDate): ItemStats {
+        require(purchases.isNotEmpty())
+        val latestIdentity = purchases.maxBy { it.boughtAtMillis }.identity
+
+        val trips = purchases
+            .groupBy { Instant.ofEpochMilli(it.boughtAtMillis).atZone(zone).toLocalDate() }
+            .map { (day, sameDay) -> Trip(day, sumBase(sameDay), sumQuantity(sameDay)) }
+            .sortedBy { it.day }
+            .takeLast(maxTrips)
+
+        val knownAmounts = trips.mapNotNull { it.baseAmount }
+        val typicalBase = if (knownAmounts.isEmpty()) null else median(knownAmounts)
+        val typicalQuantity = typicalBase?.let { base ->
+            val dim = trips.firstNotNullOfOrNull { it.quantity }?.dimension ?: Dimension.COUNT
+            Quantity.fromBase(base, dim)
+        }
+
+        fun sizeRatio(trip: Trip): Double {
+            val amount = trip.baseAmount ?: return 1.0
+            val typical = typicalBase ?: return 1.0
+            return (amount / typical).coerceIn(0.5, 3.0)
+        }
+
+        val normalisedIntervals = trips.zipWithNext { a, b ->
+            ChronoUnit.DAYS.between(a.day, b.day).toDouble() / sizeRatio(a)
+        }
+
+        val cadence: Double?
+        val spread: Double?
+        if (normalisedIntervals.isEmpty()) {
+            cadence = null
+            spread = null
+        } else {
+            val n = normalisedIntervals.size
+            val weights = List(n) { i -> recencyDecay.pow((n - 1 - i).toDouble()) }
+            cadence = weightedMedian(normalisedIntervals, weights).coerceAtLeast(1.0)
+            spread = median(normalisedIntervals.map { abs(it - cadence) })
+        }
+
+        val last = trips.last()
+        val nextDue = cadence?.let { c ->
+            last.day.plusDays((c * sizeRatio(last)).roundToLong().coerceAtLeast(1))
+        }
+
+        val intervals = normalisedIntervals.size
+        val baseConfidence = when {
+            intervals == 0 -> 0.0
+            intervals == 1 -> 0.3
+            intervals == 2 -> 0.5
+            intervals == 3 -> 0.65
+            intervals <= 5 -> 0.8
+            else -> 0.9
+        }
+        val variation = if (cadence != null && spread != null) spread / cadence else 1.0
+        val confidence = baseConfidence * (1.0 - (variation * 0.5).coerceAtMost(0.5))
+
+        val classification = when {
+            trips.size >= 4 && variation < 0.6 -> Classification.ROUTINE
+            trips.size >= 2 -> Classification.OCCASIONAL
+            else -> Classification.ONE_OFF
+        }
+
+        val frequencyScore = trips.sumOf { trip ->
+            val ageDays = ChronoUnit.DAYS.between(trip.day, today).coerceAtLeast(0).toDouble()
+            0.5.pow(ageDays / 60.0) // half-life of two months
+        }
+
+        return ItemStats(
+            itemId = itemId,
+            identity = latestIdentity,
+            purchaseDays = trips.size,
+            firstPurchase = trips.first().day,
+            lastPurchase = last.day,
+            cadenceDays = cadence,
+            spreadDays = spread,
+            typicalQuantity = typicalQuantity,
+            lastQuantity = last.quantity,
+            nextDue = nextDue,
+            confidence = confidence,
+            classification = classification,
+            frequencyScore = frequencyScore,
+        )
+    }
+
+    private fun sumBase(sameDay: List<Purchase>): Double? {
+        val quantities = sameDay.map { it.quantity }
+        if (quantities.any { it == null }) return null
+        val dims = quantities.map { it!!.dimension }.toSet()
+        if (dims.size != 1) return null
+        return quantities.sumOf { it!!.baseAmount }
+    }
+
+    private fun sumQuantity(sameDay: List<Purchase>): Quantity? {
+        var total: Quantity? = null
+        for (p in sameDay) {
+            val q = p.quantity ?: return null
+            total = if (total == null) q else (total + q ?: return null)
+        }
+        return total
+    }
+
+    companion object {
+        fun median(values: List<Double>): Double {
+            require(values.isNotEmpty())
+            val sorted = values.sorted()
+            val mid = sorted.size / 2
+            return if (sorted.size % 2 == 0) (sorted[mid - 1] + sorted[mid]) / 2.0 else sorted[mid]
+        }
+
+        fun weightedMedian(values: List<Double>, weights: List<Double>): Double {
+            require(values.size == weights.size && values.isNotEmpty())
+            val pairs = values.zip(weights).sortedBy { it.first }
+            val half = weights.sum() / 2.0
+            var acc = 0.0
+            for ((index, pair) in pairs.withIndex()) {
+                acc += pair.second
+                if (abs(acc - half) < 1e-9 && index + 1 < pairs.size) {
+                    return (pair.first + pairs[index + 1].first) / 2.0
+                }
+                if (acc > half) return pair.first
+            }
+            return pairs.last().first
+        }
+    }
+}

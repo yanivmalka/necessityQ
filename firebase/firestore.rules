@@ -1,0 +1,41 @@
+rules_version = '2';
+
+// necessityQ — only members of a household can read or write its data.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function uid() { return request.auth.uid; }
+    function isMember(hid) {
+      return signedIn() && uid() in get(/databases/$(database)/documents/households/$(hid)).data.members;
+    }
+
+    // Each user can only read/write their own pointer to a household.
+    match /users/{userId} {
+      allow read, write: if signedIn() && uid() == userId;
+    }
+
+    // Join codes: anyone signed in may look up a code (6 random chars); only a member may create one.
+    match /joinCodes/{code} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if isMember(request.resource.data.householdId);
+      allow update, delete: if false;
+    }
+
+    match /households/{hid} {
+      allow read: if isMember(hid);
+      // creator must be the only initial member
+      allow create: if signedIn() && request.resource.data.members == [uid()];
+      // members may rename; anyone signed in may add only themselves (join by code) or remove only themselves (leave)
+      allow update: if isMember(hid)
+        || (signedIn()
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members'])
+            && request.resource.data.members.toSet().difference(resource.data.members.toSet()) == [uid()].toSet());
+
+      match /{sub=**} {
+        allow read, write: if isMember(hid);
+      }
+    }
+  }
+}
