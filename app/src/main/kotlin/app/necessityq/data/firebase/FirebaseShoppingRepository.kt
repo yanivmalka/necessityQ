@@ -29,12 +29,12 @@ class FirebaseShoppingRepository(
 ) : ShoppingRepository {
 
     private fun household(hid: String) = db.collection("households").document(hid)
-    private fun lines(hid: String) = household(hid).collection("lines")
+    private fun linesRef(hid: String) = household(hid).collection("lines")
     private fun purchasesRef(hid: String) = household(hid).collection("purchases")
     private fun suppressionsRef(hid: String) = household(hid).collection("suppressions")
 
     override fun lines(householdId: String): Flow<List<ListLine>> =
-        lines(householdId).observe().map { snap -> snap.documents.mapNotNull(FirestoreMapping::lineFrom) }
+        linesRef(householdId).observe().map { snap -> snap.documents.mapNotNull(FirestoreMapping::lineFrom) }
 
     override fun purchases(householdId: String): Flow<List<Purchase>> {
         val since = clockMillis() - historyDays * 24 * 60 * 60 * 1000
@@ -50,27 +50,27 @@ class FirebaseShoppingRepository(
     // and syncs them in the background when the connection returns.
 
     override suspend fun addLine(householdId: String, line: ListLine) {
-        lines(householdId).document(line.id).set(FirestoreMapping.lineToMap(line))
+        linesRef(householdId).document(line.id).set(FirestoreMapping.lineToMap(line))
     }
 
     override suspend fun updateLineQuantity(householdId: String, lineId: String, quantity: Quantity?, atMillis: Long) {
-        lines(householdId).document(lineId).update(
+        linesRef(householdId).document(lineId).update(
             mapOf("quantity" to FirestoreMapping.quantityToMap(quantity), "updatedAt" to atMillis),
         )
     }
 
     override suspend fun updateLineNote(householdId: String, lineId: String, note: String?, atMillis: Long) {
-        lines(householdId).document(lineId).update(mapOf("note" to note, "updatedAt" to atMillis))
+        linesRef(householdId).document(lineId).update(mapOf("note" to note, "updatedAt" to atMillis))
     }
 
     override suspend fun deleteLine(householdId: String, lineId: String) {
-        lines(householdId).document(lineId).delete()
+        linesRef(householdId).document(lineId).delete()
     }
 
     override suspend fun checkOff(householdId: String, lineId: String, purchase: Purchase) {
         db.batch()
             .update(
-                lines(householdId).document(lineId),
+                linesRef(householdId).document(lineId),
                 mapOf(
                     "status" to LineStatus.BOUGHT.name,
                     "boughtAt" to purchase.boughtAtMillis,
@@ -84,7 +84,7 @@ class FirebaseShoppingRepository(
     override suspend fun reopen(householdId: String, lineId: String, purchaseId: String, atMillis: Long) {
         db.batch()
             .update(
-                lines(householdId).document(lineId),
+                linesRef(householdId).document(lineId),
                 mapOf("status" to LineStatus.NEEDED.name, "boughtAt" to FieldValue.delete(), "updatedAt" to atMillis),
             )
             .delete(purchasesRef(householdId).document(purchaseId))
@@ -94,7 +94,7 @@ class FirebaseShoppingRepository(
     override suspend fun clearBought(householdId: String, lineIds: List<String>) {
         lineIds.chunked(400).forEach { chunk ->
             val batch = db.batch()
-            chunk.forEach { batch.delete(lines(householdId).document(it)) }
+            chunk.forEach { batch.delete(linesRef(householdId).document(it)) }
             batch.commit()
         }
     }
