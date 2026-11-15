@@ -44,6 +44,8 @@ interface ShoppingRepository {
     suspend fun clearBought(householdId: String, lineIds: List<String>)
 
     suspend fun deletePurchase(householdId: String, purchaseId: String)
+    /** Records a purchase directly (history import). Idempotent: the purchase id decides the document. */
+    suspend fun addPurchase(householdId: String, purchase: Purchase)
     suspend fun suppress(householdId: String, suppression: SuggestionSuppression)
 }
 

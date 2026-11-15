@@ -242,6 +242,13 @@ fun HouseholdScreen(vm: AppViewModel, household: Household, modifier: Modifier =
             } else {
                 Text("מצב מכשיר יחיד: הנתונים נשמרים במכשיר בלבד.", style = MaterialTheme.typography.bodyMedium)
             }
+            Spacer(Modifier.height(16.dp))
+            Text("נתוני דוגמה", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "טוען לבית את רשימת הקניות מ-Microsoft To Do: מה שסומן כ\"נקנה\" הופך להיסטוריה, והשאר לרשימה הנוכחית. אפשר ללחוץ שוב בלי ליצור כפילויות.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Button(onClick = vm::importSample) { Text("טעינת נתוני דוגמה") }
             if (vm.isShared) {
                 Spacer(Modifier.height(24.dp))
                 OutlinedButton(onClick = { confirmLeave = true }) { Text("יציאה מהבית") }

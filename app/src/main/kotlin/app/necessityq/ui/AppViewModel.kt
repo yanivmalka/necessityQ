@@ -138,6 +138,14 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         launchSafe { container.service.deletePurchase(hid, purchase) }
     }
 
+    fun importSample() {
+        val (hid, uid, lines) = ctx() ?: return
+        launchSafe {
+            val (added, history) = container.service.importTodoSample(hid, uid, lines)
+            _messages.tryEmit("נטענו $history רשומות היסטוריה ו-$added פריטים לרשימה")
+        }
+    }
+
     fun createHousehold(name: String) = launchSafe { container.household.createHousehold(name) }
     fun joinHousehold(code: String) = launchSafe { container.household.joinHousehold(code) }
     fun leaveHousehold() = launchSafe { container.household.leaveHousehold() }

@@ -99,6 +99,10 @@ class FirebaseShoppingRepository(
         }
     }
 
+    override suspend fun addPurchase(householdId: String, purchase: Purchase) {
+        purchasesRef(householdId).document(purchase.id).set(FirestoreMapping.purchaseToMap(purchase))
+    }
+
     override suspend fun deletePurchase(householdId: String, purchaseId: String) {
         purchasesRef(householdId).document(purchaseId).delete()
     }
