@@ -11,7 +11,11 @@ import app.necessityq.domain.ItemIdentity
 import app.necessityq.domain.LineSource
 import app.necessityq.domain.ListLine
 import app.necessityq.domain.ListSnapshot
+import app.necessityq.domain.Member
 import app.necessityq.domain.Purchase
+import app.necessityq.domain.Releases
+import app.necessityq.BuildConfig
+import java.io.File
 import app.necessityq.domain.Quantity
 import app.necessityq.domain.QuickEntryParser
 import app.necessityq.domain.Session
@@ -146,6 +150,78 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    // ---------- accounts & participants ----------
+
+    val supportsAccounts: Boolean = container.household.supportsAccounts
+
+    val members: StateFlow<List<Member>> = container.household.members
+        .catch { emit(emptyList()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun signInWithGoogle(idToken: String) = launchSafe {
+        container.household.signInWithGoogle(idToken)
+        _messages.tryEmit("התחברת עם חשבון Google")
+    }
+
+    fun signOut() = launchSafe { container.household.signOut() }
+    fun updateDisplayName(name: String) = launchSafe { container.household.updateDisplayName(name) }
+    fun renameHousehold(name: String) = launchSafe { container.household.renameHousehold(name) }
+    fun removeMember(userId: String) = launchSafe {
+        container.household.removeMember(userId)
+        _messages.tryEmit("המשתתף הוסר מהבית")
+    }
+    fun regenerateJoinCode() = launchSafe {
+        container.household.regenerateJoinCode()
+        _messages.tryEmit("נוצר קוד הצטרפות חדש; הקוד הישן אינו תקף עוד")
+    }
+    fun reportError(message: String) { _messages.tryEmit(message) }
+
+    // ---------- app updates from GitHub Releases ----------
+
+    private val _update = MutableStateFlow<UpdateState>(UpdateState.Idle)
+    val update: StateFlow<UpdateState> = _update
+
+    val updater get() = container.updater
+
+    init {
+        checkForUpdates(manual = false)
+    }
+
+    fun checkForUpdates(manual: Boolean) {
+        if (_update.value is UpdateState.Checking || _update.value is UpdateState.Downloading) return
+        _update.value = UpdateState.Checking
+        viewModelScope.launch {
+            runCatching { container.updater.latest() }
+                .onSuccess { release ->
+                    _update.value = when {
+                        release == null -> UpdateState.UpToDate
+                        Releases.isNewer(release.versionCode, BuildConfig.VERSION_CODE) -> {
+                            if (!manual) _messages.tryEmit("יצאה גרסה חדשה ${release.versionName} — ב\"הבית\" אפשר לעדכן")
+                            UpdateState.Available(release)
+                        }
+                        else -> UpdateState.UpToDate
+                    }
+                }
+                .onFailure {
+                    // a silent startup check must not nag when offline
+                    _update.value = if (manual) UpdateState.Failed(it.message ?: "בדיקת העדכון נכשלה") else UpdateState.Idle
+                }
+        }
+    }
+
+    fun downloadUpdate() {
+        val available = _update.value as? UpdateState.Available ?: return
+        _update.value = UpdateState.Downloading(available.release, 0f)
+        viewModelScope.launch {
+            runCatching {
+                container.updater.download(available.release) { p ->
+                    _update.value = UpdateState.Downloading(available.release, p)
+                }
+            }.onSuccess { file -> _update.value = UpdateState.Ready(available.release, file) }
+                .onFailure { _update.value = UpdateState.Failed(it.message ?: "ההורדה נכשלה") }
+        }
+    }
+
     fun createHousehold(name: String) = launchSafe { container.household.createHousehold(name) }
     fun joinHousehold(code: String) = launchSafe { container.household.joinHousehold(code) }
     fun leaveHousehold() = launchSafe { container.household.leaveHousehold() }
@@ -155,4 +231,15 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             initializer { AppViewModel(container) }
         }
     }
+}
+
+/** State of the in-app update flow. */
+sealed interface UpdateState {
+    data object Idle : UpdateState
+    data object Checking : UpdateState
+    data object UpToDate : UpdateState
+    data class Available(val release: app.necessityq.domain.ReleaseInfo) : UpdateState
+    data class Downloading(val release: app.necessityq.domain.ReleaseInfo, val progress: Float) : UpdateState
+    data class Ready(val release: app.necessityq.domain.ReleaseInfo, val file: File) : UpdateState
+    data class Failed(val message: String) : UpdateState
 }

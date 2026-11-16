@@ -1,41 +1,60 @@
 rules_version = '2';
 
 // necessityQ — only members of a household can read or write its data.
+// The owner (ownerId; for older households the first member) manages participants.
 service cloud.firestore {
   match /databases/{database}/documents {
 
     function signedIn() { return request.auth != null; }
     function uid() { return request.auth.uid; }
-    function isMember(hid) {
-      return signedIn() && uid() in get(/databases/$(database)/documents/households/$(hid)).data.members;
+    function household(hid) { return get(/databases/$(database)/documents/households/$(hid)).data; }
+    function isMember(hid) { return signedIn() && uid() in household(hid).members; }
+    function isOwner(hid) {
+      return isMember(hid) && uid() == household(hid).get('ownerId', household(hid).members[0]);
     }
 
-    // Each user can only read/write their own pointer to a household.
+    // Each user can only read/write their own profile and household pointer.
     match /users/{userId} {
       allow read, write: if signedIn() && uid() == userId;
     }
 
-    // Join codes: anyone signed in may look up a code (6 random chars); only a member may create one.
+    // Join codes: anyone signed in may look up a code (6 random chars); members create, the owner rotates.
     match /joinCodes/{code} {
       allow get: if signedIn();
       allow list: if false;
       allow create: if isMember(request.resource.data.householdId);
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if isOwner(resource.data.householdId);
     }
 
     match /households/{hid} {
       allow read: if isMember(hid);
-      // creator must be the only initial member
-      allow create: if signedIn() && request.resource.data.members == [uid()];
-      // members may rename; anyone signed in may add only themselves (join by code) or remove only themselves (leave)
-      allow update: if isMember(hid)
+      // creator must be the only initial member (and the owner)
+      allow create: if signedIn() && request.resource.data.members == [uid()]
+        && request.resource.data.ownerId == uid();
+      allow update:
+        // owner: rename, remove participants, rotate code, hand over ownership
+        if isOwner(hid)
+        // any member may remove only themselves
+        || (isMember(hid)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'ownerId'])
+            && request.resource.data.members.toSet() == resource.data.members.toSet().difference([uid()].toSet()))
+        // anyone signed in may add only themselves (join by code)
         || (signedIn()
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members'])
-            && request.resource.data.members.toSet().difference(resource.data.members.toSet()) == [uid()].toSet());
+            && request.resource.data.members.toSet().difference(resource.data.members.toSet()) == [uid()].toSet()
+            && resource.data.members.toSet().difference(request.resource.data.members.toSet()).size() == 0);
 
-      match /{sub=**} {
-        allow read, write: if isMember(hid);
+      // participants' own profile cards: each writes only their own; the owner may remove any
+      match /members/{memberId} {
+        allow read: if isMember(hid);
+        allow create, update: if isMember(hid) && uid() == memberId;
+        allow delete: if uid() == memberId || isOwner(hid);
       }
+
+      match /lines/{id} { allow read, write: if isMember(hid); }
+      match /purchases/{id} { allow read, write: if isMember(hid); }
+      match /suppressions/{id} { allow read, write: if isMember(hid); }
     }
   }
 }

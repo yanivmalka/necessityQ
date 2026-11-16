@@ -1,31 +1,45 @@
 package app.necessityq.data.firebase
 
+import app.necessityq.domain.Account
 import app.necessityq.domain.Household
 import app.necessityq.domain.HouseholdRepository
+import app.necessityq.domain.Member
+import app.necessityq.domain.Members
 import app.necessityq.domain.Session
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseAuthUserCollisionException
+import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.security.SecureRandom
 
 /**
- * Anonymous Firebase sign-in + household membership.
+ * Firebase identity (anonymous, upgradable to a Google account) + household membership.
  *
- *   users/{uid}            { householdId }
- *   households/{hid}       { name, joinCode, members[], createdAt }
- *   joinCodes/{code}       { householdId }
+ *   users/{uid}                   { householdId, displayName?, googleName?, email?, photoUrl? }
+ *   households/{hid}              { name, joinCode, ownerId, members[], createdAt }
+ *   households/{hid}/members/{uid} { displayName, email }   (each member writes only their own)
+ *   joinCodes/{code}              { householdId }
  *
- * A member invites others by sharing the 6-character join code.
+ * A member invites others by sharing the 6-character join code; only the owner can remove
+ * participants, rename the household or rotate the code.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class FirebaseHouseholdRepository(
@@ -34,46 +48,106 @@ class FirebaseHouseholdRepository(
 ) : HouseholdRepository {
 
     override val isShared: Boolean = true
+    override val supportsAccounts: Boolean = true
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var lastProfileKey: String? = null
 
     private val uidFlow: Flow<String?> = callbackFlow {
-        val listener = FirebaseAuth.AuthStateListener { trySend(it.currentUser?.uid) }
-        auth.addAuthStateListener(listener)
-        if (auth.currentUser == null) {
-            auth.signInAnonymously().addOnFailureListener { close(it) }
+        val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+            val user = firebaseAuth.currentUser
+            trySend(user?.uid)
+            // after sign-out the device continues as a fresh guest
+            if (user == null) firebaseAuth.signInAnonymously().addOnFailureListener { close(it) }
         }
+        auth.addAuthStateListener(listener)
         awaitClose { auth.removeAuthStateListener(listener) }
-    }
+    }.distinctUntilChanged()
 
     override val session: Flow<Session> = uidFlow.flatMapLatest { uid ->
         if (uid == null) {
             flowOf<Session>(Session.Loading)
         } else {
             db.collection("users").document(uid).observe().flatMapLatest { userDoc ->
+                val account = accountFrom(userDoc)
                 val hid = userDoc.getString("householdId")
                 if (hid == null) {
-                    flowOf<Session>(Session.SignedIn(uid, null))
+                    flowOf<Session>(Session.SignedIn(uid, null, account))
                 } else {
                     db.collection("households").document(hid).observe()
-                        .map<_, Session> { Session.SignedIn(uid, FirestoreMapping.householdFrom(it)) }
+                        .map<_, Session> { Session.SignedIn(uid, FirestoreMapping.householdFrom(it), account) }
+                        .onEach { s -> (s as? Session.SignedIn)?.let { publishProfile(it) } }
                         // removed from the household or no longer allowed to read it
-                        .catch { emit(Session.SignedIn(uid, null)) }
+                        .catch { emit(Session.SignedIn(uid, null, account)) }
                 }
             }
         }
     }.catch { emit(Session.Error(it.message ?: "שגיאת התחברות")) }
 
+    override val members: Flow<List<Member>> = session
+        .map { (it as? Session.SignedIn)?.household }
+        .distinctUntilChanged()
+        .flatMapLatest { household ->
+            if (household == null) {
+                flowOf(emptyList())
+            } else {
+                membersRef(household.id).observe().map { snap ->
+                    val profiles = snap.documents.associate { it.id to (it.getString("displayName") to it.getString("email")) }
+                    Members.resolve(household, profiles)
+                }.catch { emit(Members.resolve(household, emptyMap())) }
+            }
+        }
+
+    private fun membersRef(hid: String) = db.collection("households").document(hid).collection("members")
+
+    private fun accountFrom(userDoc: DocumentSnapshot): Account {
+        val user = auth.currentUser
+        return Account(
+            displayName = userDoc.getString("displayName") ?: userDoc.getString("googleName") ?: user?.displayName,
+            email = userDoc.getString("email") ?: user?.email,
+            isAnonymous = user?.isAnonymous ?: true,
+        )
+    }
+
+    /** Keeps this user's own member document (name, email) current so others see who they are. */
+    private fun publishProfile(session: Session.SignedIn) {
+        val household = session.household ?: return
+        if (session.userId !in household.members) return
+        val name = session.account.displayName.orEmpty()
+        val key = "${household.id}|${session.userId}|$name|${session.account.email}"
+        if (key == lastProfileKey) return
+        lastProfileKey = key
+        scope.launch {
+            runCatching {
+                membersRef(household.id).document(session.userId).set(
+                    mapOf("displayName" to name, "email" to session.account.email),
+                    SetOptions.merge(),
+                ).await()
+            }.onFailure { lastProfileKey = null }
+        }
+    }
+
     private fun requireUid(): String = auth.currentUser?.uid ?: error("עדיין לא מחובר")
+
+    private suspend fun currentHousehold(): Pair<String, Household> {
+        val uid = requireUid()
+        val hid = db.collection("users").document(uid).get().await().getString("householdId") ?: error("אינך משויך לבית")
+        val household = FirestoreMapping.householdFrom(db.collection("households").document(hid).get().await())
+            ?: error("הבית לא נמצא")
+        return uid to household
+    }
 
     override suspend fun createHousehold(name: String): Household {
         val uid = requireUid()
         val householdRef = db.collection("households").document()
         val code = newJoinCode()
-        val household = Household(householdRef.id, name.trim().ifBlank { "הבית שלנו" }, code, listOf(uid))
+        val household = Household(householdRef.id, name.trim().ifBlank { "הבית שלנו" }, code, listOf(uid), ownerId = uid)
         // household first: the join-code and user documents are validated against it by the security rules
         householdRef.set(
             mapOf(
                 "name" to household.name,
                 "joinCode" to code,
+                "ownerId" to uid,
                 "members" to listOf(uid),
                 "createdAt" to FieldValue.serverTimestamp(),
             ),
@@ -98,11 +172,78 @@ class FirebaseHouseholdRepository(
     }
 
     override suspend fun leaveHousehold() {
+        val (uid, household) = currentHousehold()
+        val householdRef = db.collection("households").document(household.id)
+        runCatching { membersRef(household.id).document(uid).delete().await() }
+        val others = household.members - uid
+        val updates = mutableMapOf<String, Any>("members" to FieldValue.arrayRemove(uid))
+        // an owner who leaves hands the household to the next member
+        if (household.isOwner(uid) && others.isNotEmpty()) updates["ownerId"] = others.first()
+        householdRef.update(updates).await()
+        db.collection("users").document(uid).update("householdId", FieldValue.delete()).await()
+    }
+
+    override suspend fun signInWithGoogle(idToken: String) {
+        val credential = GoogleAuthProvider.getCredential(idToken, null)
+        val current = auth.currentUser
+        val user = try {
+            if (current != null && current.isAnonymous) {
+                current.linkWithCredential(credential).await().user
+            } else {
+                auth.signInWithCredential(credential).await().user
+            }
+        } catch (e: FirebaseAuthUserCollisionException) {
+            // this Google account already has a profile (another device / reinstall): switch to it
+            auth.signInWithCredential(e.updatedCredential ?: credential).await().user
+        } ?: error("ההתחברות נכשלה")
+        db.collection("users").document(user.uid).set(
+            mapOf(
+                "googleName" to user.displayName,
+                "email" to user.email,
+                "photoUrl" to user.photoUrl?.toString(),
+            ),
+            SetOptions.merge(),
+        ).await()
+    }
+
+    override suspend fun signOut() {
+        lastProfileKey = null
+        auth.signOut()
+    }
+
+    override suspend fun updateDisplayName(name: String) {
         val uid = requireUid()
-        val userRef = db.collection("users").document(uid)
-        val hid = userRef.get().await().getString("householdId") ?: return
-        db.collection("households").document(hid).update("members", FieldValue.arrayRemove(uid)).await()
-        userRef.update("householdId", FieldValue.delete()).await()
+        db.collection("users").document(uid)
+            .set(mapOf("displayName" to name.trim().ifBlank { null }), SetOptions.merge()).await()
+    }
+
+    override suspend fun renameHousehold(name: String) {
+        val (_, household) = currentHousehold()
+        val trimmed = name.trim()
+        require(trimmed.isNotEmpty()) { "שם הבית ריק" }
+        db.collection("households").document(household.id).update("name", trimmed).await()
+    }
+
+    override suspend fun removeMember(userId: String) {
+        val (uid, household) = currentHousehold()
+        require(household.isOwner(uid)) { "רק מנהל הבית יכול להסיר משתתפים" }
+        require(userId != uid) { "כדי לצאת בעצמך השתמשו ב\"יציאה מהבית\"" }
+        db.batch()
+            .update(db.collection("households").document(household.id), "members", FieldValue.arrayRemove(userId))
+            .delete(membersRef(household.id).document(userId))
+            .commit().await()
+    }
+
+    override suspend fun regenerateJoinCode(): String {
+        val (uid, household) = currentHousehold()
+        require(household.isOwner(uid)) { "רק מנהל הבית יכול להחליף את הקוד" }
+        val code = newJoinCode()
+        db.batch()
+            .set(db.collection("joinCodes").document(code), mapOf("householdId" to household.id))
+            .update(db.collection("households").document(household.id), "joinCode", code)
+            .also { if (household.joinCode.isNotBlank()) it.delete(db.collection("joinCodes").document(household.joinCode)) }
+            .commit().await()
+        return code
     }
 
     private fun newJoinCode(): String {

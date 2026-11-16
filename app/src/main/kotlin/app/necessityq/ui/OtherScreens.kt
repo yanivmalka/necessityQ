@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
@@ -44,6 +46,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.necessityq.domain.Account
 import app.necessityq.domain.Classification
 import app.necessityq.domain.Household
 import app.necessityq.domain.ListLine
@@ -57,11 +60,11 @@ import kotlin.math.roundToInt
 // ---------- Onboarding ----------
 
 @Composable
-fun OnboardingScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
+fun OnboardingScreen(vm: AppViewModel, account: Account, modifier: Modifier = Modifier) {
     var name by remember { mutableStateOf("הבית שלנו") }
     var code by remember { mutableStateOf("") }
     Column(
-        modifier.fillMaxSize().padding(24.dp),
+        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("necessityQ", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.primary)
@@ -87,6 +90,12 @@ fun OnboardingScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
                 style = MaterialTheme.typography.bodySmall,
             )
         }
+        if (vm.supportsAccounts) {
+            Spacer(Modifier.height(12.dp))
+            AccountCard(vm, account)
+        }
+        Spacer(Modifier.height(12.dp))
+        UpdateCard(vm)
     }
 }
 
@@ -213,56 +222,5 @@ fun HistoryScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
                 }
             }
         }
-    }
-}
-
-// ---------- Household ----------
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun HouseholdScreen(vm: AppViewModel, household: Household, modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    var confirmLeave by remember { mutableStateOf(false) }
-
-    Column(modifier.fillMaxSize()) {
-        TopAppBar(title = { Text(household.name) })
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (vm.isShared) {
-                Text("בני הבית: ${household.members.size}")
-                Text("קוד הצטרפות", style = MaterialTheme.typography.titleSmall)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(household.joinCode, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
-                    IconButton(onClick = {
-                        val text = "הצטרפו לרשימת הקניות של \"${household.name}\" ב-necessityQ עם הקוד: ${household.joinCode}"
-                        val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
-                        context.startActivity(Intent.createChooser(send, "שיתוף קוד"))
-                    }) { Icon(Icons.Default.Share, contentDescription = "שיתוף") }
-                }
-                Text("כל שינוי ברשימה מופיע מיד אצל כל בני הבית, גם כשעובדים במקביל.", style = MaterialTheme.typography.bodySmall)
-            } else {
-                Text("מצב מכשיר יחיד: הנתונים נשמרים במכשיר בלבד.", style = MaterialTheme.typography.bodyMedium)
-            }
-            Spacer(Modifier.height(16.dp))
-            Text("נתוני דוגמה", style = MaterialTheme.typography.titleSmall)
-            Text(
-                "טוען לבית את רשימת הקניות מ-Microsoft To Do: מה שסומן כ\"נקנה\" הופך להיסטוריה, והשאר לרשימה הנוכחית. אפשר ללחוץ שוב בלי ליצור כפילויות.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Button(onClick = vm::importSample) { Text("טעינת נתוני דוגמה") }
-            if (vm.isShared) {
-                Spacer(Modifier.height(24.dp))
-                OutlinedButton(onClick = { confirmLeave = true }) { Text("יציאה מהבית") }
-            }
-        }
-    }
-
-    if (confirmLeave) {
-        AlertDialog(
-            onDismissRequest = { confirmLeave = false },
-            title = { Text("לצאת מהבית?") },
-            text = { Text("הרשימה וההיסטוריה יישארו אצל שאר בני הבית.") },
-            confirmButton = { TextButton(onClick = { confirmLeave = false; vm.leaveHousehold() }) { Text("יציאה") } },
-            dismissButton = { TextButton(onClick = { confirmLeave = false }) { Text("ביטול") } },
-        )
     }
 }

@@ -1,11 +1,16 @@
 package app.necessityq.domain
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 
 /** Who is using the app and which household they belong to. */
 sealed interface Session {
     data object Loading : Session
-    data class SignedIn(val userId: String, val household: Household?) : Session
+    data class SignedIn(
+        val userId: String,
+        val household: Household?,
+        val account: Account = Account(null, null, isAnonymous = true),
+    ) : Session
     data class Error(val message: String) : Session
 }
 
@@ -20,6 +25,21 @@ interface HouseholdRepository {
     suspend fun createHousehold(name: String): Household
     suspend fun joinHousehold(code: String): Household
     suspend fun leaveHousehold()
+
+    /** True when real accounts (Google) and member management are available. */
+    val supportsAccounts: Boolean get() = false
+    /** Participants of the current household, live. */
+    val members: Flow<List<Member>> get() = flowOf(emptyList())
+    /** Links the current (anonymous) identity to a Google account, or switches to it if it already exists. */
+    suspend fun signInWithGoogle(idToken: String): Unit = throw UnsupportedOperationException("דורש חיבור Firebase")
+    /** Signs out of the Google account; the device continues as a fresh anonymous guest. */
+    suspend fun signOut(): Unit = throw UnsupportedOperationException("דורש חיבור Firebase")
+    suspend fun updateDisplayName(name: String): Unit = throw UnsupportedOperationException("דורש חיבור Firebase")
+    suspend fun renameHousehold(name: String): Unit = throw UnsupportedOperationException("דורש חיבור Firebase")
+    /** Owner only. */
+    suspend fun removeMember(userId: String): Unit = throw UnsupportedOperationException("דורש חיבור Firebase")
+    /** Owner only: invalidates the old code and issues a new one. */
+    suspend fun regenerateJoinCode(): String = throw UnsupportedOperationException("דורש חיבור Firebase")
 }
 
 /**

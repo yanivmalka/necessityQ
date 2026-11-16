@@ -80,7 +80,7 @@ private fun Root(vm: AppViewModel) {
             val household = s.household
             if (household == null) {
                 Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
-                    OnboardingScreen(vm, Modifier.padding(padding))
+                    OnboardingScreen(vm, s.account, Modifier.padding(padding))
                 }
             } else {
                 var tab by rememberSaveable { mutableIntStateOf(0) }
@@ -98,7 +98,7 @@ private fun Root(vm: AppViewModel) {
                     when (tab) {
                         0 -> ListScreen(vm, household.name, modifier)
                         1 -> HistoryScreen(vm, modifier)
-                        else -> HouseholdScreen(vm, household, modifier)
+                        else -> HouseholdScreen(vm, household, s.account, s.userId, modifier)
                     }
                 }
             }

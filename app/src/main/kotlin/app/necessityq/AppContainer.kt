@@ -23,6 +23,7 @@ import java.util.UUID
  * depends only on the domain ports.
  */
 class AppContainer(context: Context) {
+    val updater = app.necessityq.update.AppUpdater(context.applicationContext)
     val household: HouseholdRepository
     val shopping: ShoppingRepository
 
