@@ -126,7 +126,7 @@ internal object FirestoreMapping {
         mapOf("name" to s.name, "type" to s.type.name, "lat" to s.latitude, "lng" to s.longitude)
 
     fun messageFrom(doc: DocumentSnapshot): ItemMessage? {
-        val text = doc.getString("text") ?: return null
+        val text = doc.getString("text") ?: ""
         return ItemMessage(
             id = doc.id,
             itemId = doc.getString("itemId") ?: return null,
@@ -136,13 +136,22 @@ internal object FirestoreMapping {
             text = text,
             atMillis = doc.getLong("at") ?: 0L,
             pending = doc.metadata.hasPendingWrites(),
+            kind = doc.getString("kind")?.let { runCatching { app.necessityq.domain.MessageKind.valueOf(it) }.getOrNull() }
+                ?: app.necessityq.domain.MessageKind.TEXT,
+            mediaId = doc.getString("mediaId"),
+            durationMs = doc.getLong("durationMs"),
+            replyToId = doc.getString("replyTo"),
         )
     }
 
-    fun messageToMap(m: ItemMessage): Map<String, Any?> = mapOf(
-        "itemId" to m.itemId, "itemName" to m.itemName, "authorId" to m.authorId,
-        "authorName" to m.authorName, "text" to m.text, "at" to m.atMillis,
-    )
+    fun messageToMap(m: ItemMessage): Map<String, Any?> = buildMap {
+        put("itemId", m.itemId); put("itemName", m.itemName); put("authorId", m.authorId)
+        put("authorName", m.authorName); put("text", m.text); put("at", m.atMillis)
+        if (m.kind != app.necessityq.domain.MessageKind.TEXT) put("kind", m.kind.name)
+        m.mediaId?.let { put("mediaId", it) }
+        m.durationMs?.let { put("durationMs", it) }
+        m.replyToId?.let { put("replyTo", it) }
+    }
 
     fun suppressionFrom(doc: DocumentSnapshot): SuggestionSuppression? {
         val until = doc.getLong("untilEpochDay") ?: return null

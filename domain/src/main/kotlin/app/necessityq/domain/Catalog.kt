@@ -13,6 +13,10 @@ enum class Category(val label: String, val order: Int) {
     TOILETRIES("טואלטיקה", 9),
     BABY("תינוקות", 10),
     OTHER("אחר", 11),
+    ;
+
+    /** Needs the fridge or freezer — bought last so it stays cold. */
+    val isChilled: Boolean get() = this == DAIRY || this == MEAT_FISH || this == FROZEN
 }
 
 /** A brand-agnostic product the household names on its list: "קוטג'", "גבינה צהובה", "קורנפלקס". */

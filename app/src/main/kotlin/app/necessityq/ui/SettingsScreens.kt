@@ -14,7 +14,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -38,10 +41,18 @@ import app.necessityq.domain.Account
 /** Opens the navigation drawer from any screen's top bar. */
 val LocalOpenDrawer = compositionLocalOf<() -> Unit> { {} }
 
+/** New messages across the app — shown as a dot on the menu button of every screen. */
+val LocalUnreadTotal = compositionLocalOf { 0 }
+
 @Composable
 fun DrawerButton() {
     val open = LocalOpenDrawer.current
-    IconButton(onClick = open) { Icon(Icons.Default.Menu, contentDescription = "תפריט ראשי") }
+    val unread = LocalUnreadTotal.current
+    IconButton(onClick = open) {
+        BadgedBox(badge = { if (unread > 0) Badge() }) {
+            Icon(Icons.Default.Menu, contentDescription = if (unread > 0) "תפריט ראשי — $unread הודעות חדשות" else "תפריט ראשי")
+        }
+    }
 }
 
 /** Common frame for the drawer's secondary pages. */
@@ -81,13 +92,39 @@ fun UpdatesScreen(vm: AppViewModel, modifier: Modifier = Modifier) = PageScaffol
 @Composable
 fun DisplaySettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier) = PageScaffold("הגדרות תצוגה", modifier) {
     val current by vm.display.collectAsStateWithLifecycle()
-    Text("מה להציג ברשימה ובהמלצות", style = MaterialTheme.typography.titleMedium)
+    val sound by vm.chatSound.collectAsStateWithLifecycle()
+
+    Text("מה להציג על כל פריט ברשימה", style = MaterialTheme.typography.titleMedium)
+    OptionRow("כמות", current.showQuantity) { vm.setDisplay(current.copy(showQuantity = it)) }
+    OptionRow("כפתורי כמות (+ / −)", current.showStepper) { vm.setDisplay(current.copy(showStepper = it)) }
+    OptionRow("מחירים", current.showPrices) { vm.setDisplay(current.copy(showPrices = it)) }
+    OptionRow("סטטיסטיקה (נקנה לאחרונה, תדירות)", current.showStats) { vm.setDisplay(current.copy(showStats = it)) }
+    OptionRow("מחיר משוער בתחתית הרשימה", current.showTotal) { vm.setDisplay(current.copy(showTotal = it)) }
+    OptionRow("מוצרי קירור והקפאה בסוף הרשימה", current.chilledLast) { vm.setDisplay(current.copy(chilledLast = it)) }
+
+    Text("נגיעה בפריט", style = MaterialTheme.typography.titleMedium)
+    app.necessityq.platform.TapMode.entries.forEach { mode ->
+        Row(
+            Modifier.fillMaxWidth().clickable { vm.setDisplay(current.copy(tapMode = mode)) },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RadioButton(selected = current.tapMode == mode, onClick = { vm.setDisplay(current.copy(tapMode = mode)) })
+            Column {
+                Text(mode.label)
+                Text(mode.hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+
+    Text("הודעות", style = MaterialTheme.typography.titleMedium)
+    OptionRow("צליל כשמגיעה הודעה חדשה", sound) { vm.setChatSound(it) }
+
+    Text("פרטים בהמלצות ובפריטים", style = MaterialTheme.typography.titleMedium)
     OptionRow("סיבת ההמלצה", current.showReason) { vm.setDisplay(current.copy(showReason = it)) }
     OptionRow("מתי נקנה לאחרונה", current.showLastBought) { vm.setDisplay(current.copy(showLastBought = it)) }
     OptionRow("תדירות קנייה", current.showFrequency) { vm.setDisplay(current.copy(showFrequency = it)) }
     OptionRow("סימון מועדפים ★", current.showFavorite) { vm.setDisplay(current.copy(showFavorite = it)) }
     OptionRow("מי הוסיף", current.showAddedBy) { vm.setDisplay(current.copy(showAddedBy = it)) }
-    OptionRow("מקום למחיר ולמחיר ממוצע", current.showPrices) { vm.setDisplay(current.copy(showPrices = it)) }
 }
 
 @Composable

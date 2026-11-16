@@ -239,11 +239,14 @@ private fun Root(vm: AppViewModel) {
                     }
                 },
             ) {
-                CompositionLocalProvider(LocalOpenDrawer provides { scope.launch { drawer.open() } }) {
+                CompositionLocalProvider(
+                    LocalOpenDrawer provides { scope.launch { drawer.open() } },
+                    LocalUnreadTotal provides unread,
+                ) {
                     Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
                         val modifier = Modifier.padding(padding)
                         when (dest) {
-                            Dest.PLAN, Dest.SHOP -> ListScreen(vm, household.name, modifier)
+                            Dest.PLAN, Dest.SHOP -> ListScreen(vm, household.name, modifier, onOpenMessages = { go(Dest.MESSAGES) })
                             Dest.MENU -> MenuScreen(vm, modifier)
                             Dest.MESSAGES -> MessagesScreen(vm, modifier, onOpen = { itemId, name -> openChat = itemId to name })
                             Dest.HISTORY -> HistoryScreen(vm, modifier)

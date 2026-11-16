@@ -47,6 +47,8 @@ object Stores {
 
 // ---------- per-item conversation ----------
 
+enum class MessageKind { TEXT, IMAGE, AUDIO }
+
 /** One chat message about a product. A product has one conversation across all its appearances on the list. */
 data class ItemMessage(
     val id: String,
@@ -54,11 +56,36 @@ data class ItemMessage(
     val itemName: String,
     val authorId: String,
     val authorName: String,
+    /** The text, or the caption of a picture / recording (may be empty then). */
     val text: String,
     val atMillis: Long,
     /** Written on this device but not yet confirmed by the server. */
     val pending: Boolean = false,
-)
+    val kind: MessageKind = MessageKind.TEXT,
+    /** Picture / recording bytes are stored apart from the message and loaded on demand. */
+    val mediaId: String? = null,
+    /** Length of a recording. */
+    val durationMs: Long? = null,
+    /** The message this one answers (quoted above it). */
+    val replyToId: String? = null,
+) {
+    /** One-line preview for lists, notifications and quotes. */
+    val preview: String get() = when (kind) {
+        MessageKind.TEXT -> text
+        MessageKind.IMAGE -> "📷 תמונה" + (if (text.isNotBlank()) ": $text" else "")
+        MessageKind.AUDIO -> "🎤 הקלטה" + (durationMs?.let { " " + formatDuration(it) } ?: "")
+    }
+
+    companion object {
+        fun formatDuration(ms: Long): String {
+            val sec = (ms / 1000).coerceAtLeast(0)
+            return "%d:%02d".format(sec / 60, sec % 60)
+        }
+    }
+}
+
+/** Binary attachment of a message (a compressed picture or a short voice recording). */
+class MediaBlob(val mime: String, val bytes: ByteArray)
 
 /** What one member has received and read. */
 data class Receipt(val seenAt: Long = 0, val read: Map<String, Long> = emptyMap())
@@ -92,6 +119,14 @@ interface CollabRepository {
     fun messages(householdId: String): Flow<List<ItemMessage>>
     suspend fun sendMessage(householdId: String, message: ItemMessage)
 
+    /** Attachments (kept out of the message documents so the conversation list stays light). */
+    suspend fun saveMedia(householdId: String, mediaId: String, authorId: String, media: MediaBlob)
+    suspend fun loadMedia(householdId: String, mediaId: String): MediaBlob?
+
+    /** Price per unit (piece / package / kg / litre) the household entered, by item id — until a price database is connected. */
+    fun prices(householdId: String): Flow<Map<String, Double>>
+    suspend fun setPrice(householdId: String, itemId: String, price: Double?)
+
     fun notifySettings(householdId: String): Flow<NotifySettings>
     suspend fun setMissingRecipients(householdId: String, userIds: Set<String>)
 
@@ -115,6 +150,17 @@ class InMemoryCollabRepository : CollabRepository {
         favoritesState.update { if (favorite) it + itemId else it - itemId }
     override fun messages(householdId: String): Flow<List<ItemMessage>> = messagesState
     override suspend fun sendMessage(householdId: String, message: ItemMessage) = messagesState.update { it + message }
+
+    private val media = java.util.concurrent.ConcurrentHashMap<String, MediaBlob>()
+    override suspend fun saveMedia(householdId: String, mediaId: String, authorId: String, media: MediaBlob) {
+        this.media[mediaId] = media
+    }
+    override suspend fun loadMedia(householdId: String, mediaId: String): MediaBlob? = media[mediaId]
+
+    private val pricesState = MutableStateFlow<Map<String, Double>>(emptyMap())
+    override fun prices(householdId: String): Flow<Map<String, Double>> = pricesState
+    override suspend fun setPrice(householdId: String, itemId: String, price: Double?) =
+        pricesState.update { if (price == null) it - itemId else it + (itemId to price) }
     override fun notifySettings(householdId: String): Flow<NotifySettings> = notifyState
     override suspend fun setMissingRecipients(householdId: String, userIds: Set<String>) {
         notifyState.value = NotifySettings(userIds)
@@ -138,6 +184,7 @@ enum class ListSort(val label: String) {
     ALPHA("א–ב"),
     ADDED("לפי סדר הוספה"),
     PICK("לפי סדר איסוף"),
+    CART_LOAD("לפי סדר העמסה לעגלה"),
 }
 
 /** The two ways the list is used: preparing it at home, and walking the shop. */
@@ -169,31 +216,69 @@ object PickOrder {
     }
 }
 
+/**
+ * One block of the list screen. [title] null = no header (a flat list); [category] is set for
+ * category groups so a drag can regroup a line.
+ */
+data class ListSection(
+    val key: String,
+    val title: String?,
+    val category: Category?,
+    val lines: List<ListLine>,
+)
+
 object ListOrdering {
     private val collator: Collator = Collator.getInstance(Locale("he", "IL"))
 
-    /** Groups for the list screen; [ListSort.GROUPS] keeps the store-walk categories, the others use one group. */
+    const val CHILLED_KEY = "chilled"
+
+    /**
+     * Sections for the list screen.
+     *  - [ListSort.GROUPS] keeps the store-walk categories; the others are one flat block.
+     *  - [ListSort.CART_LOAD] is split into the cart-loading stages of [CartLoad].
+     *  - [descending] reverses the order inside every section (and the group order).
+     *  - [chilledLast] moves dairy, meat/fish and frozen to the end, since they are picked up last.
+     */
     fun arrange(
         lines: List<ListLine>,
         sort: ListSort,
         pickRanks: Map<String, Double> = emptyMap(),
-    ): List<Pair<Category?, List<ListLine>>> {
+        descending: Boolean = false,
+        chilledLast: Boolean = false,
+    ): List<ListSection> {
         val needed = lines.filter { it.status == LineStatus.NEEDED }
-        return when (sort) {
-            ListSort.GROUPS -> needed.groupBy { it.category }
-                .toSortedMap(compareBy { it.order })
-                .map { (c, items) -> c to items.sortedBy { it.orderKey } }
-            ListSort.ALPHA -> if (needed.isEmpty()) emptyList()
-            else listOf(null to needed.sortedWith { a, b -> collator.compare(a.displayName, b.displayName) })
-            ListSort.ADDED -> if (needed.isEmpty()) emptyList()
-            else listOf(null to needed.sortedBy { it.addedAtMillis })
-            ListSort.PICK -> if (needed.isEmpty()) emptyList()
-            else listOf(
-                null to needed.sortedWith(
-                    compareBy<ListLine>({ pickRanks[it.itemId] ?: 2.0 }, { it.category.order }, { it.addedAtMillis }),
-                ),
-            )
+        if (needed.isEmpty()) return emptyList()
+        fun List<ListLine>.dir() = if (descending) asReversed().toList() else this
+
+        if (sort == ListSort.CART_LOAD) {
+            return needed.groupBy { CartLoad.stageOf(it) }
+                .toSortedMap(compareBy { it.ordinal })
+                .map { (stage, items) ->
+                    ListSection("load_" + stage.name, stage.title, null, items.sortedWith(CartLoad.withinStage).dir())
+                }
         }
+
+        if (sort == ListSort.GROUPS) {
+            var groups = needed.groupBy { it.category }.entries.sortedBy { it.key.order }
+            if (descending) groups = groups.asReversed()
+            if (chilledLast) groups = groups.sortedBy { it.key.isChilled } // stable: keeps the order inside each part
+            return groups.map { (c, items) -> ListSection(c.name, c.label, c, items.sortedBy { it.orderKey }.dir()) }
+        }
+
+        val sorted = when (sort) {
+            ListSort.ALPHA -> needed.sortedWith { a, b -> collator.compare(a.displayName, b.displayName) }
+            ListSort.ADDED -> needed.sortedBy { it.addedAtMillis }
+            ListSort.PICK -> needed.sortedWith(
+                compareBy<ListLine>({ pickRanks[it.itemId] ?: 2.0 }, { it.category.order }, { it.addedAtMillis }),
+            )
+            else -> needed
+        }.dir()
+        if (!chilledLast) return listOf(ListSection("all", null, null, sorted))
+        val (cold, rest) = sorted.partition { it.category.isChilled }
+        return listOfNotNull(
+            rest.takeIf { it.isNotEmpty() }?.let { ListSection("all", null, null, it) },
+            cold.takeIf { it.isNotEmpty() }?.let { ListSection(CHILLED_KEY, "❄ קירור והקפאה — בסוף הקנייה", null, it) },
+        )
     }
 
     /**

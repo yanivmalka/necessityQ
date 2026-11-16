@@ -3,9 +3,18 @@ package app.necessityq.domain
 enum class LineStatus { NEEDED, BOUGHT, REMOVED }
 
 /** Why a line went to the recycle bin. */
-enum class RemoveReason(val label: String) { DELETED("נמחק"), CLEARED("נוקה אחרי קנייה") }
+enum class RemoveReason(val label: String) { DELETED("נמחק"), CLEARED("נוקה אחרי קנייה"), RESET("איפוס רשימה") }
 
-enum class LineSource { MANUAL, SUGGESTED, QUICK_ADD }
+/**
+ * Where a line came from. [AUTO] lines were generated from past purchases ("רשימה מקניות עבר");
+ * everything else was put there by a person (typed, or one tap on a suggestion / quick-add chip / menu).
+ */
+enum class LineSource(val label: String) {
+    MANUAL("נוסף ידנית"),
+    SUGGESTED("נוסף מהמלצה"),
+    QUICK_ADD("נוסף מ'קונים בדרך כלל'"),
+    AUTO("נוצר אוטומטית מקניות עבר"),
+}
 
 /** One entry on the household's shared shopping list. */
 data class ListLine(
@@ -37,6 +46,9 @@ data class ListLine(
 ) {
     val identity: ItemIdentity get() = ItemIdentity(name, variant, category)
     val displayName: String get() = identity.displayName
+
+    /** Generated from past purchases rather than added by a person. */
+    val isAuto: Boolean get() = source == LineSource.AUTO
 
     /** Sort key honouring manual moves while preserving the order of adding for untouched lines. */
     val orderKey: Long get() = if (position != 0L) position else addedAtMillis

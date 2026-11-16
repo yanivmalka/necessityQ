@@ -16,18 +16,18 @@ class CollabTest {
         val lines = listOf(line("1", "קוטג'", added = 1), line("2", "אורז", Category.PANTRY, added = 2), line("3", "חלב", added = 3))
         val arranged = ListOrdering.arrange(lines, ListSort.ALPHA)
         assertEquals(1, arranged.size)
-        assertNull(arranged[0].first)
-        assertEquals(listOf("אורז", "חלב", "קוטג'"), arranged[0].second.map { it.name })
+        assertNull(arranged[0].title)
+        assertEquals(listOf("אורז", "חלב", "קוטג'"), arranged[0].lines.map { it.name })
     }
 
     @Test fun `added sort keeps the order products were added`() {
         val lines = listOf(line("1", "ב", added = 30), line("2", "א", added = 10), line("3", "ג", added = 20))
-        assertEquals(listOf("2", "3", "1"), ListOrdering.arrange(lines, ListSort.ADDED)[0].second.map { it.id })
+        assertEquals(listOf("2", "3", "1"), ListOrdering.arrange(lines, ListSort.ADDED)[0].lines.map { it.id })
     }
 
     @Test fun `groups sort follows manual position but untouched lines keep add order`() {
         val lines = listOf(line("a", "א", added = 10), line("b", "ב", added = 20), line("c", "ג", added = 30, position = 15))
-        assertEquals(listOf("a", "c", "b"), ListOrdering.arrange(lines, ListSort.GROUPS)[0].second.map { it.id })
+        assertEquals(listOf("a", "c", "b"), ListOrdering.arrange(lines, ListSort.GROUPS)[0].lines.map { it.id })
     }
 
     @Test fun `position between neighbours`() {

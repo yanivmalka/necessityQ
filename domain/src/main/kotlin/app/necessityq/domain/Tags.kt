@@ -1,7 +1,7 @@
 package app.necessityq.domain
 
 /** Kinds of badge a product tile can carry, so items are easy to tell apart at a glance. */
-enum class TagKind { ROUTINE, OCCASIONAL, SPECIAL, FAVORITE, MISSING, RECIPE }
+enum class TagKind { ROUTINE, OCCASIONAL, SPECIAL, FAVORITE, MISSING, RECIPE, AUTO }
 
 data class ItemTag(val kind: TagKind, val label: String)
 
@@ -12,6 +12,7 @@ object ItemTags {
      *  - מיוחד: one-off or never bought before (occasions, new products)
      *  - מועדף / חסר: user flags
      *  - מתכון: the line was derived from a menu or recipe
+     *  - אוטומטי: generated from past purchases (not added by a person)
      */
     fun of(line: ListLine, stats: ItemStats?, favorite: Boolean): List<ItemTag> = buildList {
         if (line.missing) add(ItemTag(TagKind.MISSING, "חסר"))
@@ -22,5 +23,6 @@ object ItemTags {
             Classification.ONE_OFF, null -> add(ItemTag(TagKind.SPECIAL, "מיוחד"))
         }
         if (favorite) add(ItemTag(TagKind.FAVORITE, "מועדף"))
+        if (line.isAuto) add(ItemTag(TagKind.AUTO, "אוטומטי"))
     }
 }
