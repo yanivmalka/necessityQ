@@ -49,6 +49,7 @@ import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.FilterListOff
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.UnfoldLess
@@ -112,6 +113,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -166,8 +168,10 @@ private sealed interface ListRow {
     }
 }
 
-private fun buildSections(lines: List<ListLine>, sort: ListSort, ranks: Map<String, Double>, descending: Boolean, chilledLast: Boolean, filter: ListFilter) =
-    ListOrdering.arrange(filter.apply(lines), sort, ranks, descending, chilledLast)
+private fun buildSections(
+    lines: List<ListLine>, sort: ListSort, ranks: Map<String, Double>, descending: Boolean, chilledLast: Boolean,
+    filter: ListFilter, chatItemIds: Set<String>,
+) = ListOrdering.arrange(filter.apply(lines, chatItemIds), sort, ranks, descending, chilledLast)
 
 private fun buildRows(sections: List<ListSection>, collapsed: Set<String>): List<ListRow> =
     sections.flatMap { section ->
@@ -210,6 +214,7 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
     var showFilter by remember { mutableStateOf(false) }
     var showGenerate by remember { mutableStateOf(false) }
     var showReset by remember { mutableStateOf(false) }
+    var showEmpty by remember { mutableStateOf(false) }
     /** Tiles whose controls are open (tap mode "controls"). */
     var expanded by remember { mutableStateOf(emptySet<String>()) }
     var showBin by remember { mutableStateOf(false) }
@@ -221,8 +226,9 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
     // Local copy of the rows so a drag can move items immediately; re-synced from the live data when idle.
     val rows = remember { mutableStateListOf<ListRow>() }
     var dragging by remember { mutableStateOf(false) }
-    val sections = remember(snapshot?.lines, sort, pickRanks, descending, display.chilledLast, filter) {
-        buildSections(snapshot?.lines.orEmpty(), sort, pickRanks, descending, display.chilledLast, filter)
+    val chatItemIds = remember(messages) { messages.map { it.itemId }.toSet() }
+    val sections = remember(snapshot?.lines, sort, pickRanks, descending, display.chilledLast, filter, chatItemIds) {
+        buildSections(snapshot?.lines.orEmpty(), sort, pickRanks, descending, display.chilledLast, filter, chatItemIds)
     }
     val built = remember(sections, collapsed) { buildRows(sections, collapsed) }
     val titledKeys = sections.filter { it.title != null }.map { it.key }.toSet()
@@ -299,6 +305,11 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
                             text = { Text("יצירת רשימה מקניות עבר") },
                             leadingIcon = { Icon(Icons.Default.AutoAwesome, null) },
                             onClick = { showGenerate = true; showMore = false },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("ריקון הרשימה") },
+                            leadingIcon = { Icon(Icons.Default.DeleteSweep, null) },
+                            onClick = { showEmpty = true; showMore = false },
                         )
                         DropdownMenuItem(
                             text = { Text("איפוס הרשימה") },
@@ -381,6 +392,11 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
                 label = { Text(if (filter.isActive) "מסונן" else "סינון") },
                 leadingIcon = { Icon(Icons.Default.FilterList, null, Modifier.size(18.dp)) },
             )
+            if (filter.isActive) {
+                IconButton(onClick = { vm.setFilter(ListFilter()) }) {
+                    Icon(Icons.Default.FilterListOff, contentDescription = "ביטול כל הסינון")
+                }
+            }
             Spacer(Modifier.weight(1f))
             if (titledKeys.isNotEmpty()) {
                 IconButton(onClick = { vm.setAllCollapsed(if (allCollapsed) null else titledKeys) }) {
@@ -391,7 +407,26 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
                 }
             }
         }
-        if (showFilter) FilterPanel(filter, snapshot?.lines.orEmpty(), onChange = vm::setFilter)
+        if (showFilter) {
+            FilterPanel(filter, snapshot?.lines.orEmpty(), onChange = vm::setFilter)
+        } else {
+            // the controls are hidden: say what is filtered, with a way out
+            filter.summary()?.let { text ->
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "מסונן: $text",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    TextButton(onClick = { vm.setFilter(ListFilter()) }) { Text("ביטול הסינון") }
+                }
+            }
+        }
 
         val snap = snapshot
         LazyColumn(
@@ -549,6 +584,18 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
     }
 
     if (showGenerate) GenerateSheet(vm, onDismiss = { showGenerate = false })
+    if (showEmpty) {
+        val count = ListReset.linesFor(ResetScope.ALL, snapshot?.lines.orEmpty()).size
+        AlertDialog(
+            onDismissRequest = { showEmpty = false },
+            title = { Text("לרוקן את כל הרשימה?") },
+            text = { Text(if (count == 0) "הרשימה כבר ריקה." else "$count פריטים (גם אלה שסומנו כנקנו) יעברו לסל המחזור, ואפשר לבטל מיד אחרי הפעולה.") },
+            confirmButton = {
+                TextButton(enabled = count > 0, onClick = { vm.resetList(ResetScope.ALL); showEmpty = false }) { Text("ריקון") }
+            },
+            dismissButton = { TextButton(onClick = { showEmpty = false }) { Text("ביטול") } },
+        )
+    }
     if (showReset) ResetDialog(snapshot?.lines.orEmpty(), onReset = { vm.resetList(it); showReset = false }, onDismiss = { showReset = false })
 
     openItem?.let { line ->
@@ -827,16 +874,21 @@ data class ChatState(val unread: Int, val lastIsMine: Boolean, val status: Deliv
 
 private const val HOLD_MS = 650
 
+/** A pull faster than this (dp per second) in the direction of the pull counts as a push: no waiting. */
+private const val PUSH_SPEED_DP = 1500f
+
 private class SwipeAction(val label: String, val icon: ImageVector, val color: Color, val run: () -> Unit)
 
 /**
  * Physical-direction swipe: left = bought, right = missing (shopping) / delete (preparing).
- * The icon and label sit at the edge of the phone the tile was pulled away from. The action only
- * runs if the tile is held past the threshold until the ring fills and blinks; pulling back cancels.
+ * The icon and the action's name sit at the edge of the phone the tile was pulled away from, with the
+ * instruction under the name: pull on → hold → release. The action runs when the tile is held past the
+ * threshold until the ring fills; a forceful push runs it at once. Pulling back cancels.
  */
 @Composable
 private fun SwipeableTile(left: SwipeAction, right: SwipeAction, content: @Composable () -> Unit) {
     val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
     var width by remember { mutableFloatStateOf(1f) }
     val offset = remember { Animatable(0f) }
     val ring = remember { Animatable(0f) }
@@ -869,7 +921,7 @@ private fun SwipeableTile(left: SwipeAction, right: SwipeAction, content: @Compo
                 Modifier.matchParentSize().clip(RoundedCornerShape(20.dp)).background(action.color).padding(horizontal = 18.dp),
                 contentAlignment = if (toRight) AbsoluteAlignment.CenterLeft else AbsoluteAlignment.CenterRight,
             ) {
-                // ring pinned to the phone edge, label beside it
+                // ring pinned to the phone edge, the action's name beside it and the instruction below the name
                 CompositionLocalProvider(LocalLayoutDirection provides if (toRight) LayoutDirection.Ltr else LayoutDirection.Rtl) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(contentAlignment = Alignment.Center, modifier = Modifier.alpha(if (ready) blink else 1f)) {
@@ -883,15 +935,18 @@ private fun SwipeableTile(left: SwipeAction, right: SwipeAction, content: @Compo
                             Icon(action.icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
                         }
                         Spacer(Modifier.width(10.dp))
-                        Text(
-                            when {
-                                !past -> action.label
-                                !ready -> "החזיקו…"
-                                else -> "שחררו: ${action.label}"
-                            },
-                            color = Color.White,
-                            fontWeight = FontWeight.ExtraBold,
-                        )
+                        Column {
+                            Text(action.label, color = Color.White, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                when {
+                                    !past -> "משכו עוד"
+                                    !ready -> "החזיקו…"
+                                    else -> "שחררו"
+                                },
+                                color = Color.White.copy(alpha = 0.9f),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
                     }
                 }
             }
@@ -904,10 +959,13 @@ private fun SwipeableTile(left: SwipeAction, right: SwipeAction, content: @Compo
                     state = rememberDraggableState { delta ->
                         scope.launch { offset.snapTo((offset.value + delta).coerceIn(-width, width)) }
                     },
-                    onDragStopped = {
+                    onDragStopped = { velocity ->
+                        val dir = if (offset.value > 0) 1f else -1f
+                        val pushed = offset.value != 0f && velocity * dir >= with(density) { PUSH_SPEED_DP.dp.toPx() } &&
+                            abs(offset.value) >= width * 0.12f
                         val held = armedAt?.let { System.currentTimeMillis() - it >= HOLD_MS } == true
                         val stillPast = abs(offset.value) >= width * 0.3f
-                        if (held && stillPast) (if (offset.value > 0) right else left).run()
+                        if (pushed || (held && stillPast)) (if (offset.value > 0) right else left).run()
                         offset.animateTo(0f, tween(220))
                     },
                 ),
@@ -1085,6 +1143,14 @@ private fun FilterPanel(filter: ListFilter, lines: List<ListLine>, onChange: (Li
                 FilterChip(selected = filter.source == option, onClick = { onChange(filter.copy(source = option)) }, label = { Text(option.label) })
             }
             FilterChip(selected = filter.missingOnly, onClick = { onChange(filter.copy(missingOnly = !filter.missingOnly)) }, label = { Text("חסרים") })
+            FilterChip(selected = filter.withChatOnly, onClick = { onChange(filter.copy(withChatOnly = !filter.withChatOnly)) }, label = { Text("עם שיחה") })
+            if (filter.isActive) {
+                androidx.compose.material3.AssistChip(
+                    onClick = { onChange(ListFilter()) },
+                    label = { Text("ביטול כל הסינון") },
+                    leadingIcon = { Icon(Icons.Default.FilterListOff, null, Modifier.size(18.dp)) },
+                )
+            }
         }
         if (present.size > 1) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

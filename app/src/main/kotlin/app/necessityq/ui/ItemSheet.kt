@@ -64,6 +64,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.MoreVert
@@ -131,6 +133,14 @@ fun ItemSheet(vm: AppViewModel, itemId: String, itemName: String, onDismiss: () 
     var messageDetails by remember { mutableStateOf<ItemMessage?>(null) }
     var confirmDeleteChat by remember { mutableStateOf(false) }
     val chatStats by vm.chatStats.collectAsStateWithLifecycle()
+    val archivedAll by vm.archivedMessages.collectAsStateWithLifecycle()
+    var detailsOpen by remember(itemId) { mutableStateOf(false) }
+    var pastOpen by remember(itemId) { mutableStateOf(false) }
+    var confirmDeletePast by remember { mutableStateOf<List<ItemMessage>?>(null) }
+    val pastThreads = archivedAll.filter { it.itemId == itemId }
+        .groupBy { it.archivedAtMillis }.values
+        .map { g -> g.sortedBy { it.atMillis } }
+        .sortedByDescending { it.last().archivedAtMillis ?: 0L }
 
     val line = snapshot?.lines?.firstOrNull { it.itemId == itemId && it.status == LineStatus.NEEDED }
     val stats = snapshot?.stats?.get(itemId)
@@ -189,8 +199,15 @@ fun ItemSheet(vm: AppViewModel, itemId: String, itemName: String, onDismiss: () 
                     QuantityStepper(line.quantity, onMinus = { vm.adjustQuantity(line, -1) }, onPlus = { vm.adjustQuantity(line, +1) })
                     PriceSlot(price = null, average = null)
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.foundation.layout.FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     Button(onClick = { vm.checkOff(line); onDismiss() }) { Text("נקנה ✓") }
+                    OutlinedButton(onClick = { vm.setMissing(line, !line.missing) }) {
+                        Icon(Icons.Default.ReportProblem, null, Modifier.padding(end = 4.dp))
+                        Text(if (line.missing) "ביטול סימון חסר" else "סימון כחסר")
+                    }
                     OutlinedButton(onClick = { vm.delete(line); onDismiss() }) {
                         Icon(Icons.Default.Delete, null, Modifier.padding(end = 4.dp))
                         Text("הסרה")
@@ -207,27 +224,75 @@ fun ItemSheet(vm: AppViewModel, itemId: String, itemName: String, onDismiss: () 
             }
 
             HorizontalDivider()
-            InfoLine("קטגוריה", (line?.category ?: stats?.identity?.category)?.label)
-            line?.let { InfoLine("מקור", it.source.label) }
-            line?.let { InfoLine(if (it.isAuto) "נוצר עבור" else "נוסף", "${names[it.addedBy] ?: "בן/בת בית"} · ${fmt(it.addedAtMillis)}") }
+            // category, source and statistics: collapsed until asked for
+            Row(
+                Modifier.fillMaxWidth().clickable { detailsOpen = !detailsOpen },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("פרטים נוספים", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Icon(if (detailsOpen) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = if (detailsOpen) "כיווץ" else "הרחבה")
+            }
+            if (detailsOpen) {
+                InfoLine("קטגוריה", (line?.category ?: stats?.identity?.category)?.label)
+                line?.let { InfoLine("מקור", it.source.label) }
+                line?.let { InfoLine(if (it.isAuto) "נוצר עבור" else "נוסף", "${names[it.addedBy] ?: "בן/בת בית"} · ${fmt(it.addedAtMillis)}") }
+                stats?.let { s ->
+                    val days = ChronoUnit.DAYS.between(s.lastPurchase, LocalDate.now())
+                    InfoLine("נקנה לאחרונה", if (days <= 0) "היום" else "לפני $days ימים")
+                    InfoLine("תדירות", s.cadenceDays?.let { "בערך כל ${it.roundToInt().coerceAtLeast(1)} ימים" } ?: "אין עדיין מספיק היסטוריה")
+                    InfoLine("כמות רגילה", s.typicalQuantity?.format())
+                    InfoLine("נקנה", "${s.purchaseDays} פעמים")
+                }
+                InfoLine("נקנה לאחרונה ב", lastStore)
+                chatStats[itemId]?.let {
+                    InfoLine("שיחות שנמחקו", "${it.messages} הודעות ב-${it.threads.coerceAtLeast(1)} שיחות (נשמרו רק הספירות)")
+                }
+            }
             line?.note?.let { InfoLine("הערה", it) }
-            stats?.let { s ->
-                val days = ChronoUnit.DAYS.between(s.lastPurchase, LocalDate.now())
-                InfoLine("נקנה לאחרונה", if (days <= 0) "היום" else "לפני $days ימים")
-                InfoLine("תדירות", s.cadenceDays?.let { "בערך כל ${it.roundToInt().coerceAtLeast(1)} ימים" } ?: "אין עדיין מספיק היסטוריה")
-                InfoLine("כמות רגילה", s.typicalQuantity?.format())
-                InfoLine("נקנה", "${s.purchaseDays} פעמים")
-            }
-            InfoLine("נקנה לאחרונה ב", lastStore)
-            chatStats[itemId]?.let {
-                InfoLine("שיחות קודמות", "${it.messages} הודעות ב-${it.threads.coerceAtLeast(1)} שיחות (נמחקו; נשמרו רק הספירות)")
-            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("מחיר משוער: ", fontWeight = FontWeight.Bold)
                 Text(price?.let { "₪%.2f".format(it) + unitHint(line?.quantity) } ?: "לא הוזן", Modifier.weight(1f))
                 androidx.compose.material3.TextButton(onClick = { editingPrice = true }) { Text(if (price == null) "הזנה" else "עריכה") }
             }
 
+            if (pastThreads.isNotEmpty()) {
+                HorizontalDivider()
+                Row(
+                    Modifier.fillMaxWidth().clickable { pastOpen = !pastOpen },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("שיחות קודמות על המוצר (${pastThreads.size})", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    Icon(if (pastOpen) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = if (pastOpen) "כיווץ" else "הרחבה")
+                }
+                if (pastOpen) {
+                    pastThreads.forEach { thread ->
+                        Column(
+                            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)).padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "קנייה שהסתיימה ${fmt(thread.last().archivedAtMillis ?: 0L)} · ${thread.size} הודעות",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                IconButton(onClick = { confirmDeletePast = thread }, modifier = Modifier.size(32.dp)) {
+                                    Icon(Icons.Default.Delete, contentDescription = "מחיקת השיחה", Modifier.size(18.dp))
+                                }
+                            }
+                            thread.forEach { m ->
+                                Text(
+                                    "${if (m.authorId == vm.me) "אני" else m.authorName} · ${fmt(m.atMillis)}" + (m.editedAtMillis?.let { " · נערכה ${fmt(it)}" } ?: ""),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Text(m.preview, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                    }
+                }
+            }
             HorizontalDivider()
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("שיחה על המוצר", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
@@ -271,6 +336,17 @@ fun ItemSheet(vm: AppViewModel, itemId: String, itemName: String, onDismiss: () 
                 androidx.compose.material3.TextButton(onClick = { vm.deleteMessage(m); confirmDeleteMessage = null }) { Text("מחיקה") }
             },
             dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmDeleteMessage = null }) { Text("ביטול") } },
+        )
+    }
+    confirmDeletePast?.let { past ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmDeletePast = null },
+            title = { Text("למחוק את השיחה?") },
+            text = { Text("${past.size} הודעות יימחקו אצל כל בני הבית, כולל תמונות והקלטות.") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { vm.deleteConversation(past); confirmDeletePast = null }) { Text("מחיקה") }
+            },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmDeletePast = null }) { Text("ביטול") } },
         )
     }
     if (confirmDeleteChat) {

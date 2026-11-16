@@ -123,4 +123,15 @@ class ListToolsTest {
         assertEquals(2, estimate.pricedLines)
         assertEquals(3, estimate.openLines)
     }
+
+    @Test fun `filter can keep only products with a conversation and describes itself`() {
+        val lines = listOf(line("a", "חלב", Category.DAIRY), line("b", "לחם", Category.BAKERY), line("c", "קמח", Category.PANTRY, status = LineStatus.BOUGHT))
+        val f = ListFilter(withChatOnly = true)
+        assertEquals(listOf("a", "c"), f.apply(lines, setOf("a")).map { it.id })
+        assertEquals(listOf("c"), f.apply(lines, emptySet()).map { it.id })
+        assertEquals(null, ListFilter().summary())
+        assertEquals("עם שיחה", f.summary())
+        assertEquals("חיפוש \"חל\" · חסרים · עם שיחה", ListFilter(text = "חל", missingOnly = true, withChatOnly = true).summary())
+        assertEquals(false, ListFilter().isActive)
+    }
 }
