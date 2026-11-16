@@ -67,6 +67,10 @@ interface ShoppingRepository {
     /** Records a purchase directly (history import). Idempotent: the purchase id decides the document. */
     suspend fun addPurchase(householdId: String, purchase: Purchase)
     suspend fun suppress(householdId: String, suppression: SuggestionSuppression)
+
+    /** Manual ordering / regrouping by drag. */
+    suspend fun moveLine(householdId: String, lineId: String, category: Category, position: Long, atMillis: Long)
+    suspend fun setMissing(householdId: String, lineId: String, missing: Boolean, byUserId: String?, atMillis: Long)
 }
 
 interface Clock {

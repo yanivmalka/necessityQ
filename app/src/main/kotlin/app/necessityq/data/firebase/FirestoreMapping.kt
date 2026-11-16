@@ -2,6 +2,9 @@ package app.necessityq.data.firebase
 
 import app.necessityq.domain.Category
 import app.necessityq.domain.Household
+import app.necessityq.domain.ItemMessage
+import app.necessityq.domain.Store
+import app.necessityq.domain.StoreType
 import app.necessityq.domain.LineSource
 import app.necessityq.domain.LineStatus
 import app.necessityq.domain.ListLine
@@ -43,6 +46,9 @@ internal object FirestoreMapping {
         "addedAt" to line.addedAtMillis,
         "updatedAt" to line.updatedAtMillis,
         "boughtAt" to line.boughtAtMillis,
+        "position" to line.position,
+        "missing" to line.missing,
+        "missingBy" to line.missingBy,
     )
 
     fun lineFrom(doc: DocumentSnapshot): ListLine? {
@@ -62,6 +68,9 @@ internal object FirestoreMapping {
             addedAtMillis = doc.getLong("addedAt") ?: 0L,
             updatedAtMillis = doc.getLong("updatedAt") ?: 0L,
             boughtAtMillis = doc.getLong("boughtAt"),
+            position = doc.getLong("position") ?: 0L,
+            missing = doc.getBoolean("missing") ?: false,
+            missingBy = doc.getString("missingBy"),
         )
     }
 
@@ -74,6 +83,7 @@ internal object FirestoreMapping {
         "boughtAt" to p.boughtAtMillis,
         "boughtBy" to p.boughtBy,
         "lineId" to p.lineId,
+        "storeId" to p.storeId,
     )
 
     fun purchaseFrom(doc: DocumentSnapshot): Purchase? {
@@ -88,8 +98,41 @@ internal object FirestoreMapping {
             boughtAtMillis = doc.getLong("boughtAt") ?: return null,
             boughtBy = doc.getString("boughtBy") ?: "",
             lineId = doc.getString("lineId"),
+            storeId = doc.getString("storeId"),
         )
     }
+
+    fun storeFrom(doc: DocumentSnapshot): Store? {
+        val name = doc.getString("name") ?: return null
+        return Store(
+            id = doc.id,
+            name = name,
+            type = doc.getString("type")?.let { runCatching { StoreType.valueOf(it) }.getOrNull() } ?: StoreType.OTHER,
+            latitude = doc.getDouble("lat"),
+            longitude = doc.getDouble("lng"),
+        )
+    }
+
+    fun storeToMap(s: Store): Map<String, Any?> =
+        mapOf("name" to s.name, "type" to s.type.name, "lat" to s.latitude, "lng" to s.longitude)
+
+    fun messageFrom(doc: DocumentSnapshot): ItemMessage? {
+        val text = doc.getString("text") ?: return null
+        return ItemMessage(
+            id = doc.id,
+            itemId = doc.getString("itemId") ?: return null,
+            itemName = doc.getString("itemName") ?: "",
+            authorId = doc.getString("authorId") ?: "",
+            authorName = doc.getString("authorName") ?: "",
+            text = text,
+            atMillis = doc.getLong("at") ?: 0L,
+        )
+    }
+
+    fun messageToMap(m: ItemMessage): Map<String, Any?> = mapOf(
+        "itemId" to m.itemId, "itemName" to m.itemName, "authorId" to m.authorId,
+        "authorName" to m.authorName, "text" to m.text, "at" to m.atMillis,
+    )
 
     fun suppressionFrom(doc: DocumentSnapshot): SuggestionSuppression? {
         val until = doc.getLong("untilEpochDay") ?: return null

@@ -23,9 +23,13 @@ import java.util.UUID
  * depends only on the domain ports.
  */
 class AppContainer(context: Context) {
+    val appContext: Context = context.applicationContext
+    val prefs = app.necessityq.platform.AppPrefs(context)
+    val notifier = app.necessityq.platform.Notifier(context)
     val updater = app.necessityq.update.AppUpdater(context.applicationContext)
     val household: HouseholdRepository
     val shopping: ShoppingRepository
+    val collab: app.necessityq.domain.CollabRepository
 
     init {
         val firebase = if (BuildConfig.FIREBASE_CONFIGURED) FirebaseApp.initializeApp(context) else null
@@ -36,10 +40,12 @@ class AppContainer(context: Context) {
                 .build()
             household = FirebaseHouseholdRepository(FirebaseAuth.getInstance(firebase), db)
             shopping = FirebaseShoppingRepository(db)
+            collab = app.necessityq.data.firebase.FirebaseCollabRepository(db)
         } else {
             val store = LocalStore(File(context.filesDir, "necessityq-state.json"))
             household = store.household
             shopping = store.shopping
+            collab = app.necessityq.domain.InMemoryCollabRepository()
         }
     }
 

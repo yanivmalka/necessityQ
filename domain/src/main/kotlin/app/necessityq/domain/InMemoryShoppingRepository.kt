@@ -85,6 +85,18 @@ open class InMemoryShoppingRepository(
     override suspend fun deletePurchase(householdId: String, purchaseId: String) =
         mutate { it.copy(purchases = it.purchases - purchaseId) }
 
+    override suspend fun moveLine(householdId: String, lineId: String, category: Category, position: Long, atMillis: Long) =
+        mutate { s ->
+            val line = s.lines[lineId] ?: return@mutate s
+            s.copy(lines = s.lines + (lineId to line.copy(category = category, position = position, updatedAtMillis = atMillis)))
+        }
+
+    override suspend fun setMissing(householdId: String, lineId: String, missing: Boolean, byUserId: String?, atMillis: Long) =
+        mutate { s ->
+            val line = s.lines[lineId] ?: return@mutate s
+            s.copy(lines = s.lines + (lineId to line.copy(missing = missing, missingBy = byUserId.takeIf { missing }, updatedAtMillis = atMillis)))
+        }
+
     override suspend fun suppress(householdId: String, suppression: SuggestionSuppression) =
         mutate { it.copy(suppressions = it.suppressions + (suppression.itemId to suppression)) }
 }

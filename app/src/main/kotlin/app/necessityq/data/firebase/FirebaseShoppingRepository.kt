@@ -1,5 +1,6 @@
 package app.necessityq.data.firebase
 
+import app.necessityq.domain.Category
 import app.necessityq.domain.LineStatus
 import app.necessityq.domain.ListLine
 import app.necessityq.domain.Purchase
@@ -105,6 +106,21 @@ class FirebaseShoppingRepository(
 
     override suspend fun deletePurchase(householdId: String, purchaseId: String) {
         purchasesRef(householdId).document(purchaseId).delete()
+    }
+
+    override suspend fun moveLine(householdId: String, lineId: String, category: Category, position: Long, atMillis: Long) {
+        linesRef(householdId).document(lineId)
+            .update(mapOf("category" to category.name, "position" to position, "updatedAt" to atMillis))
+    }
+
+    override suspend fun setMissing(householdId: String, lineId: String, missing: Boolean, byUserId: String?, atMillis: Long) {
+        linesRef(householdId).document(lineId).update(
+            mapOf(
+                "missing" to missing,
+                "missingBy" to if (missing) byUserId else FieldValue.delete(),
+                "updatedAt" to atMillis,
+            ),
+        )
     }
 
     override suspend fun suppress(householdId: String, suppression: SuggestionSuppression) {

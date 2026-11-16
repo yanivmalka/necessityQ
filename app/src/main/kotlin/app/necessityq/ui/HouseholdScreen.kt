@@ -126,6 +126,14 @@ fun HouseholdScreen(
             }
 
             HorizontalDivider()
+            DisplayCard(vm)
+
+            if (vm.isShared) {
+                HorizontalDivider()
+                NotifyCard(vm, members, userId)
+            }
+
+            HorizontalDivider()
             UpdateCard(vm)
 
             HorizontalDivider()
@@ -319,6 +327,53 @@ fun UpdateCard(vm: AppViewModel) {
                 }
             }
             Text("העדכונים נלקחים מגרסאות האפליקציה ב-GitHub.", style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+// ---------- display ----------
+
+@Composable
+private fun DisplayCard(vm: AppViewModel) {
+    val bright by vm.brightTheme.collectAsStateWithLifecycle()
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                SectionTitle("תצוגה בהירה במיוחד")
+                Text("רקע לבן, טקסט כהה ובולט — קריא בסופר ובשמש. כבוי: לפי הגדרת הטלפון.", style = MaterialTheme.typography.bodySmall)
+            }
+            androidx.compose.material3.Switch(checked = bright, onCheckedChange = vm::setBrightTheme)
+        }
+    }
+}
+
+// ---------- who is notified ----------
+
+@Composable
+private fun NotifyCard(vm: AppViewModel, members: List<Member>, userId: String) {
+    val settings by vm.notifySettings.collectAsStateWithLifecycle()
+    // nobody chosen yet = everyone
+    val chosen = settings.missingRecipients.ifEmpty { members.map { it.userId }.toSet() }
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            SectionTitle("התראות על מוצר חסר")
+            Text("מי יקבל התראה כשמישהו מסמן מוצר כחסר בקנייה הזו:", style = MaterialTheme.typography.bodySmall)
+            members.forEach { m ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.Checkbox(
+                        checked = m.userId in chosen,
+                        onCheckedChange = { on ->
+                            vm.setMissingRecipients(if (on) chosen + m.userId else chosen - m.userId)
+                        },
+                    )
+                    Text(m.displayName + if (m.userId == userId) " (את/ה)" else "")
+                }
+            }
+            Text(
+                "ההתראות מגיעות כשהאפליקציה פתוחה או רצה ברקע. הודעות על מוצרים מגיעות לכל בני הבית.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

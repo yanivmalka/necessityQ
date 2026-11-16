@@ -52,6 +52,16 @@ service cloud.firestore {
         allow delete: if uid() == memberId || isOwner(hid);
       }
 
+      match /stores/{id} { allow read, write: if isMember(hid); }
+      match /itemMeta/{id} { allow read, write: if isMember(hid); }
+      match /settings/{id} { allow read, write: if isMember(hid); }
+      // item conversations: members write as themselves; only the author may edit or delete
+      match /messages/{id} {
+        allow read: if isMember(hid);
+        allow create: if isMember(hid) && request.resource.data.authorId == uid();
+        allow update, delete: if isMember(hid) && resource.data.authorId == uid();
+      }
+
       match /lines/{id} { allow read, write: if isMember(hid); }
       match /purchases/{id} { allow read, write: if isMember(hid); }
       match /suppressions/{id} { allow read, write: if isMember(hid); }

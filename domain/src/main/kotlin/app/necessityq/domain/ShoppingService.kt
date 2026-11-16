@@ -108,7 +108,24 @@ class ShoppingService(
 
     suspend fun delete(householdId: String, line: ListLine) = repository.deleteLine(householdId, line.id)
 
-    suspend fun checkOff(householdId: String, userId: String, line: ListLine) {
+    suspend fun adjustQuantity(householdId: String, line: ListLine, delta: Int) {
+        val next = QuantitySteps.step(line.quantity, delta)
+        if (next != line.quantity) changeQuantity(householdId, line, next)
+    }
+
+    /**
+     * Persists a drag: [category] is the group it was dropped in; [previous]/[next] are the lines now
+     * directly above and below it in that group (null at the ends).
+     */
+    suspend fun moveLine(householdId: String, line: ListLine, category: Category, previous: ListLine?, next: ListLine?) {
+        val position = ListOrdering.positionBetween(previous?.orderKey, next?.orderKey)
+        repository.moveLine(householdId, line.id, category, position, clock.nowMillis())
+    }
+
+    suspend fun setMissing(householdId: String, userId: String, line: ListLine, missing: Boolean) =
+        repository.setMissing(householdId, line.id, missing, userId, clock.nowMillis())
+
+    suspend fun checkOff(householdId: String, userId: String, line: ListLine, storeId: String? = null) {
         val purchase = Purchase(
             id = purchaseIdFor(line.id),
             itemId = line.itemId,
@@ -119,6 +136,7 @@ class ShoppingService(
             boughtAtMillis = clock.nowMillis(),
             boughtBy = userId,
             lineId = line.id,
+            storeId = storeId,
         )
         repository.checkOff(householdId, line.id, purchase)
     }
