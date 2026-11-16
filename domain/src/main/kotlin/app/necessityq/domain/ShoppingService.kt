@@ -134,51 +134,55 @@ class ShoppingService(
 
     /**
      * Loads [TodoSample]: history for the statistics plus the open items as list lines.
-     * Safe to run more than once. Returns (lines added, purchases recorded).
+     * Safe to run more than once (ids are deterministic; items already on the list are skipped).
+     * Returns (lines added, purchases recorded).
      */
     suspend fun importTodoSample(householdId: String, userId: String, current: List<ListLine>): Pair<Int, Int> {
         val onList = current.filter { it.status == LineStatus.NEEDED }.map { it.itemId }.toMutableSet()
         var addedLines = 0
-        TodoSample.openLines.forEachIndexed { index, row ->
-            val identity = row.identity
-            if (!onList.add(identity.id)) return@forEachIndexed
-            repository.addLine(
-                householdId,
-                ListLine(
-                    id = "todo_l$index",
-                    itemId = identity.id,
-                    name = identity.name,
-                    variant = identity.variant,
-                    category = identity.category,
-                    quantity = row.quantity,
-                    note = row.note,
-                    status = LineStatus.NEEDED,
-                    source = LineSource.MANUAL,
-                    addedBy = userId,
-                    addedAtMillis = row.atMillis,
-                    updatedAtMillis = row.atMillis,
-                ),
-            )
-            addedLines++
+        var recorded = 0
+        TodoSample.rows.forEachIndexed { index, row ->
+            val parsed = QuickEntryParser.parse(row.title) ?: return@forEachIndexed
+            val identity = parsed.item
+            if (row.isOpen) {
+                if (!onList.add(identity.id)) return@forEachIndexed
+                repository.addLine(
+                    householdId,
+                    ListLine(
+                        id = "todo_l$index",
+                        itemId = identity.id,
+                        name = identity.name,
+                        variant = identity.variant,
+                        category = identity.category,
+                        quantity = parsed.quantity,
+                        note = null,
+                        status = LineStatus.NEEDED,
+                        source = LineSource.MANUAL,
+                        addedBy = userId,
+                        addedAtMillis = row.atMillis,
+                        updatedAtMillis = row.atMillis,
+                    ),
+                )
+                addedLines++
+            } else {
+                repository.addPurchase(
+                    householdId,
+                    Purchase(
+                        id = "p_todo_$index",
+                        itemId = identity.id,
+                        name = identity.name,
+                        variant = identity.variant,
+                        category = identity.category,
+                        quantity = parsed.quantity,
+                        boughtAtMillis = row.atMillis,
+                        boughtBy = userId,
+                        lineId = null,
+                    ),
+                )
+                recorded++
+            }
         }
-        TodoSample.purchases.forEachIndexed { index, row ->
-            val identity = row.identity
-            repository.addPurchase(
-                householdId,
-                Purchase(
-                    id = "p_todo_$index",
-                    itemId = identity.id,
-                    name = identity.name,
-                    variant = identity.variant,
-                    category = identity.category,
-                    quantity = row.quantity,
-                    boughtAtMillis = row.atMillis,
-                    boughtBy = userId,
-                    lineId = null,
-                ),
-            )
-        }
-        return addedLines to TodoSample.purchases.size
+        return addedLines to recorded
     }
 
     companion object {
