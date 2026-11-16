@@ -49,6 +49,7 @@ internal object FirestoreMapping {
         "position" to line.position,
         "missing" to line.missing,
         "missingBy" to line.missingBy,
+        "recipe" to line.recipe,
     )
 
     fun lineFrom(doc: DocumentSnapshot): ListLine? {
@@ -71,6 +72,7 @@ internal object FirestoreMapping {
             position = doc.getLong("position") ?: 0L,
             missing = doc.getBoolean("missing") ?: false,
             missingBy = doc.getString("missingBy"),
+            recipe = doc.getString("recipe"),
         )
     }
 

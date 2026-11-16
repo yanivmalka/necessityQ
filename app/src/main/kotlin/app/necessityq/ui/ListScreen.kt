@@ -80,6 +80,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.necessityq.domain.Category
 import app.necessityq.domain.ItemMessage
+import app.necessityq.domain.ItemTag
+import app.necessityq.domain.ItemTags
+import app.necessityq.domain.TagKind
 import app.necessityq.domain.ItemStats
 import app.necessityq.domain.LineStatus
 import app.necessityq.domain.ListLine
@@ -123,7 +126,7 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
     val sort by vm.sort.collectAsStateWithLifecycle()
     val display by vm.display.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
-    val messages by vm.messages.collectAsStateWithLifecycle()
+    val messages by vm.itemMessages.collectAsStateWithLifecycle()
     val names by vm.memberNames.collectAsStateWithLifecycle()
     var openItem by remember { mutableStateOf<ListLine?>(null) }
     var showSortMenu by remember { mutableStateOf(false) }
@@ -272,7 +275,8 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
                             ProductTile(
                                 line = line,
                                 subline = tileInfo(line, stats, favorites, names, display, today),
-                                favorite = display.showFavorite && line.itemId in favorites,
+                                tags = ItemTags.of(line, stats, favorite = line.itemId in favorites)
+                                    .filter { display.showFavorite || it.kind != TagKind.FAVORITE },
                                 unread = vm.unreadCount(line.itemId, messages),
                                 hasMessages = messages.any { it.itemId == line.itemId },
                                 showPrices = display.showPrices,
@@ -404,7 +408,7 @@ private fun RunningLowCard(s: Suggestion, info: String, onAdd: () -> Unit, onDis
 private fun ProductTile(
     line: ListLine,
     subline: String,
-    favorite: Boolean,
+    tags: List<ItemTag>,
     unread: Int,
     hasMessages: Boolean,
     showPrices: Boolean,
@@ -473,11 +477,7 @@ private fun ProductTile(
                         Column(Modifier.weight(1f)) {
                             Text(line.displayName, style = ProductNameStyle, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                if (favorite) Icon(Icons.Default.Star, "מועדף", Modifier.size(18.dp), tint = Color(0xFFC77700))
-                                if (line.missing) {
-                                    Icon(Icons.Default.Warning, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.secondary)
-                                    Text("חסר", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
-                                }
+                                tags.forEach { TagBadge(it) }
                                 if (hasMessages) {
                                     Icon(
                                         Icons.AutoMirrored.Filled.Chat, "יש הודעות", Modifier.size(18.dp),
@@ -688,3 +688,24 @@ private fun OptionRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
 @Suppress("unused")
 private fun unreadFor(itemId: String, all: List<ItemMessage>, me: String, readAt: Long) =
     all.count { it.itemId == itemId && it.authorId != me && it.atMillis > readAt }
+
+/** Coloured badge: routine green, occasional blue, special purple, favourite gold, missing orange, recipe teal. */
+@Composable
+fun TagBadge(tag: ItemTag) {
+    val (bg, fg) = when (tag.kind) {
+        TagKind.ROUTINE -> Color(0xFFD6F5DC) to Color(0xFF0B5D1E)
+        TagKind.OCCASIONAL -> Color(0xFFDCE8FF) to Color(0xFF0040A0)
+        TagKind.SPECIAL -> Color(0xFFF0DDFF) to Color(0xFF5B1A8C)
+        TagKind.FAVORITE -> Color(0xFFFFEDB8) to Color(0xFF6B4A00)
+        TagKind.MISSING -> Color(0xFFFFD9C2) to Color(0xFF8A2E00)
+        TagKind.RECIPE -> Color(0xFFCCF2EE) to Color(0xFF00544C)
+    }
+    Text(
+        tag.label,
+        Modifier.background(bg, RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 1.dp),
+        color = fg,
+        fontWeight = FontWeight.Bold,
+        style = MaterialTheme.typography.bodySmall,
+        maxLines = 1,
+    )
+}

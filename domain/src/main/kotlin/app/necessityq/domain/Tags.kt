@@ -1,0 +1,26 @@
+package app.necessityq.domain
+
+/** Kinds of badge a product tile can carry, so items are easy to tell apart at a glance. */
+enum class TagKind { ROUTINE, OCCASIONAL, SPECIAL, FAVORITE, MISSING, RECIPE }
+
+data class ItemTag(val kind: TagKind, val label: String)
+
+object ItemTags {
+    /**
+     *  - קבוע: a routine item (regular cadence in the history)
+     *  - לפעמים: bought now and then
+     *  - מיוחד: one-off or never bought before (occasions, new products)
+     *  - מועדף / חסר: user flags
+     *  - מתכון: the line was derived from a menu or recipe
+     */
+    fun of(line: ListLine, stats: ItemStats?, favorite: Boolean): List<ItemTag> = buildList {
+        if (line.missing) add(ItemTag(TagKind.MISSING, "חסר"))
+        line.recipe?.let { add(ItemTag(TagKind.RECIPE, "מתכון: $it")) }
+        when (stats?.classification) {
+            Classification.ROUTINE -> add(ItemTag(TagKind.ROUTINE, "קבוע"))
+            Classification.OCCASIONAL -> add(ItemTag(TagKind.OCCASIONAL, "לפעמים"))
+            Classification.ONE_OFF, null -> add(ItemTag(TagKind.SPECIAL, "מיוחד"))
+        }
+        if (favorite) add(ItemTag(TagKind.FAVORITE, "מועדף"))
+    }
+}

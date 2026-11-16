@@ -59,12 +59,12 @@ private fun fmt(millis: Long) = Instant.ofEpochMilli(millis).atZone(ZoneId.syste
  * Expanded information about one product plus its conversation. Works for an item that is on the list
  * now (with quick actions) and for one that is not (opened from the messages tab).
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ItemSheet(vm: AppViewModel, itemId: String, itemName: String, onDismiss: () -> Unit) {
     val snapshot by vm.snapshot.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
-    val allMessages by vm.messages.collectAsStateWithLifecycle()
+    val allMessages by vm.itemMessages.collectAsStateWithLifecycle()
     val names by vm.memberNames.collectAsStateWithLifecycle()
     val purchases by vm.purchases.collectAsStateWithLifecycle()
     val stores by vm.stores.collectAsStateWithLifecycle()
@@ -98,6 +98,9 @@ fun ItemSheet(vm: AppViewModel, itemId: String, itemName: String, onDismiss: () 
             }
 
             if (line != null) {
+                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    app.necessityq.domain.ItemTags.of(line, stats, favorite).forEach { TagBadge(it) }
+                }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     QuantityStepper(line.quantity, onMinus = { vm.adjustQuantity(line, -1) }, onPlus = { vm.adjustQuantity(line, +1) })
                     PriceSlot(price = null, average = null)
@@ -209,7 +212,7 @@ private fun ChatThread(thread: List<ItemMessage>, me: String) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MessagesScreen(vm: AppViewModel, modifier: Modifier = Modifier, onOpen: (itemId: String, itemName: String) -> Unit) {
-    val all by vm.messages.collectAsStateWithLifecycle()
+    val all by vm.itemMessages.collectAsStateWithLifecycle()
     vm.unreadTotal.collectAsStateWithLifecycle() // recompose when read markers change
     val threads = all.groupBy { it.itemId }.values
         .map { it.maxBy { m -> m.atMillis } to it }

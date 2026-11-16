@@ -243,7 +243,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     val me: String get() = (session.value as? Session.SignedIn)?.userId.orEmpty()
 
-    val messages: StateFlow<List<ItemMessage>> = householdId
+    val itemMessages: StateFlow<List<ItemMessage>> = householdId
         .flatMapLatest { hid -> if (hid == null) emptyFlow() else container.collab.messages(hid) }
         .catch { emit(emptyList()) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -267,7 +267,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         return all.count { it.itemId == itemId && it.authorId != me && it.atMillis > readAt }
     }
 
-    val unreadTotal: StateFlow<Int> = combine(messages, readTick) { all, _ ->
+    val unreadTotal: StateFlow<Int> = combine(itemMessages, readTick) { all, _ ->
         all.filter { it.authorId != me && it.atMillis > prefs.readAt(it.itemId) }.size
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 

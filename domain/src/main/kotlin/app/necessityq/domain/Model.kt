@@ -24,6 +24,8 @@ data class ListLine(
     /** Flagged as missing/urgent; chosen household members are notified. */
     val missing: Boolean = false,
     val missingBy: String? = null,
+    /** Set when the line came from a planned menu / recipe (future meal planning). */
+    val recipe: String? = null,
 ) {
     val identity: ItemIdentity get() = ItemIdentity(name, variant, category)
     val displayName: String get() = identity.displayName
