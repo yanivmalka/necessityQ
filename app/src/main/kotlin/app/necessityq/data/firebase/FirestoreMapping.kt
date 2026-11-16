@@ -141,6 +141,9 @@ internal object FirestoreMapping {
             mediaId = doc.getString("mediaId"),
             durationMs = doc.getLong("durationMs"),
             replyToId = doc.getString("replyTo"),
+            editedAtMillis = doc.getLong("editedAt"),
+            waveform = (doc.get("wave") as? List<*>)?.mapNotNull { (it as? Number)?.toInt() }?.takeIf { it.isNotEmpty() },
+            archivedAtMillis = doc.getLong("archivedAt"),
         )
     }
 
@@ -151,6 +154,7 @@ internal object FirestoreMapping {
         m.mediaId?.let { put("mediaId", it) }
         m.durationMs?.let { put("durationMs", it) }
         m.replyToId?.let { put("replyTo", it) }
+        m.waveform?.let { put("wave", it) }
     }
 
     fun suppressionFrom(doc: DocumentSnapshot): SuggestionSuppression? {

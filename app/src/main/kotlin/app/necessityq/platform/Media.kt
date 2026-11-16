@@ -50,9 +50,12 @@ object ImageCodec {
 
 /** Short voice messages: AAC, mono, low bit-rate — about 3 KB per second. */
 class VoiceRecorder(private val context: Context) {
+    class Recording(val bytes: ByteArray, val durationMs: Long, val waveform: List<Int>)
+
     private var recorder: MediaRecorder? = null
     private var file: File? = null
     private var startedAt = 0L
+    private val levels = ArrayList<Int>()
 
     val isRecording: Boolean get() = recorder != null
 
@@ -74,10 +77,17 @@ class VoiceRecorder(private val context: Context) {
         recorder = r
         file = target
         startedAt = System.currentTimeMillis()
+        levels.clear()
     }
 
-    /** Stops and returns (bytes, duration ms), or null if nothing usable was recorded. */
-    fun stop(): Pair<ByteArray, Long>? {
+    /** Call about every [SAMPLE_MS] while recording: remembers the loudness for the waveform. */
+    fun sample() {
+        val level = runCatching { recorder?.maxAmplitude }.getOrNull() ?: return
+        levels.add(level)
+    }
+
+    /** Stops and returns the recording, or null if nothing usable was recorded. */
+    fun stop(): Recording? {
         val r = recorder ?: return null
         val duration = System.currentTimeMillis() - startedAt
         val ok = runCatching { r.stop() }.isSuccess
@@ -91,7 +101,7 @@ class VoiceRecorder(private val context: Context) {
         }
         val bytes = f.readBytes()
         f.delete()
-        return bytes to duration.coerceAtMost(MAX_MS)
+        return Recording(bytes, duration.coerceAtMost(MAX_MS), app.necessityq.domain.Waveform.fromAmplitudes(levels))
     }
 
     fun stopQuietly() {
@@ -103,6 +113,7 @@ class VoiceRecorder(private val context: Context) {
 
     companion object {
         const val MAX_MS = 60_000L
+        const val SAMPLE_MS = 100L
     }
 }
 
@@ -124,6 +135,11 @@ class VoicePlayer(private val context: Context) {
         }
         playingId = id
     }
+
+    /** Playback position in ms (0 when nothing plays). */
+    fun position(): Long = runCatching { player?.currentPosition?.toLong() }.getOrNull() ?: 0L
+
+    fun seekTo(ms: Int) { runCatching { player?.seekTo(ms) } }
 
     fun stop() {
         player?.let { runCatching { it.stop() }; it.release() }

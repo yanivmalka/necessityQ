@@ -5,6 +5,8 @@ import app.necessityq.domain.ItemMessage
 import app.necessityq.domain.NotifySettings
 import app.necessityq.domain.Receipt
 import app.necessityq.domain.Store
+import app.necessityq.domain.ChatStats
+import app.necessityq.domain.ConversationRetention
 import app.necessityq.domain.MediaBlob
 import com.google.firebase.firestore.Blob
 import com.google.firebase.firestore.FieldValue
@@ -16,8 +18,10 @@ import kotlinx.coroutines.flow.map
 
 /**
  *   households/{hid}/stores/{id}        { name, type, lat?, lng? }
- *   households/{hid}/itemMeta/{itemId}  { favorite, price? }
- *   households/{hid}/messages/{id}      { itemId, itemName, authorId, authorName, text, at, kind?, mediaId?, durationMs?, replyTo? }
+ *   households/{hid}/itemMeta/{itemId}  { favorite, price?, chatMessages?, chatThreads?, chatMedia?, chatLastAt? }
+ *   households/{hid}/messages/{id}      { itemId, itemName, authorId, authorName, text, at, kind?, mediaId?, durationMs?, replyTo?,
+ *                                         wave?, editedAt?, archivedAt? }
+ *   households/{hid}/settings/chat      { retentionDays }
  *   households/{hid}/media/{id}         { mime, data (bytes), by, at }  — picture / recording of a message
  *   households/{hid}/settings/notify    { missingRecipients[] }
  *
@@ -53,6 +57,92 @@ class FirebaseCollabRepository(private val db: FirebaseFirestore) : CollabReposi
     override suspend fun sendMessage(householdId: String, message: ItemMessage) {
         household(householdId).collection("messages").document(message.id).set(FirestoreMapping.messageToMap(message))
     }
+
+    override suspend fun editMessage(householdId: String, messageId: String, text: String, editedAtMillis: Long) {
+        household(householdId).collection("messages").document(messageId)
+            .update(mapOf("text" to text, "editedAt" to editedAtMillis))
+    }
+
+    override suspend fun deleteMessages(householdId: String, messages: List<ItemMessage>) {
+        val hh = household(householdId)
+        messages.chunked(200).forEach { chunk ->
+            val batch = db.batch()
+            chunk.forEach { m ->
+                batch.delete(hh.collection("messages").document(m.id))
+                m.mediaId?.let { batch.delete(hh.collection("media").document(it)) }
+            }
+            batch.commit()
+        }
+    }
+
+    /** Messages of [itemId] archived exactly at [from] (null = still open) move to [to]. */
+    private suspend fun moveArchive(householdId: String, itemId: String, from: Long?, to: Long?) {
+        val docs = household(householdId).collection("messages").whereEqualTo("itemId", itemId).get().await()
+            .documents.filter { it.getLong("archivedAt") == from }
+        docs.chunked(400).forEach { chunk ->
+            val batch = db.batch()
+            chunk.forEach { d -> batch.update(d.reference, "archivedAt", to ?: FieldValue.delete()) }
+            batch.commit()
+        }
+    }
+
+    override suspend fun archiveConversation(householdId: String, itemId: String, atMillis: Long) =
+        moveArchive(householdId, itemId, null, atMillis)
+
+    override suspend fun unarchiveConversation(householdId: String, itemId: String, atMillis: Long) =
+        moveArchive(householdId, itemId, atMillis, null)
+
+    /**
+     * One transaction per item: only messages that still exist are counted, so two devices purging at
+     * the same moment cannot count the same message twice.
+     */
+    override suspend fun purgeMessages(householdId: String, messages: List<ItemMessage>) {
+        val hh = household(householdId)
+        messages.groupBy { it.itemId }.forEach { (itemId, group) ->
+            group.chunked(200).forEach { chunk ->
+                db.runTransaction { tx ->
+                    val existing = chunk.filter { tx.get(hh.collection("messages").document(it.id)).exists() }
+                    if (existing.isNotEmpty()) {
+                        val stats = ConversationRetention.statsFor(existing)
+                        tx.set(
+                            hh.collection("itemMeta").document(itemId),
+                            mapOf(
+                                "chatMessages" to FieldValue.increment(stats.messages.toLong()),
+                                "chatThreads" to FieldValue.increment(stats.threads.toLong()),
+                                "chatMedia" to FieldValue.increment(stats.media.toLong()),
+                                "chatLastAt" to stats.lastAtMillis,
+                            ),
+                            com.google.firebase.firestore.SetOptions.merge(),
+                        )
+                        existing.forEach { m ->
+                            tx.delete(hh.collection("messages").document(m.id))
+                            m.mediaId?.let { tx.delete(hh.collection("media").document(it)) }
+                        }
+                    }
+                    Unit
+                }.await()
+            }
+        }
+    }
+
+    /** Null until the server confirmed the setting, so nothing is deleted on a guess from an empty cache. */
+    override fun chatRetentionDays(householdId: String): Flow<Int?> =
+        household(householdId).collection("settings").document("chat").observe(includeMetadata = true).map { doc ->
+            if (!doc.exists() && doc.metadata.isFromCache) null
+            else doc.getLong("retentionDays")?.toInt() ?: ConversationRetention.DEFAULT_DAYS
+        }
+
+    override suspend fun setChatRetentionDays(householdId: String, days: Int) {
+        household(householdId).collection("settings").document("chat").set(mapOf("retentionDays" to days))
+    }
+
+    override fun chatStats(householdId: String): Flow<Map<String, ChatStats>> =
+        household(householdId).collection("itemMeta").observe().map { snap ->
+            snap.documents.mapNotNull { doc ->
+                val n = doc.getLong("chatMessages")?.toInt() ?: return@mapNotNull null
+                doc.id to ChatStats(n, doc.getLong("chatThreads")?.toInt() ?: 0, doc.getLong("chatMedia")?.toInt() ?: 0, doc.getLong("chatLastAt") ?: 0L)
+            }.toMap()
+        }
 
     override suspend fun saveMedia(householdId: String, mediaId: String, authorId: String, media: MediaBlob) {
         household(householdId).collection("media").document(mediaId).set(
