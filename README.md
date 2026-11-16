@@ -104,6 +104,10 @@ app/      Android (Jetpack Compose)
 2. לחשבון השירות שבסוד `FIREBASE_SERVICE_ACCOUNT` צריכות להיות ההרשאות Cloud Functions Admin, Service Account User, Cloud Scheduler Admin ו-Firebase Rules Admin, או התפקיד Editor.
 3. ב-GitHub, תחת Settings ← Secrets and variables ← Actions ← Variables, להגדיר משתנה `PRICES_DEPLOY` עם הערך `true`. מאותו רגע כל דחיפה ל-`main` שנוגעת ב-`firebase/` פורסת את הפונקציות ואת כללי ה-Storage, דרך [`.github/workflows/functions.yml`](.github/workflows/functions.yml).
 
+**הגנת תקציב (ניתוק חיוב אוטומטי):** הפונקציה `budgetGuard` מאזינה לנושא ה-Pub/Sub `billing-budget`. כשהעלות החודשית מגיעה לתקציב, היא מנתקת את חשבון החיוב מהפרויקט. מאותו רגע השירותים בתשלום נעצרים, והפרויקט חוזר למכסות החינמיות. מחברים את החיוב מחדש ידנית בקונסולה. ההגדרות נמצאות במסמך `config/billing`: השדה `enabled` (ברירת מחדל `true`) מפעיל או מכבה את המנגנון, והשדה `cutAtRatio` (ברירת מחדל `1`, כלומר 100%) קובע באיזה אחוז מהתקציב לנתק. כדי שזה יעבוד צריך שני דברים:
+1. בתקציב, תחת Billing ← Budgets & alerts, לחבר את הנושא `billing-budget` ("Connect a Pub/Sub topic to this budget").
+2. לתת לחשבון השירות של הפונקציה (`<project-number>-compute@developer.gserviceaccount.com`) את התפקיד **Project Billing Manager**.
+
 בדיקות: `cd firebase/functions && npm ci && npm run check`.
 
 ## פיתוח מקומי
