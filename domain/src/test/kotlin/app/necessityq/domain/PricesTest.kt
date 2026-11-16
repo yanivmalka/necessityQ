@@ -36,7 +36,7 @@ class PricesTest {
         )
         assertEquals(listOf("1", "2"), PriceData.search(products, "קוטג").map { it.code })
         assertEquals(listOf("1"), PriceData.search(products, "קוטג 5%").map { it.code })
-        assertEquals(listOf("2", "3"), PriceData.search(products, "תנובה").map { it.code })
+        assertEquals(listOf("3", "2"), PriceData.search(products, "תנובה").map { it.code })
         assertEquals(listOf("7290000042015"), PriceData.search(products, "7290000042015").map { it.code })
         assertEquals(emptyList<BranchProduct>(), PriceData.search(products, "  "))
     }
