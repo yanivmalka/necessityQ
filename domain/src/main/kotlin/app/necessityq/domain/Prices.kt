@@ -134,6 +134,9 @@ interface PriceRepository {
     suspend fun prices(branchId: String): BranchPrices?
     /** Asks the server to load fresh prices now (skipped by the server when they are recent). */
     suspend fun requestRefresh(branchId: String): Boolean
+    /** Product (barcode) the household chose for a generic item, by item id — optional precision. */
+    fun preferredProducts(householdId: String): Flow<Map<String, String>>
+    suspend fun setPreferredProduct(householdId: String, itemId: String, code: String?)
 }
 
 /** Used without Firebase (single-device builds): no price data. */
@@ -145,4 +148,122 @@ class NoPriceRepository : PriceRepository {
     override fun status(branchIds: List<String>): Flow<Map<String, BranchPriceStatus>> = flowOf(emptyMap())
     override suspend fun prices(branchId: String): BranchPrices? = null
     override suspend fun requestRefresh(branchId: String) = false
+    private val preferred = MutableStateFlow<Map<String, Map<String, String>>>(emptyMap())
+    override fun preferredProducts(householdId: String) = preferred.map { it[householdId].orEmpty() }
+    override suspend fun setPreferredProduct(householdId: String, itemId: String, code: String?) = preferred.update { all ->
+        val mine = all[householdId].orEmpty()
+        all + (householdId to if (code == null) mine - itemId else mine + (itemId to code))
+    }
+}
+
+// ---------- generic item (as the household names it) → products at a branch ----------
+
+/** Price picture of a generic list item ("קוטג' 5%") at one branch. */
+data class ItemPriceInfo(
+    val branchId: String,
+    /** typical range of the matching products (outliers trimmed) */
+    val low: Double,
+    val high: Double,
+    /** matching products, cheapest first */
+    val candidates: List<BranchProduct>,
+    /** the product the household chose for this item, when sold at this branch */
+    val preferred: BranchProduct?,
+)
+
+/** Products of a branch with their search keys computed once (searching runs per list item). */
+class ProductIndex(val branchId: String, val updatedAtMillis: Long, products: List<BranchProduct>) {
+    internal val entries: List<Pair<BranchProduct, String>> = products.map { it to HebrewText.matchKey("${it.name} ${it.brand}") }
+    internal val byCode: Map<String, BranchProduct> = products.associateBy { it.code }
+}
+
+object ItemPrices {
+    private val percent = Regex("""\d+(?:\.\d+)?%""")
+
+    /**
+     * Products matching a generic item: every word of the name must appear; percentages of the
+     * variant must appear as whole numbers ("5%" does not match "15%"). When some products start with
+     * the item name ("קוטג' 5% טרה"), products that only mention it ("פסטה עם קוטג'") are dropped.
+     */
+    fun candidates(index: ProductIndex, name: String, variant: String?): List<BranchProduct> {
+        val nameKey = HebrewText.matchKey(name)
+        val words = nameKey.split(' ').filter { it.isNotBlank() }
+        if (words.isEmpty()) return emptyList()
+        val variantKey = variant?.let { HebrewText.matchKey(it) }.orEmpty()
+        val percents = percent.findAll(variantKey).map { it.value }.toList()
+        val otherVariantWords = percent.replace(variantKey, " ").split(' ').filter { it.isNotBlank() }
+        val matches = index.entries.filter { (_, key) ->
+            words.all { key.contains(it) } &&
+                otherVariantWords.all { key.contains(it) } &&
+                percents.all { p -> Regex("""(?<![\d.])${Regex.escape(p)}""").containsMatchIn(key) }
+        }
+        val leading = matches.filter { (_, key) -> key.startsWith(nameKey) }
+        return (leading.ifEmpty { matches }).map { it.first }.sortedBy { it.price }
+    }
+
+    /** Typical range: the cheapest and dearest 10% are left out (from ten products on), otherwise min–max. */
+    fun typicalRange(prices: List<Double>): Pair<Double, Double>? {
+        if (prices.isEmpty()) return null
+        val sorted = prices.sorted()
+        val trim = sorted.size / 10
+        return sorted[trim] to sorted[sorted.size - 1 - trim]
+    }
+
+    fun info(index: ProductIndex, name: String, variant: String?, preferredCode: String?): ItemPriceInfo? {
+        val preferred = preferredCode?.let { index.byCode[it] }
+        val candidates = candidates(index, name, variant)
+        val range = typicalRange(candidates.map { it.price }) ?: preferred?.let { it.price to it.price } ?: return null
+        return ItemPriceInfo(index.branchId, range.first, range.second, candidates, preferred)
+    }
+
+    /** Distinct brands among the candidates (for the optional "choose exactly" filter). */
+    fun brands(candidates: List<BranchProduct>): List<String> =
+        candidates.map { it.brand.trim() }.filter { it.isNotBlank() }.groupingBy { it }.eachCount()
+            .entries.sortedByDescending { it.value }.map { it.key }
+
+    /** Fat / strength percentages seen in the candidates' names ("3%", "5%", "9%"). */
+    fun percents(candidates: List<BranchProduct>): List<String> =
+        candidates.flatMap { percent.findAll(it.name).map { m -> m.value }.toList() }.distinct()
+            .sortedBy { it.removeSuffix("%").toDoubleOrNull() ?: 0.0 }
+
+    fun hasPercent(product: BranchProduct, p: String): Boolean =
+        Regex("""(?<![\d.])${Regex.escape(p)}""").containsMatchIn(product.name)
+}
+
+/** Estimated cost of the open lines as a range: the household's own prices, else the branch data. */
+data class ListCostEstimate(val low: Double, val high: Double, val pricedLines: Int, val openLines: Int) {
+    val complete: Boolean get() = openLines > 0 && pricedLines == openLines
+    val isRange: Boolean get() = high - low >= 0.005
+}
+
+object ListCost {
+    /** Packages to buy for a branch price: counted units as is; weights only for products sold by weight. */
+    fun packages(quantity: Quantity?, weighted: Boolean): Double = when (quantity?.unit) {
+        null -> 1.0
+        QuantityUnit.PIECE, QuantityUnit.PACKAGE -> quantity.amount
+        QuantityUnit.KILOGRAM, QuantityUnit.LITER -> if (weighted) quantity.amount else 1.0
+        QuantityUnit.GRAM, QuantityUnit.MILLILITER -> if (weighted) quantity.amount / 1000.0 else 1.0
+    }
+
+    fun of(lines: List<ListLine>, householdPrices: Map<String, Double>, branch: Map<String, ItemPriceInfo>): ListCostEstimate {
+        val open = lines.filter { it.status == LineStatus.NEEDED }
+        var low = 0.0
+        var high = 0.0
+        var priced = 0
+        for (line in open) {
+            val own = householdPrices[line.itemId]
+            val info = branch[line.itemId]
+            when {
+                own != null -> (own * PriceEstimate.units(line.quantity)).let { low += it; high += it }
+                info?.preferred != null -> (info.preferred.price * packages(line.quantity, info.preferred.weighted)).let { low += it; high += it }
+                info != null -> {
+                    val n = packages(line.quantity, info.candidates.firstOrNull()?.weighted == true)
+                    low += info.low * n
+                    high += info.high * n
+                }
+                else -> continue
+            }
+            priced++
+        }
+        return ListCostEstimate(low, high, priced, open.size)
+    }
 }

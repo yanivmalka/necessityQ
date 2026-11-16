@@ -253,6 +253,13 @@ fun ItemSheet(vm: AppViewModel, itemId: String, itemName: String, onDismiss: () 
                 androidx.compose.material3.TextButton(onClick = { editingPrice = true }) { Text(if (price == null) "הזנה" else "עריכה") }
             }
 
+            BranchPriceSection(
+                vm,
+                itemId = itemId,
+                name = line?.name ?: stats?.identity?.name ?: itemName,
+                variant = line?.variant ?: stats?.identity?.variant,
+            )
+
             if (pastThreads.isNotEmpty()) {
                 HorizontalDivider()
                 Row(
@@ -1021,5 +1028,82 @@ fun MessagesScreen(vm: AppViewModel, modifier: Modifier = Modifier, onOpen: (ite
             },
             confirmButton = { androidx.compose.material3.TextButton(onClick = { showRetention = false }) { Text("סגירה") } },
         )
+    }
+}
+
+
+/**
+ * What the item costs at the household's primary branch. By default only the typical range of the
+ * matching products ("קוטג'" → ₪5.90–₪7.80); choosing an exact product is optional and tucked away.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun BranchPriceSection(vm: AppViewModel, itemId: String, name: String, variant: String?) {
+    val primary by vm.primaryBranch.collectAsStateWithLifecycle()
+    val infos by vm.itemPriceInfo.collectAsStateWithLifecycle()
+    val loaded by vm.branchPrices.collectAsStateWithLifecycle()
+    val branch = primary ?: return
+    val fallback = remember(loaded, infos, branch.id, itemId) { vm.priceInfoFor(itemId, name, variant) }
+    val info = infos[itemId] ?: fallback
+    var open by remember(itemId) { mutableStateOf(false) }
+    var brand by remember(itemId) { mutableStateOf<String?>(null) }
+    var pct by remember(itemId) { mutableStateOf<String?>(null) }
+    var showAll by remember(itemId) { mutableStateOf(false) }
+
+    HorizontalDivider()
+    Row(Modifier.fillMaxWidth().clickable(enabled = info != null) { open = !open }, verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("מחיר ב${branch.title}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Text(
+                when {
+                    !loaded.containsKey(branch.id) -> "המחירים של הסניף נטענים…"
+                    info == null -> "לא נמצאו מוצרים מתאימים בסניף"
+                    info.preferred != null -> "${app.necessityq.domain.PriceData.formatPrice(info.preferred!!.price)} · ${info.preferred!!.name}"
+                    else -> "${app.necessityq.domain.PriceData.formatRange(info.low, info.high)} · ${info.candidates.size} מוצרים"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        if (info != null) Icon(if (open) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = if (open) "כיווץ" else "דיוק לפי מוצר")
+    }
+    if (!open || info == null) return
+
+    Text("דיוק לפי מוצר (לא חובה) — המוצר שתבחרו יוצג ברשימה במקום הטווח.", style = MaterialTheme.typography.bodySmall)
+    val brands = remember(info) { app.necessityq.domain.ItemPrices.brands(info.candidates) }
+    val percents = remember(info) { app.necessityq.domain.ItemPrices.percents(info.candidates) }
+    if (percents.size > 1) {
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            percents.forEach { p -> androidx.compose.material3.FilterChip(selected = pct == p, onClick = { pct = if (pct == p) null else p }, label = { Text(p) }) }
+        }
+    }
+    if (brands.size > 1) {
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            brands.take(12).forEach { b -> androidx.compose.material3.FilterChip(selected = brand == b, onClick = { brand = if (brand == b) null else b }, label = { Text(b) }) }
+        }
+    }
+    val filtered = info.candidates.filter { c ->
+        (brand == null || c.brand.trim() == brand) && (pct == null || app.necessityq.domain.ItemPrices.hasPercent(c, pct!!))
+    }
+    val shown = if (showAll) filtered else filtered.take(15)
+    shown.forEach { c ->
+        val chosen = info.preferred?.code == c.code
+        Row(
+            Modifier.fillMaxWidth().clickable { vm.setPreferredProduct(itemId, if (chosen) null else c.code) }.padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            androidx.compose.material3.RadioButton(selected = chosen, onClick = { vm.setPreferredProduct(itemId, if (chosen) null else c.code) })
+            Column(Modifier.weight(1f)) {
+                Text(c.name, fontWeight = if (chosen) FontWeight.Bold else FontWeight.Normal)
+                val range = if (c.high > c.low) " · היה ${app.necessityq.domain.PriceData.formatRange(c.low, c.high)}" else ""
+                Text(listOf(c.brand, range.removePrefix(" · ")).filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
+            }
+            Text(app.necessityq.domain.PriceData.formatPrice(c.price), fontWeight = FontWeight.Bold)
+        }
+    }
+    if (filtered.size > shown.size) {
+        androidx.compose.material3.TextButton(onClick = { showAll = true }) { Text("הצגת כל ${filtered.size} המוצרים") }
+    }
+    if (info.preferred != null) {
+        androidx.compose.material3.TextButton(onClick = { vm.setPreferredProduct(itemId, null) }) { Text("ביטול הבחירה — הצגת טווח בלבד") }
     }
 }

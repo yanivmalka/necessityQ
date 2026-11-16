@@ -207,6 +207,7 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
     val descending by vm.descending.collectAsStateWithLifecycle()
     val filter by vm.filter.collectAsStateWithLifecycle()
     val prices by vm.prices.collectAsStateWithLifecycle()
+    val itemPrices by vm.itemPriceInfo.collectAsStateWithLifecycle()
     val unreadTotal by vm.unreadTotal.collectAsStateWithLifecycle()
     var openItem by remember { mutableStateOf<ListLine?>(null) }
     var showSortMenu by remember { mutableStateOf(false) }
@@ -531,6 +532,7 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
                                 },
                                 display = display,
                                 price = prices[line.itemId],
+                                priceInfo = itemPrices[line.itemId],
                                 controlsOpen = line.id in expanded,
                                 lifted = isDragging,
                                 dragHandle = if (sort == ListSort.GROUPS && !descending && !filter.isActive) {
@@ -579,7 +581,7 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
 
         // estimated total of the open lines
         if (display.showTotal && snap != null && snap.lines.any { it.status == LineStatus.NEEDED }) {
-            TotalBar(PriceEstimate.of(snap.lines, prices))
+            TotalBar(app.necessityq.domain.ListCost.of(snap.lines, prices, itemPrices))
         }
     }
 
@@ -967,6 +969,7 @@ private fun ProductTile(
     chat: ChatState?,
     display: DisplayOptions,
     price: Double?,
+    priceInfo: app.necessityq.domain.ItemPriceInfo? = null,
     controlsOpen: Boolean,
     lifted: Boolean,
     dragHandle: (@Composable () -> Unit)?,
@@ -1052,7 +1055,7 @@ private fun ProductTile(
                                     }
                                 }
                             }
-                            if (display.showPrices) PriceSlot(price = price?.let { it * PriceEstimate.units(line.quantity) }, average = null)
+                            if (display.showPrices) PriceSlot(price = price?.let { it * PriceEstimate.units(line.quantity) }, average = null, info = priceInfo)
                         }
                         if (subline.isNotBlank() || showStepper || (controlsMode && controlsOpen)) {
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
@@ -1081,7 +1084,7 @@ private fun ProductTile(
 
 /** Estimated cost of the open lines, from the prices the household entered. */
 @Composable
-private fun TotalBar(estimate: PriceEstimate) {
+private fun TotalBar(estimate: app.necessityq.domain.ListCostEstimate) {
     Row(
         Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1090,15 +1093,20 @@ private fun TotalBar(estimate: PriceEstimate) {
             Text("מחיר משוער", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(
                 when {
-                    estimate.pricedLines == 0 -> "אין עדיין מחירים — מזינים מחיר בדף המוצר"
+                    estimate.pricedLines == 0 -> "אין עדיין מחירים — בוחרים סניף (תפריט ← סניפים ומחירים) או מזינים מחיר בדף המוצר"
                     estimate.complete -> "לכל ${estimate.openLines} הפריטים"
                     else -> "לפי ${estimate.pricedLines} מתוך ${estimate.openLines} פריטים"
                 },
                 style = MaterialTheme.typography.bodySmall,
             )
         }
+        val prefix = if (estimate.complete) "" else "~"
         Text(
-            if (estimate.pricedLines == 0) "₪ —" else (if (estimate.complete) "" else "~") + "₪%.2f".format(estimate.total),
+            when {
+                estimate.pricedLines == 0 -> "₪ —"
+                estimate.isRange -> prefix + "₪%.0f–%.0f".format(estimate.low, estimate.high)
+                else -> prefix + "₪%.2f".format(estimate.low)
+            },
             fontWeight = FontWeight.ExtraBold,
             style = MaterialTheme.typography.titleLarge,
         )
@@ -1283,18 +1291,22 @@ private fun ChatIndicator(state: ChatState) {
 
 /** Current price and household/market average; filled once a live price source is connected. */
 @Composable
-fun PriceSlot(price: Double?, average: Double?) {
+fun PriceSlot(price: Double?, average: Double?, info: app.necessityq.domain.ItemPriceInfo? = null) {
+    // the household's own price wins; otherwise the branch data: chosen product, or the typical range
+    val (main, sub) = when {
+        price != null -> "₪%.2f".format(price) to "ממוצע " + (average?.let { "₪%.2f".format(it) } ?: "—")
+        info?.preferred != null -> app.necessityq.domain.PriceData.formatPrice(info.preferred!!.price) to "המוצר שבחרת"
+        info != null -> app.necessityq.domain.PriceData.formatRange(info.low, info.high).replace("–₪", "–") to
+            (if (info.candidates.size == 1) "מוצר אחד" else "${info.candidates.size} מוצרים")
+        else -> "₪ —" to "ממוצע " + (average?.let { "₪%.2f".format(it) } ?: "—")
+    }
     Column(
         Modifier.widthIn(min = 68.dp).clip(NqShapes.Panel)
             .background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 8.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.End,
     ) {
-        Text(price?.let { "₪%.2f".format(it) } ?: "₪ —", fontWeight = FontWeight.ExtraBold)
-        Text(
-            "ממוצע " + (average?.let { "₪%.2f".format(it) } ?: "—"),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Text(main, fontWeight = FontWeight.ExtraBold)
+        Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

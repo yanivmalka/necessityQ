@@ -46,6 +46,7 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -413,6 +414,61 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             pricesLoading.update { it - branchId }
             loadPrices(branchId, force = true)
         }
+    }
+
+    /** Product the household chose per generic item (optional precision). */
+    val preferredProducts: StateFlow<Map<String, String>> = householdId
+        .flatMapLatest { hid -> if (hid == null) emptyFlow() else container.prices.preferredProducts(hid) }
+        .catch { emit(emptyMap()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    fun setPreferredProduct(itemId: String, code: String?) {
+        val hid = ctx()?.first ?: return
+        launchSafe { container.prices.setPreferredProduct(hid, itemId, code) }
+    }
+
+    /** The branch whose prices the list shows: the first one the household follows. */
+    val primaryBranch: StateFlow<app.necessityq.domain.PriceBranch?> = combine(priceBranches, selectedPriceBranches) { all, ids ->
+        ids.firstNotNullOfOrNull { id -> all.firstOrNull { it.id == id } }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    private val indexCache = mutableMapOf<String, app.necessityq.domain.ProductIndex>()
+
+    private fun indexFor(p: app.necessityq.domain.BranchPrices): app.necessityq.domain.ProductIndex {
+        synchronized(indexCache) {
+            val cached = indexCache[p.branchId]
+            if (cached != null && cached.updatedAtMillis == p.updatedAtMillis) return cached
+            return app.necessityq.domain.ProductIndex(p.branchId, p.updatedAtMillis, p.products).also { indexCache[p.branchId] = it }
+        }
+    }
+
+    /**
+     * Price picture per list item at the primary branch: typical range of the matching products
+     * ("קוטג'" → ₪5.90–₪7.80), or the household's chosen product. Computed off the main thread.
+     */
+    val itemPriceInfo: StateFlow<Map<String, app.necessityq.domain.ItemPriceInfo>> =
+        combine(snapshot, branchPrices, primaryBranch, preferredProducts) { snap, loaded, primary, preferred ->
+            val prices = primary?.let { loaded[it.id] } ?: return@combine emptyMap()
+            val index = indexFor(prices)
+            snap?.lines.orEmpty().distinctBy { it.itemId }.mapNotNull { line ->
+                app.necessityq.domain.ItemPrices.info(index, line.name, line.variant, preferred[line.itemId])?.let { line.itemId to it }
+            }.toMap()
+        }
+            .flowOn(kotlinx.coroutines.Dispatchers.Default)
+            .catch { emit(emptyMap()) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    /** Price picture of any item (also one not on the list right now, e.g. from history). */
+    fun priceInfoFor(itemId: String, name: String, variant: String?): app.necessityq.domain.ItemPriceInfo? {
+        itemPriceInfo.value[itemId]?.let { return it }
+        val primary = primaryBranch.value ?: return null
+        val prices = branchPrices.value[primary.id] ?: return null
+        return app.necessityq.domain.ItemPrices.info(indexFor(prices), name, variant, preferredProducts.value[itemId])
+    }
+
+    init {
+        // the list shows ranges of the primary branch: load its prices as soon as it is known
+        viewModelScope.launch { primaryBranch.collect { b -> b?.let { loadPrices(it.id) } } }
     }
 
     /** Shopping day: branches whose prices are older than 12 hours are refreshed in the background. */

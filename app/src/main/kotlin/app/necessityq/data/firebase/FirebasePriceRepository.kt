@@ -7,6 +7,8 @@ import app.necessityq.domain.PriceBranch
 import app.necessityq.domain.PriceRepository
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldPath
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.functions.FirebaseFunctions
 import com.google.firebase.storage.FirebaseStorage
@@ -37,7 +39,8 @@ import kotlinx.serialization.json.jsonPrimitive
  *   prices/branchIndex                 { updatedAt, cities[], branches[{ id, chainKey, chainName, storeId, name, address, city, lat, lng, approx }] }
  *   priceBranches/{branchId}           { updatedAt, items, error, … }   — freshness per branch
  *   Storage prices/{branchId}.json.gz  { updatedAt, rangeDays, items[{ c, n, b, q, u, w, i, p, up, s, lo, hi, h }] }
- *   households/{hid}/settings/priceBranches { kind: "priceBranches", branchIds[] } — what the server keeps fresh
+ *   households/{hid}/settings/priceBranches { kind: "priceBranches", branchIds[], preferred{itemId: barcode} } — what the server keeps fresh,
+ *                                       and the product the household chose for a generic item (optional)
  * Snapshots are cached in [cacheDir] and downloaded again only when the server's updatedAt changes.
  */
 class FirebasePriceRepository(
@@ -63,7 +66,21 @@ class FirebasePriceRepository(
         }
 
     override suspend fun setSelectedBranches(householdId: String, branchIds: List<String>) {
-        settings(householdId).set(mapOf("kind" to "priceBranches", "branchIds" to branchIds.distinct()))
+        settings(householdId).set(mapOf("kind" to "priceBranches", "branchIds" to branchIds.distinct()), SetOptions.merge())
+    }
+
+    override fun preferredProducts(householdId: String): Flow<Map<String, String>> =
+        settings(householdId).observe().map { doc ->
+            val m = doc.get("preferred") as? Map<*, *> ?: return@map emptyMap<String, String>()
+            m.entries.mapNotNull { e -> val k = e.key as? String; val v = e.value as? String; if (k != null && v != null) k to v else null }.toMap()
+        }
+
+    override suspend fun setPreferredProduct(householdId: String, itemId: String, code: String?) {
+        if (code != null) {
+            settings(householdId).set(mapOf("kind" to "priceBranches", "preferred" to mapOf(itemId to code)), SetOptions.merge())
+        } else {
+            settings(householdId).update(FieldPath.of("preferred", itemId), FieldValue.delete())
+        }
     }
 
     override fun status(branchIds: List<String>): Flow<Map<String, BranchPriceStatus>> {
