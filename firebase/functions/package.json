@@ -3,7 +3,9 @@
   "private": true,
   "description": "Price-transparency ingestion for necessityQ (Cloud Functions, region me-west1)",
   "main": "lib/index.js",
-  "engines": { "node": "22" },
+  "engines": {
+    "node": "22"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
@@ -14,6 +16,7 @@
     "fflate": "^0.8.2",
     "firebase-admin": "^13.4.0",
     "firebase-functions": "^6.4.0",
+    "google-auth-library": "^9.15.1",
     "sax": "^1.4.1"
   },
   "devDependencies": {

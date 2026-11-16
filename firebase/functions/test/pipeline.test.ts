@@ -218,3 +218,18 @@ describe("geocoding input", () => {
     expect(cleanAddress("רח' יפו 97 פינת שטראוס")).toBe("יפו 97");
   });
 });
+
+import { guardConfig, parseNotification, shouldCut } from "../src/budget";
+
+describe("budget kill switch", () => {
+  it("cuts only when the cost reaches the budget and the switch is on", () => {
+    const n = parseNotification({ costAmount: 25.1, budgetAmount: 25, currencyCode: "ILS", alertThresholdExceeded: 1 })!;
+    expect(shouldCut(n, guardConfig(undefined))).toBe(true);
+    expect(shouldCut({ ...n, costAmount: 24.9 }, guardConfig(undefined))).toBe(false);
+    expect(shouldCut(n, guardConfig({ enabled: false }))).toBe(false);
+    expect(shouldCut(n, guardConfig({ cutAtRatio: 2 }))).toBe(false);
+    expect(shouldCut({ ...n, budgetAmount: 0 }, guardConfig(undefined))).toBe(false);
+    expect(parseNotification({ costAmount: "x" })).toBeNull();
+    expect(parseNotification(undefined)).toBeNull();
+  });
+});
