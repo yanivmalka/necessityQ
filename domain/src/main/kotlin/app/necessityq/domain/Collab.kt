@@ -68,7 +68,15 @@ data class ItemMessage(
     val durationMs: Long? = null,
     /** The message this one answers (quoted above it). */
     val replyToId: String? = null,
+    /** Set when the author edited the text (see [MessageRules.EDIT_WINDOW_MS]). */
+    val editedAtMillis: Long? = null,
+    /** Loudness bars (0..100) of a recording, for the waveform display. */
+    val waveform: List<Int>? = null,
+    /** Set when the shopping event of the item ended: the conversation left the list and awaits its retention period. */
+    val archivedAtMillis: Long? = null,
 ) {
+    val isArchived: Boolean get() = archivedAtMillis != null
+
     /** One-line preview for lists, notifications and quotes. */
     val preview: String get() = when (kind) {
         MessageKind.TEXT -> text
@@ -118,6 +126,20 @@ interface CollabRepository {
 
     fun messages(householdId: String): Flow<List<ItemMessage>>
     suspend fun sendMessage(householdId: String, message: ItemMessage)
+    suspend fun editMessage(householdId: String, messageId: String, text: String, editedAtMillis: Long)
+    /** Deletes the messages and their attachments for good (no statistics are kept). */
+    suspend fun deleteMessages(householdId: String, messages: List<ItemMessage>)
+    /** The shopping event of the item ended: its open conversation moves out of the list. */
+    suspend fun archiveConversation(householdId: String, itemId: String, atMillis: Long)
+    /** Undo of [archiveConversation] (only messages archived exactly at [atMillis]). */
+    suspend fun unarchiveConversation(householdId: String, itemId: String, atMillis: Long)
+    /** Retention expired: deletes the messages and adds them to the item's [ChatStats]. */
+    suspend fun purgeMessages(householdId: String, messages: List<ItemMessage>)
+    /** Days an ended conversation is kept (0 = delete at once, -1 = keep); null until known. */
+    fun chatRetentionDays(householdId: String): Flow<Int?>
+    suspend fun setChatRetentionDays(householdId: String, days: Int)
+    /** What remains of deleted conversations, per item. */
+    fun chatStats(householdId: String): Flow<Map<String, ChatStats>>
 
     /** Attachments (kept out of the message documents so the conversation list stays light). */
     suspend fun saveMedia(householdId: String, mediaId: String, authorId: String, media: MediaBlob)
@@ -150,6 +172,36 @@ class InMemoryCollabRepository : CollabRepository {
         favoritesState.update { if (favorite) it + itemId else it - itemId }
     override fun messages(householdId: String): Flow<List<ItemMessage>> = messagesState
     override suspend fun sendMessage(householdId: String, message: ItemMessage) = messagesState.update { it + message }
+
+    override suspend fun editMessage(householdId: String, messageId: String, text: String, editedAtMillis: Long) =
+        messagesState.update { list -> list.map { if (it.id == messageId) it.copy(text = text, editedAtMillis = editedAtMillis) else it } }
+
+    override suspend fun deleteMessages(householdId: String, messages: List<ItemMessage>) {
+        val ids = messages.map { it.id }.toSet()
+        messagesState.update { list -> list.filter { it.id !in ids } }
+    }
+
+    override suspend fun archiveConversation(householdId: String, itemId: String, atMillis: Long) =
+        messagesState.update { list -> list.map { if (it.itemId == itemId && it.archivedAtMillis == null) it.copy(archivedAtMillis = atMillis) else it } }
+
+    override suspend fun unarchiveConversation(householdId: String, itemId: String, atMillis: Long) =
+        messagesState.update { list -> list.map { if (it.itemId == itemId && it.archivedAtMillis == atMillis) it.copy(archivedAtMillis = null) else it } }
+
+    private val statsState = MutableStateFlow<Map<String, ChatStats>>(emptyMap())
+    override suspend fun purgeMessages(householdId: String, messages: List<ItemMessage>) {
+        val ids = messages.map { it.id }.toSet()
+        val existing = messagesState.value.filter { it.id in ids }
+        existing.groupBy { it.itemId }.forEach { (itemId, group) ->
+            val add = ConversationRetention.statsFor(group)
+            statsState.update { it + (itemId to ((it[itemId] ?: ChatStats()) + add)) }
+        }
+        messagesState.update { list -> list.filter { it.id !in ids } }
+    }
+
+    private val retentionState = MutableStateFlow<Int?>(ConversationRetention.DEFAULT_DAYS)
+    override fun chatRetentionDays(householdId: String): Flow<Int?> = retentionState
+    override suspend fun setChatRetentionDays(householdId: String, days: Int) { retentionState.value = days }
+    override fun chatStats(householdId: String): Flow<Map<String, ChatStats>> = statsState
 
     private val media = java.util.concurrent.ConcurrentHashMap<String, MediaBlob>()
     override suspend fun saveMedia(householdId: String, mediaId: String, authorId: String, media: MediaBlob) {

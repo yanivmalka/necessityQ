@@ -5,7 +5,24 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material3.RadioButton
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
+import app.necessityq.domain.ConversationRetention
+import app.necessityq.domain.MessageRules
+import app.necessityq.domain.Waveform
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
@@ -110,6 +127,10 @@ fun ItemSheet(vm: AppViewModel, itemId: String, itemName: String, onDismiss: () 
     val price = prices[itemId]
     var editing by remember { mutableStateOf(false) }
     var editingPrice by remember { mutableStateOf(false) }
+    var confirmDeleteMessage by remember { mutableStateOf<ItemMessage?>(null) }
+    var messageDetails by remember { mutableStateOf<ItemMessage?>(null) }
+    var confirmDeleteChat by remember { mutableStateOf(false) }
+    val chatStats by vm.chatStats.collectAsStateWithLifecycle()
 
     val line = snapshot?.lines?.firstOrNull { it.itemId == itemId && it.status == LineStatus.NEEDED }
     val stats = snapshot?.stats?.get(itemId)
@@ -198,6 +219,9 @@ fun ItemSheet(vm: AppViewModel, itemId: String, itemName: String, onDismiss: () 
                 InfoLine("נקנה", "${s.purchaseDays} פעמים")
             }
             InfoLine("נקנה לאחרונה ב", lastStore)
+            chatStats[itemId]?.let {
+                InfoLine("שיחות קודמות", "${it.messages} הודעות ב-${it.threads.coerceAtLeast(1)} שיחות (נמחקו; נשמרו רק הספירות)")
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("מחיר משוער: ", fontWeight = FontWeight.Bold)
                 Text(price?.let { "₪%.2f".format(it) + unitHint(line?.quantity) } ?: "לא הוזן", Modifier.weight(1f))
@@ -207,15 +231,60 @@ fun ItemSheet(vm: AppViewModel, itemId: String, itemName: String, onDismiss: () 
             HorizontalDivider()
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("שיחה על המוצר", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                if (thread.isNotEmpty()) {
+                    IconButton(onClick = { confirmDeleteChat = true }) {
+                        Icon(Icons.Default.DeleteSweep, contentDescription = "מחיקת כל השיחה")
+                    }
+                }
                 ChatSoundToggle(vm)
             }
             vm.receipts.collectAsStateWithLifecycle()
             var replyTo by remember(itemId) { mutableStateOf<ItemMessage?>(null) }
-            ChatThread(thread, vm = vm, onReply = { replyTo = it })
-            ChatComposer(vm, itemId, line?.displayName ?: itemName, replyTo = replyTo, onReplyDone = { replyTo = null })
+            var editingMessage by remember(itemId) { mutableStateOf<ItemMessage?>(null) }
+            ChatThread(
+                thread, vm = vm,
+                onReply = { replyTo = it; editingMessage = null },
+                onEdit = { editingMessage = it; replyTo = null },
+                onDelete = { confirmDeleteMessage = it },
+                onDetails = { messageDetails = it },
+            )
+            ChatComposer(
+                vm, itemId, line?.displayName ?: itemName,
+                replyTo = replyTo, onReplyDone = { replyTo = null },
+                editing = editingMessage, onEditDone = { editingMessage = null },
+            )
+            Text(
+                "השיחה שייכת לקנייה הנוכחית: כשהפריט נוקה מהרשימה היא עוברת ל\"שיחות מקניות קודמות\" בהודעות.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             androidx.compose.foundation.layout.Spacer(Modifier.padding(bottom = 24.dp))
         }
     }
+
+    confirmDeleteMessage?.let { m ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmDeleteMessage = null },
+            title = { Text("למחוק את ההודעה?") },
+            text = { Text("ההודעה תימחק אצל כל בני הבית ולא ניתן לשחזר אותה.") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { vm.deleteMessage(m); confirmDeleteMessage = null }) { Text("מחיקה") }
+            },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmDeleteMessage = null }) { Text("ביטול") } },
+        )
+    }
+    if (confirmDeleteChat) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmDeleteChat = false },
+            title = { Text("למחוק את כל השיחה?") },
+            text = { Text("${thread.size} הודעות על ${line?.displayName ?: itemName} יימחקו אצל כל בני הבית, כולל תמונות והקלטות.") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { vm.deleteConversation(thread); confirmDeleteChat = false }) { Text("מחיקה") }
+            },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmDeleteChat = false }) { Text("ביטול") } },
+        )
+    }
+    messageDetails?.let { m -> MessageDetailsDialog(vm, m, onDismiss = { messageDetails = null }) }
 
     if (editingPrice) {
         PriceDialog(
@@ -302,9 +371,19 @@ fun ChatSoundToggle(vm: AppViewModel) {
     }
 }
 
+private val fullFormat = DateTimeFormatter.ofPattern("d.M.yyyy HH:mm")
+private fun fullFmt(millis: Long) = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).format(fullFormat)
+
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun ChatThread(thread: List<ItemMessage>, vm: AppViewModel, onReply: (ItemMessage) -> Unit) {
+private fun ChatThread(
+    thread: List<ItemMessage>,
+    vm: AppViewModel,
+    onReply: (ItemMessage) -> Unit,
+    onEdit: (ItemMessage) -> Unit,
+    onDelete: (ItemMessage) -> Unit,
+    onDetails: (ItemMessage) -> Unit,
+) {
     if (thread.isEmpty()) {
         Text(
             "אין עדיין הודעות. כתבו שאלה, צלמו תמונה או הקליטו הודעה — וכל בני הבית יראו.",
@@ -315,54 +394,132 @@ private fun ChatThread(thread: List<ItemMessage>, vm: AppViewModel, onReply: (It
     val byId = thread.associateBy { it.id }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         thread.forEach { m ->
-            val mine = m.authorId == vm.me
-            Column(
-                Modifier.fillMaxWidth(0.85f)
-                    .align(if (mine) Alignment.Start else Alignment.End)
-                    .background(
-                        if (mine) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                        RoundedCornerShape(12.dp),
-                    )
-                    .combinedClickable(onClick = {}, onLongClick = { onReply(m) })
-                    .padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 6.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "${if (mine) "אני" else m.authorName} · ${fmt(m.atMillis)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.weight(1f),
-                    )
-                    IconButton(onClick = { onReply(m) }, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = "תגובה להודעה", Modifier.size(18.dp))
-                    }
-                }
-                m.replyToId?.let { id ->
-                    val quoted = byId[id]
-                    Column(
-                        Modifier.padding(end = 6.dp, bottom = 4.dp).fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 8.dp, vertical = 3.dp),
-                    ) {
-                        Text(
-                            quoted?.let { if (it.authorId == vm.me) "אני" else it.authorName } ?: "הודעה",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold,
+            androidx.compose.runtime.key(m.id) {
+                val mine = m.authorId == vm.me
+                var menu by remember { mutableStateOf(false) }
+                Column(
+                    Modifier.fillMaxWidth(0.85f)
+                        .align(if (mine) Alignment.Start else Alignment.End)
+                        .background(
+                            if (mine) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                            RoundedCornerShape(12.dp),
                         )
-                        Text(quoted?.preview ?: "ההודעה המקורית אינה זמינה", style = MaterialTheme.typography.bodySmall, maxLines = 2)
+                        .combinedClickable(onClick = {}, onLongClick = { menu = true })
+                        .padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 6.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            buildString {
+                                append(if (mine) "אני" else m.authorName)
+                                append(" · ").append(fmt(m.atMillis))
+                                m.editedAtMillis?.let { append(" · נערכה ").append(fmt(it)) }
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = { onReply(m) }, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = "תגובה להודעה", Modifier.size(18.dp))
+                        }
+                        Box {
+                            IconButton(onClick = { menu = true }, modifier = Modifier.size(32.dp)) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "פעולות על ההודעה", Modifier.size(18.dp))
+                            }
+                            androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text("פרטי הודעה") },
+                                    leadingIcon = { Icon(Icons.Default.Info, null) },
+                                    onClick = { menu = false; onDetails(m) },
+                                )
+                                val now = System.currentTimeMillis()
+                                if (MessageRules.canEdit(m, vm.me, now)) {
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = { Text("עריכה (עוד ${MessageRules.minutesLeft(m, now)} דק')") },
+                                        leadingIcon = { Icon(Icons.Default.Edit, null) },
+                                        onClick = { menu = false; onEdit(m) },
+                                    )
+                                }
+                                if (MessageRules.canDelete(m, vm.me)) {
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = { Text("מחיקה") },
+                                        leadingIcon = { Icon(Icons.Default.Delete, null) },
+                                        onClick = { menu = false; onDelete(m) },
+                                    )
+                                }
+                            }
+                        }
                     }
+                    m.replyToId?.let { id ->
+                        val quoted = byId[id]
+                        Column(
+                            Modifier.padding(end = 6.dp, bottom = 4.dp).fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 3.dp),
+                        ) {
+                            Text(
+                                quoted?.let { if (it.authorId == vm.me) "אני" else it.authorName } ?: "הודעה",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(quoted?.preview ?: "ההודעה המקורית אינה זמינה", style = MaterialTheme.typography.bodySmall, maxLines = 2)
+                        }
+                    }
+                    when (m.kind) {
+                        MessageKind.IMAGE -> m.mediaId?.let { ImageAttachment(vm, it) }
+                        MessageKind.AUDIO -> m.mediaId?.let { AudioAttachment(vm, it, m.durationMs, m.waveform) }
+                        MessageKind.TEXT -> Unit
+                    }
+                    if (m.text.isNotBlank()) Text(m.text, Modifier.padding(end = 6.dp))
+                    if (mine) Box(Modifier.align(Alignment.End).padding(end = 6.dp)) { DeliveryTicks(vm.deliveryStatus(m)) }
                 }
-                when (m.kind) {
-                    MessageKind.IMAGE -> m.mediaId?.let { ImageAttachment(vm, it) }
-                    MessageKind.AUDIO -> m.mediaId?.let { AudioAttachment(vm, it, m.durationMs) }
-                    MessageKind.TEXT -> Unit
-                }
-                if (m.text.isNotBlank()) Text(m.text, Modifier.padding(end = 6.dp))
-                if (mine) Box(Modifier.align(Alignment.End).padding(end = 6.dp)) { DeliveryTicks(vm.deliveryStatus(m)) }
             }
         }
     }
+}
+
+/** Who wrote the message, when it was sent / edited, and who received and read it. */
+@Composable
+private fun MessageDetailsDialog(vm: AppViewModel, m: ItemMessage, onDismiss: () -> Unit) {
+    val names by vm.memberNames.collectAsStateWithLifecycle()
+    vm.receipts.collectAsStateWithLifecycle() // recompose when someone reads it
+    val receipts = vm.receiptDetails(m)
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("פרטי הודעה") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.verticalScroll(rememberScrollState())) {
+                InfoLine("נכתבה על ידי", if (m.authorId == vm.me) "אני" else (names[m.authorId] ?: m.authorName))
+                InfoLine("נשלחה", fullFmt(m.atMillis))
+                m.editedAtMillis?.let { InfoLine("נערכה", fullFmt(it)) }
+                if (m.pending) Text("ממתינה לשליחה (אין חיבור).", style = MaterialTheme.typography.bodySmall)
+                HorizontalDivider()
+                Text("מי קיבל וקרא", fontWeight = FontWeight.Bold)
+                if (receipts.isEmpty()) Text("אין עוד משתתפים בבית.", style = MaterialTheme.typography.bodySmall)
+                receipts.forEach { r ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(28.dp), contentAlignment = Alignment.Center) { DeliveryTicks(r.state) }
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                if (r.userId == vm.me) "אני" else (names[r.userId] ?: "משתתף"),
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                when (r.state) {
+                                    app.necessityq.domain.DeliveryStatus.READ -> "קרא/ה · פתח/ה את השיחה ב-${fullFmt(r.atMillis ?: 0L)}"
+                                    app.necessityq.domain.DeliveryStatus.DELIVERED -> "התקבלה · ${fullFmt(r.atMillis ?: 0L)}"
+                                    else -> "נשלחה, טרם התקבלה"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("סגירה") } },
+    )
 }
 
 @Composable
@@ -392,13 +549,30 @@ private fun ImageAttachment(vm: AppViewModel, mediaId: String) {
     }
 }
 
+/** Play / stop, loudness bars with a dot at the running time (tap the bars to jump), and the time. */
 @Composable
-private fun AudioAttachment(vm: AppViewModel, mediaId: String, durationMs: Long?) {
+private fun AudioAttachment(vm: AppViewModel, mediaId: String, durationMs: Long?, waveform: List<Int>?) {
     val scope = rememberCoroutineScope()
     var playing by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(false) }
+    var position by remember { mutableLongStateOf(0L) }
+    val total = durationMs ?: 0L
+    val progress = if (playing && total > 0) (position.toFloat() / total).coerceIn(0f, 1f) else 0f
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val played = MaterialTheme.colorScheme.primary
+    val rest = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+    // recordings from before the waveform existed get a neutral shape
+    val bars = waveform ?: remember { List(Waveform.BARS) { 25 + (it * 7 % 5) * 8 } }
+
+    LaunchedEffect(playing) {
+        while (playing) {
+            position = vm.player.position()
+            kotlinx.coroutines.delay(60)
+        }
+        position = 0L
+    }
     DisposableEffect(mediaId) { onDispose { if (vm.player.playingId == mediaId) vm.player.stop() } }
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 6.dp)) {
         IconButton(onClick = {
             if (playing) {
                 vm.player.stop(); playing = false
@@ -423,18 +597,60 @@ private fun AudioAttachment(vm: AppViewModel, mediaId: String, durationMs: Long?
                 else -> Icon(Icons.Default.PlayArrow, contentDescription = "השמעה")
             }
         }
-        Text("🎤 " + (durationMs?.let { ItemMessage.formatDuration(it) } ?: "הקלטה"))
+        Canvas(
+            Modifier.weight(1f).height(36.dp).pointerInput(playing, total, rtl) {
+                detectTapGestures { offset ->
+                    if (playing && total > 0) {
+                        val f = (offset.x / size.width).coerceIn(0f, 1f).let { if (rtl) 1f - it else it }
+                        vm.player.seekTo((f * total).toInt())
+                    }
+                }
+            },
+        ) {
+            val n = bars.size
+            val slot = size.width / n
+            val barW = slot * 0.55f
+            fun xOf(t: Float) = (if (rtl) 1f - t else t) * size.width
+            bars.forEachIndexed { i, level ->
+                val t = (i + 0.5f) / n
+                val h = (size.height * level / 100f).coerceAtLeast(4.dp.toPx())
+                drawRoundRect(
+                    color = if (t <= progress) played else rest,
+                    topLeft = Offset(xOf(t) - barW / 2, (size.height - h) / 2),
+                    size = Size(barW, h),
+                    cornerRadius = CornerRadius(barW / 2),
+                )
+            }
+            val r = 6.dp.toPx()
+            drawCircle(played, radius = r, center = Offset(xOf(progress).coerceIn(r, size.width - r), size.height / 2))
+        }
+        Text(
+            if (playing) ItemMessage.formatDuration(position) + " / " + ItemMessage.formatDuration(total) else ItemMessage.formatDuration(total),
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(start = 6.dp),
+        )
     }
 }
 
-/** Text box with picture, camera and voice; shows the message being answered above it. */
+/** Text box with picture, camera and voice; shows the message being answered or edited above it. */
 @Composable
-private fun ChatComposer(vm: AppViewModel, itemId: String, itemName: String, replyTo: ItemMessage?, onReplyDone: () -> Unit) {
+private fun ChatComposer(
+    vm: AppViewModel,
+    itemId: String,
+    itemName: String,
+    replyTo: ItemMessage?,
+    onReplyDone: () -> Unit,
+    editing: ItemMessage?,
+    onEditDone: () -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var draft by remember(itemId) { mutableStateOf("") }
     var recording by remember { mutableStateOf(false) }
     var elapsed by remember { mutableStateOf(0L) }
+
+    // starting an edit puts the message text in the box
+    LaunchedEffect(editing?.id) { if (editing != null) draft = editing.text }
 
     fun sendImage(bitmap: android.graphics.Bitmap?) {
         if (bitmap == null) return
@@ -444,6 +660,14 @@ private fun ChatComposer(vm: AppViewModel, itemId: String, itemName: String, rep
             draft = ""
             onReplyDone()
         }
+    }
+
+    fun sendRecording(r: app.necessityq.platform.VoiceRecorder.Recording) {
+        vm.sendMedia(
+            itemId, itemName, MessageKind.AUDIO, MediaBlob("audio/mp4", r.bytes),
+            durationMs = r.durationMs, replyToId = replyTo?.id, waveform = r.waveform,
+        )
+        onReplyDone()
     }
 
     val gallery = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -463,14 +687,12 @@ private fun ChatComposer(vm: AppViewModel, itemId: String, itemName: String, rep
     }
     LaunchedEffect(recording) {
         while (recording) {
-            kotlinx.coroutines.delay(250)
-            elapsed += 250
+            kotlinx.coroutines.delay(app.necessityq.platform.VoiceRecorder.SAMPLE_MS)
+            vm.recorder.sample()
+            elapsed += app.necessityq.platform.VoiceRecorder.SAMPLE_MS
             if (elapsed >= app.necessityq.platform.VoiceRecorder.MAX_MS) {
                 recording = false
-                vm.recorder.stop()?.let { (bytes, ms) ->
-                    vm.sendMedia(itemId, itemName, MessageKind.AUDIO, MediaBlob("audio/mp4", bytes), durationMs = ms, replyToId = replyTo?.id)
-                    onReplyDone()
-                }
+                vm.recorder.stop()?.let { sendRecording(it) }
             }
         }
     }
@@ -490,6 +712,23 @@ private fun ChatComposer(vm: AppViewModel, itemId: String, itemName: String, rep
             IconButton(onClick = onReplyDone) { Icon(Icons.Default.Close, contentDescription = "ביטול התגובה") }
         }
     }
+    editing?.let { m ->
+        Row(
+            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.tertiaryContainer, RoundedCornerShape(10.dp))
+                .padding(start = 10.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Default.Edit, null, Modifier.size(18.dp))
+            Column(Modifier.weight(1f).padding(horizontal = 6.dp)) {
+                Text("עריכת הודעה", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                Text(
+                    "אפשר לערוך עוד ${MessageRules.minutesLeft(m, System.currentTimeMillis())} דק'",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            IconButton(onClick = { draft = ""; onEditDone() }) { Icon(Icons.Default.Close, contentDescription = "ביטול העריכה") }
+        }
+    }
 
     if (recording) {
         Row(
@@ -505,34 +744,35 @@ private fun ChatComposer(vm: AppViewModel, itemId: String, itemName: String, rep
             IconButton(onClick = {
                 recording = false
                 val result = vm.recorder.stop()
-                if (result == null) vm.reportError("ההקלטה קצרה מדי")
-                else {
-                    vm.sendMedia(itemId, itemName, MessageKind.AUDIO, MediaBlob("audio/mp4", result.first), durationMs = result.second, replyToId = replyTo?.id)
-                    onReplyDone()
-                }
+                if (result == null) vm.reportError("ההקלטה קצרה מדי") else sendRecording(result)
             }) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "שליחת ההקלטה") }
         }
         return
     }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = { gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
-            Icon(Icons.Default.PhotoLibrary, contentDescription = "שליחת תמונה מהגלריה")
+        if (editing == null) {
+            IconButton(onClick = { gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
+                Icon(Icons.Default.PhotoLibrary, contentDescription = "שליחת תמונה מהגלריה")
+            }
+            IconButton(onClick = { camera.launch(null) }) { Icon(Icons.Default.PhotoCamera, contentDescription = "צילום תמונה") }
         }
-        IconButton(onClick = { camera.launch(null) }) { Icon(Icons.Default.PhotoCamera, contentDescription = "צילום תמונה") }
         OutlinedTextField(
             draft, { draft = it },
             modifier = Modifier.weight(1f),
-            placeholder = { Text(if (replyTo != null) "תגובה…" else "למשל: לקנות את הגדול?") },
+            placeholder = { Text(if (editing != null) "עריכה…" else if (replyTo != null) "תגובה…" else "למשל: לקנות את הגדול?") },
             maxLines = 4,
         )
-        if (draft.isBlank()) {
-            IconButton(onClick = {
+        when {
+            editing != null -> IconButton(
+                enabled = draft.isNotBlank() || editing.kind != MessageKind.TEXT,
+                onClick = { vm.editMessage(editing, draft); draft = ""; onEditDone() },
+            ) { Icon(Icons.Default.Check, contentDescription = "שמירת העריכה") }
+            draft.isBlank() -> IconButton(onClick = {
                 val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
                 if (granted) startRecording() else micPermission.launch(Manifest.permission.RECORD_AUDIO)
             }) { Icon(Icons.Default.Mic, contentDescription = "הקלטת הודעה") }
-        } else {
-            IconButton(onClick = {
+            else -> IconButton(onClick = {
                 vm.sendMessage(itemId, itemName, draft, replyTo?.id)
                 draft = ""
                 onReplyDone()
@@ -543,30 +783,55 @@ private fun ChatComposer(vm: AppViewModel, itemId: String, itemName: String, rep
 
 // ---------- messages hub ----------
 
-/** All product conversations in one place, newest first, with unread counts. */
+private val dayFormat = DateTimeFormatter.ofPattern("d.M")
+private fun fmtDay(millis: Long) = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).format(dayFormat)
+
+private fun retentionText(days: Int?): String = when {
+    days == null -> ""
+    days < 0 -> "שיחות שהסתיימו נשמרות ללא הגבלה."
+    days == 0 -> "שיחות שהסתיימו נמחקות מיד; נשארות רק סטטיסטיקות."
+    else -> "שיחות שהסתיימו נשמרות $days ימים ואז נמחקות; נשארות רק סטטיסטיקות."
+}
+
+/**
+ * All product conversations of the current shopping, newest first, with unread counts — and below them
+ * the conversations of finished shoppings, which wait out the retention period before they are deleted.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MessagesScreen(vm: AppViewModel, modifier: Modifier = Modifier, onOpen: (itemId: String, itemName: String) -> Unit) {
     val all by vm.itemMessages.collectAsStateWithLifecycle()
+    val archived by vm.archivedMessages.collectAsStateWithLifecycle()
+    val retention by vm.chatRetention.collectAsStateWithLifecycle()
     vm.unreadTotal.collectAsStateWithLifecycle() // recompose when read markers change
     val threads = all.groupBy { it.itemId }.values
         .map { it.maxBy { m -> m.atMillis } to it }
         .sortedByDescending { it.first.atMillis }
+    val archivedThreads = archived.groupBy { it.itemId to it.archivedAtMillis }.values
+        .map { group -> group.sortedBy { it.atMillis } }
+        .sortedByDescending { it.last().archivedAtMillis ?: 0L }
+    var showRetention by remember { mutableStateOf(false) }
+    var openArchived by remember { mutableStateOf<List<ItemMessage>?>(null) }
+    var confirmDelete by remember { mutableStateOf<List<ItemMessage>?>(null) }
 
     Column(modifier.fillMaxSize()) {
         TopAppBar(
             navigationIcon = { DrawerButton() },
             title = { Text("הודעות על מוצרים", fontWeight = FontWeight.ExtraBold) },
-            actions = { ChatSoundToggle(vm) },
+            actions = {
+                IconButton(onClick = { showRetention = true }) { Icon(Icons.Default.Schedule, contentDescription = "משך שמירת שיחות שהסתיימו") }
+                ChatSoundToggle(vm)
+            },
         )
-        if (threads.isEmpty()) {
-            Text(
-                "כאן יופיעו כל השיחות על מוצרים. פותחים שיחה בהקשה על מוצר ברשימה.",
-                Modifier.padding(16.dp),
-            )
-            return
-        }
         LazyColumn {
+            if (threads.isEmpty()) {
+                item(key = "empty") {
+                    Text(
+                        "כאן יופיעו שיחות הקנייה הנוכחית. פותחים שיחה בהקשה על מוצר ברשימה.",
+                        Modifier.padding(16.dp),
+                    )
+                }
+            }
             items(threads, key = { it.first.itemId }) { (last, _) ->
                 val unread = vm.unreadCount(last.itemId, all)
                 Row(
@@ -586,6 +851,101 @@ fun MessagesScreen(vm: AppViewModel, modifier: Modifier = Modifier, onOpen: (ite
                 }
                 HorizontalDivider()
             }
+            if (archivedThreads.isNotEmpty()) {
+                item(key = "archived_title") {
+                    Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 6.dp)) {
+                        Text("שיחות מקניות קודמות (${archivedThreads.size})", style = MaterialTheme.typography.titleSmall)
+                        Text(retentionText(retention), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                items(archivedThreads, key = { "arch_${it.first().itemId}_${it.last().archivedAtMillis}" }) { thread ->
+                    val last = thread.last()
+                    Row(
+                        Modifier.fillMaxWidth().clickable { openArchived = thread }.padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(last.itemName, style = MaterialTheme.typography.titleMedium)
+                            Text("${last.authorName}: ${last.preview}", maxLines = 1, style = MaterialTheme.typography.bodyMedium)
+                            val endedAt = last.archivedAtMillis ?: 0L
+                            val deleteAt = retention?.let { ConversationRetention.deleteAt(endedAt, it) }
+                            Text(
+                                "${thread.size} הודעות · הסתיימה ${fmtDay(endedAt)}" + (deleteAt?.let { " · תימחק ב-${fmtDay(it)}" } ?: ""),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        IconButton(onClick = { confirmDelete = thread }) { Icon(Icons.Default.Delete, contentDescription = "מחיקת השיחה") }
+                    }
+                    HorizontalDivider()
+                }
+            }
         }
+    }
+
+    openArchived?.let { thread ->
+        ModalBottomSheet(onDismissRequest = { openArchived = null }) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(thread.last().itemName, style = MaterialTheme.typography.titleLarge)
+                thread.forEach { m ->
+                    Column {
+                        Text(
+                            "${if (m.authorId == vm.me) "אני" else m.authorName} · ${fmt(m.atMillis)}" +
+                                (m.editedAtMillis?.let { " · נערכה ${fmt(it)}" } ?: ""),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(m.preview)
+                    }
+                }
+                OutlinedButton(onClick = { confirmDelete = thread; openArchived = null }, modifier = Modifier.fillMaxWidth()) {
+                    Text("מחיקת השיחה")
+                }
+                androidx.compose.foundation.layout.Spacer(Modifier.padding(bottom = 24.dp))
+            }
+        }
+    }
+    confirmDelete?.let { thread ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmDelete = null },
+            title = { Text("למחוק את השיחה?") },
+            text = { Text("${thread.size} הודעות על ${thread.last().itemName} יימחקו אצל כל בני הבית, כולל תמונות והקלטות.") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { vm.deleteConversation(thread); confirmDelete = null }) { Text("מחיקה") }
+            },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmDelete = null }) { Text("ביטול") } },
+        )
+    }
+    if (showRetention) {
+        val options = listOf(
+            0 to "מיד כשהקנייה מסתיימת",
+            7 to "שבוע",
+            30 to "30 ימים",
+            90 to "90 ימים",
+            -1 to "ללא הגבלה",
+        )
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showRetention = false },
+            title = { Text("כמה זמן לשמור שיחות שהסתיימו?") },
+            text = {
+                Column {
+                    Text(
+                        "שיחה שייכת לקנייה. כשהפריט נוקה מהרשימה (או שהרשימה אופסה) השיחה יוצאת מהרשימה, " +
+                            "ואחרי הזמן שנבחר היא נמחקת ונשארים רק נתונים סטטיסטיים: כמה הודעות ושיחות היו על כל מוצר. ההגדרה משותפת לכל בני הבית.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    options.forEach { (days, label) ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { vm.setChatRetention(days); showRetention = false },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RadioButton(selected = retention == days, onClick = { vm.setChatRetention(days); showRetention = false })
+                            Text(label)
+                        }
+                    }
+                }
+            },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { showRetention = false }) { Text("סגירה") } },
+        )
     }
 }

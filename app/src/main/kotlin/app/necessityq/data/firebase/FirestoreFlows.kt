@@ -25,8 +25,9 @@ internal fun Query.observe(includeMetadata: Boolean = false): Flow<QuerySnapshot
     awaitClose { registration.remove() }
 }
 
-internal fun DocumentReference.observe(): Flow<DocumentSnapshot> = callbackFlow {
-    val registration = addSnapshotListener { snapshot, error ->
+internal fun DocumentReference.observe(includeMetadata: Boolean = false): Flow<DocumentSnapshot> = callbackFlow {
+    val changes = if (includeMetadata) com.google.firebase.firestore.MetadataChanges.INCLUDE else com.google.firebase.firestore.MetadataChanges.EXCLUDE
+    val registration = addSnapshotListener(changes) { snapshot, error ->
         if (error != null) {
             close(error)
             return@addSnapshotListener

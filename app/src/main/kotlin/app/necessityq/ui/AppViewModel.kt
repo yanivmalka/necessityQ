@@ -153,7 +153,13 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         val bought = lines.filter { it.status == LineStatus.BOUGHT }
         launchSafe { container.service.clearBought(hid, lines) }
         if (bought.isNotEmpty()) {
-            _undo.tryEmit(UndoEvent("${bought.size} פריטים שנקנו עברו לסל המחזור") { bought.forEach { restore(it, LineStatus.BOUGHT) } })
+            val undoChats = archiveChats(bought.map { it.itemId }, lines.filter { it.status == LineStatus.NEEDED })
+            _undo.tryEmit(
+                UndoEvent("${bought.size} פריטים שנקנו עברו לסל המחזור") {
+                    bought.forEach { restore(it, LineStatus.BOUGHT) }
+                    undoChats?.invoke()
+                },
+            )
         }
     }
 
@@ -179,8 +185,18 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         val (hid, _, lines) = ctx() ?: return
         launchSafe {
             val moved = container.service.resetList(hid, scope, lines)
-            if (moved.isEmpty()) _messages.tryEmit("אין מה לאפס")
-            else _undo.tryEmit(UndoEvent("${moved.size} פריטים עברו לסל המחזור") { moved.forEach { restore(it, it.status) } })
+            if (moved.isEmpty()) {
+                _messages.tryEmit("אין מה לאפס")
+            } else {
+                val movedIds = moved.map { it.id }.toSet()
+                val undoChats = archiveChats(moved.map { it.itemId }, lines.filter { it.id !in movedIds })
+                _undo.tryEmit(
+                    UndoEvent("${moved.size} פריטים עברו לסל המחזור") {
+                        moved.forEach { restore(it, it.status) }
+                        undoChats?.invoke()
+                    },
+                )
+            }
         }
     }
 
@@ -390,10 +406,37 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     val me: String get() = (session.value as? Session.SignedIn)?.userId.orEmpty()
 
-    val itemMessages: StateFlow<List<ItemMessage>> = householdId
+    private val allMessages: StateFlow<List<ItemMessage>> = householdId
         .flatMapLatest { hid -> if (hid == null) emptyFlow() else container.collab.messages(hid) }
         .catch { emit(emptyList()) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** Conversations of the current shopping event (what the list and the messages screen show). */
+    val itemMessages: StateFlow<List<ItemMessage>> = allMessages
+        .map { all -> all.filter { !it.isArchived } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** Conversations of finished shopping events, kept until their retention period ends. */
+    val archivedMessages: StateFlow<List<ItemMessage>> = allMessages
+        .map { all -> all.filter { it.isArchived } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** Days an ended conversation is kept; null until confirmed by the server. */
+    val chatRetention: StateFlow<Int?> = householdId
+        .flatMapLatest { hid -> if (hid == null) emptyFlow() else container.collab.chatRetentionDays(hid) }
+        .catch { }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** What is left of deleted conversations, per item. */
+    val chatStats: StateFlow<Map<String, app.necessityq.domain.ChatStats>> = householdId
+        .flatMapLatest { hid -> if (hid == null) emptyFlow() else container.collab.chatStats(hid) }
+        .catch { emit(emptyMap()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    fun setChatRetention(days: Int) {
+        val (hid, _, _) = ctx() ?: return
+        launchSafe { container.collab.setChatRetentionDays(hid, days) }
+    }
 
     val notifySettings: StateFlow<NotifySettings> = householdId
         .flatMapLatest { hid -> if (hid == null) emptyFlow() else container.collab.notifySettings(hid) }
@@ -454,6 +497,54 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** Edits the text of an own message; only within [app.necessityq.domain.MessageRules.EDIT_WINDOW_MS] of writing it. */
+    fun editMessage(message: ItemMessage, text: String) {
+        val (hid, uid, _) = ctx() ?: return
+        val clean = text.trim()
+        if (clean == message.text) return
+        if (message.kind == app.necessityq.domain.MessageKind.TEXT && clean.isEmpty()) return
+        val now = System.currentTimeMillis()
+        if (!app.necessityq.domain.MessageRules.canEdit(message, uid, now)) {
+            _messages.tryEmit("אפשר לערוך הודעה רק עד 15 דקות מהכתיבה"); return
+        }
+        launchSafe { container.collab.editMessage(hid, message.id, clean, now) }
+    }
+
+    fun deleteMessage(message: ItemMessage) {
+        val (hid, uid, _) = ctx() ?: return
+        if (!app.necessityq.domain.MessageRules.canDelete(message, uid)) return
+        launchSafe { container.collab.deleteMessages(hid, listOf(message)) }
+    }
+
+    /** Deletes a whole conversation (the open one of an item, or an archived one). */
+    fun deleteConversation(messages: List<ItemMessage>) {
+        val (hid, _, _) = ctx() ?: return
+        if (messages.isEmpty()) return
+        launchSafe {
+            container.collab.deleteMessages(hid, messages)
+            _messages.tryEmit("השיחה נמחקה")
+        }
+    }
+
+    /** Who received / read a message, and when. */
+    fun receiptDetails(m: ItemMessage): List<app.necessityq.domain.MemberReceipt> =
+        app.necessityq.domain.ReceiptDetails.of(m, memberNames.value.keys, receipts.value)
+
+    /**
+     * The shopping event of these items ended (lines cleared or list reset): their conversations leave
+     * the list and wait out the retention period. Items still open on the list keep their conversation.
+     */
+    private fun archiveChats(itemIds: Collection<String>, remainingOpen: List<ListLine>): (() -> Unit)? {
+        val (hid, _, _) = ctx() ?: return null
+        val open = remainingOpen.filter { it.status == LineStatus.NEEDED }.map { it.itemId }.toSet()
+        val withChat = itemMessages.value.map { it.itemId }.toSet()
+        val targets = itemIds.toSet().filter { it !in open && it in withChat }
+        if (targets.isEmpty()) return null
+        val at = System.currentTimeMillis()
+        launchSafe { targets.forEach { container.collab.archiveConversation(hid, it, at) } }
+        return { launchSafe { targets.forEach { container.collab.unarchiveConversation(hid, it, at) } } }
+    }
+
     /** Sends a picture or a recording: the bytes first, then the message that points at them. */
     fun sendMedia(
         itemId: String,
@@ -463,6 +554,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         caption: String = "",
         durationMs: Long? = null,
         replyToId: String? = null,
+        waveform: List<Int>? = null,
     ) {
         val (hid, uid, _) = ctx() ?: return
         if (media.bytes.size > 900_000) { _messages.tryEmit("הקובץ גדול מדי לשליחה"); return }
@@ -474,7 +566,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                 hid,
                 ItemMessage(
                     java.util.UUID.randomUUID().toString(), itemId, itemName, uid, authorName(uid), caption.trim(),
-                    System.currentTimeMillis(), kind = kind, mediaId = mediaId, durationMs = durationMs, replyToId = replyToId,
+                    System.currentTimeMillis(), kind = kind, mediaId = mediaId, durationMs = durationMs, replyToId = replyToId, waveform = waveform,
                 ),
             )
         }
@@ -511,6 +603,20 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     init { checkStorePrompt() }
+
+    init {
+        // Retention: ended conversations older than the household's setting are deleted; only counts stay.
+        viewModelScope.launch {
+            combine(archivedMessages, chatRetention) { archived, days ->
+                if (days == null) emptyList()
+                else app.necessityq.domain.ConversationRetention.expired(archived, days, System.currentTimeMillis())
+            }.collect { expired ->
+                if (expired.isEmpty()) return@collect
+                val (hid, _, _) = ctx() ?: return@collect
+                runCatching { container.collab.purgeMessages(hid, expired) }
+            }
+        }
+    }
 
     private var seenMessages: Set<String>? = null
     private var seenMissing: Set<String>? = null

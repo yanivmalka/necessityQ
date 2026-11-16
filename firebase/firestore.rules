@@ -55,11 +55,14 @@ service cloud.firestore {
       match /stores/{id} { allow read, write: if isMember(hid); }
       match /itemMeta/{id} { allow read, write: if isMember(hid); }
       match /settings/{id} { allow read, write: if isMember(hid); }
-      // item conversations: members write as themselves; only the author may edit or delete
+      // item conversations: members write as themselves; only the author edits; any member may archive
+      // (the shopping event ended) and delete (clearing a conversation)
       match /messages/{id} {
         allow read: if isMember(hid);
         allow create: if isMember(hid) && request.resource.data.authorId == uid();
-        allow update, delete: if isMember(hid) && resource.data.authorId == uid();
+        allow update: if isMember(hid) && (resource.data.authorId == uid()
+          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['archivedAt']));
+        allow delete: if isMember(hid);
       }
 
       // pictures / recordings of messages: written once by their author, readable by members
@@ -67,7 +70,7 @@ service cloud.firestore {
         allow read: if isMember(hid);
         allow create: if isMember(hid) && request.resource.data.by == uid();
         allow update: if false;
-        allow delete: if isMember(hid) && resource.data.by == uid();
+        allow delete: if isMember(hid);
       }
 
       // read receipts: each member writes only their own
