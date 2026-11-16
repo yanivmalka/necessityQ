@@ -134,10 +134,27 @@ data class ListFilter(
     val source: SourceFilter = SourceFilter.ALL,
     val categories: Set<Category> = emptySet(),
     val missingOnly: Boolean = false,
+    /** Only products that have a conversation in the current shopping. */
+    val withChatOnly: Boolean = false,
 ) {
-    val isActive: Boolean get() = text.isNotBlank() || source != SourceFilter.ALL || categories.isNotEmpty() || missingOnly
+    val isActive: Boolean
+        get() = text.isNotBlank() || source != SourceFilter.ALL || categories.isNotEmpty() || missingOnly || withChatOnly
 
-    fun matches(line: ListLine): Boolean {
+    /** What is being filtered, in words (null when nothing is). Shown while the filter controls are hidden. */
+    fun summary(): String? {
+        if (!isActive) return null
+        val parts = buildList {
+            if (text.isNotBlank()) add("חיפוש \"${text.trim()}\"")
+            if (source != SourceFilter.ALL) add(source.label)
+            if (missingOnly) add("חסרים")
+            if (withChatOnly) add("עם שיחה")
+            if (categories.isNotEmpty()) add(categories.sortedBy { it.order }.joinToString(", ") { it.label })
+        }
+        return parts.joinToString(" · ")
+    }
+
+    fun matches(line: ListLine, chatItemIds: Set<String> = emptySet()): Boolean {
+        if (withChatOnly && line.itemId !in chatItemIds) return false
         if (text.isNotBlank() && !HebrewText.matchKey(line.displayName).contains(HebrewText.matchKey(text))) return false
         when (source) {
             SourceFilter.ALL -> Unit
@@ -150,8 +167,8 @@ data class ListFilter(
     }
 
     /** Applies to open lines only; bought and removed lines pass through untouched. */
-    fun apply(lines: List<ListLine>): List<ListLine> =
-        if (!isActive) lines else lines.filter { it.status != LineStatus.NEEDED || matches(it) }
+    fun apply(lines: List<ListLine>, chatItemIds: Set<String> = emptySet()): List<ListLine> =
+        if (!isActive) lines else lines.filter { it.status != LineStatus.NEEDED || matches(it, chatItemIds) }
 }
 
 // ---------- estimated total ----------
