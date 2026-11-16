@@ -46,6 +46,7 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
@@ -231,6 +232,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         sort.value = prefs.sortFor(value)
         descending.value = prefs.descendingFor(value)
         checkStorePrompt()
+        if (value == ListMode.SHOP) refreshStalePricesForShopping()
     }
 
     /** Sort direction (per stage of use). */
@@ -343,6 +345,88 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun setPrice(itemId: String, price: Double?) {
         val (hid, _, _) = ctx() ?: return
         launchSafe { container.collab.setPrice(hid, itemId, price?.takeIf { it > 0 }) }
+    }
+
+    // ---------- price data (branches near the user, products and price ranges) ----------
+
+    val priceBranches: StateFlow<List<app.necessityq.domain.PriceBranch>> = container.prices.branches()
+        .catch { emit(emptyList()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val selectedPriceBranches: StateFlow<List<String>> = householdId
+        .flatMapLatest { hid -> if (hid == null) emptyFlow() else container.prices.selectedBranches(hid) }
+        .catch { emit(emptyList()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val priceStatus: StateFlow<Map<String, app.necessityq.domain.BranchPriceStatus>> = selectedPriceBranches
+        .flatMapLatest { ids -> container.prices.status(ids) }
+        .catch { emit(emptyMap()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    /** The device position used to sort branches (null without permission / fix). */
+    val userPosition = MutableStateFlow<Pair<Double, Double>?>(null)
+
+    fun refreshPosition() {
+        val location = LocationHelper.lastKnown(container.appContext) ?: return
+        lastLocation = location
+        userPosition.value = location.latitude to location.longitude
+    }
+
+    /** Loaded product lists per branch. */
+    val branchPrices = MutableStateFlow<Map<String, app.necessityq.domain.BranchPrices>>(emptyMap())
+    val pricesLoading = MutableStateFlow<Set<String>>(emptySet())
+
+    fun toggleBranch(branchId: String) {
+        val hid = ctx()?.first ?: return
+        val current = selectedPriceBranches.value
+        val next = if (branchId in current) current - branchId else current + branchId
+        if (next.size > MAX_BRANCHES) {
+            _messages.tryEmit("אפשר לעקוב אחרי עד $MAX_BRANCHES סניפים")
+            return
+        }
+        launchSafe {
+            container.prices.setSelectedBranches(hid, next)
+            // a newly followed branch gets its prices now rather than at the next daily load
+            if (branchId !in current) runCatching { container.prices.requestRefresh(branchId) }
+        }
+    }
+
+    /** Downloads (or reads from cache) the products of a branch. */
+    fun loadPrices(branchId: String, force: Boolean = false) {
+        if (!force && branchPrices.value.containsKey(branchId)) return
+        pricesLoading.update { it + branchId }
+        viewModelScope.launch {
+            runCatching { container.prices.prices(branchId) }
+                .onSuccess { p -> if (p != null) branchPrices.update { it + (branchId to p) } }
+                .onFailure { _messages.tryEmit("טעינת המחירים נכשלה: ${it.message ?: ""}") }
+            pricesLoading.update { it - branchId }
+        }
+    }
+
+    /** Asks the server for fresh prices, then reloads them. */
+    fun refreshPrices(branchId: String) {
+        pricesLoading.update { it + branchId }
+        viewModelScope.launch {
+            runCatching { container.prices.requestRefresh(branchId) }
+                .onSuccess { refreshed -> _messages.tryEmit(if (refreshed) "המחירים עודכנו" else "המחירים כבר עדכניים") }
+                .onFailure { _messages.tryEmit("רענון המחירים נכשל: ${it.message ?: ""}") }
+            pricesLoading.update { it - branchId }
+            loadPrices(branchId, force = true)
+        }
+    }
+
+    /** Shopping day: branches whose prices are older than 12 hours are refreshed in the background. */
+    private fun refreshStalePricesForShopping() {
+        val now = System.currentTimeMillis()
+        val stale = selectedPriceBranches.value.filter { id ->
+            val updated = priceStatus.value[id]?.updatedAtMillis ?: 0L
+            now - updated > 12 * 3_600_000L
+        }
+        if (stale.isEmpty()) return
+        viewModelScope.launch {
+            stale.forEach { id -> runCatching { container.prices.requestRefresh(id) } }
+            stale.filter { branchPrices.value.containsKey(it) }.forEach { loadPrices(it, force = true) }
+        }
     }
 
     /** A known store near the device right now (set by [refreshLocation]). */
@@ -744,6 +828,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun leaveHousehold() = launchSafe { container.household.leaveHousehold() }
 
     companion object {
+        const val MAX_BRANCHES = 5
+
         fun factory(container: AppContainer): ViewModelProvider.Factory = viewModelFactory {
             initializer { AppViewModel(container) }
         }

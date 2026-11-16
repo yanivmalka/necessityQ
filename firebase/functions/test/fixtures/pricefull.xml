@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <ChainId>7290058140886</ChainId>
+  <SubChainId>001</SubChainId>
+  <StoreId>039</StoreId>
+  <BikoretNo>1</BikoretNo>
+  <DllVerNo>8.0.1.3</DllVerNo>
+  <Items Count="4">
+    <Item>
+      <PriceUpdateDate>2026-11-15 09:12:00</PriceUpdateDate>
+      <ItemCode>7290000042015</ItemCode>
+      <ItemType>1</ItemType>
+      <ItemName>חלב תנובה 3% 1 ליטר</ItemName>
+      <ManufacturerName>תנובה</ManufacturerName>
+      <ManufactureCountry>IL</ManufactureCountry>
+      <ManufacturerItemDescription>חלב טרי</ManufacturerItemDescription>
+      <UnitQty>ליטר</UnitQty>
+      <Quantity>1.00</Quantity>
+      <bIsWeighted>0</bIsWeighted>
+      <UnitOfMeasure>ליטר</UnitOfMeasure>
+      <QtyInPackage>0</QtyInPackage>
+      <ItemPrice>6.20</ItemPrice>
+      <UnitOfMeasurePrice>6.20</UnitOfMeasurePrice>
+      <AllowDiscount>1</AllowDiscount>
+      <ItemStatus>1</ItemStatus>
+    </Item>
+    <Item>
+      <PriceUpdateDate>2026-11-15 09:12:00</PriceUpdateDate>
+      <ItemCode>7290004131074</ItemCode>
+      <ItemType>1</ItemType>
+      <ItemName>קוטג' 5% טרה & שות</ItemName>
+      <ManufacturerName>טרה</ManufacturerName>
+      <UnitQty>גרם</UnitQty>
+      <Quantity>250</Quantity>
+      <bIsWeighted>0</bIsWeighted>
+      <ItemPrice>5.90</ItemPrice>
+      <UnitOfMeasurePrice>2.36</UnitOfMeasurePrice>
+    </Item>
+    <Item>
+      <ItemCode>1234</ItemCode>
+      <ItemType>0</ItemType>
+      <ItemName>עגבניות</ItemName>
+      <UnitQty>קילו</UnitQty>
+      <Quantity>1</Quantity>
+      <bIsWeighted>1</bIsWeighted>
+      <ItemPrice>7.90</ItemPrice>
+    </Item>
+    <Item>
+      <ItemCode>7290000042015</ItemCode>
+      <ItemName>כפול</ItemName>
+      <ItemPrice>99</ItemPrice>
+    </Item>
+    <Item>
+      <ItemCode>7290000000000</ItemCode>
+      <ItemName>מחיר אפס</ItemName>
+      <ItemPrice>0</ItemPrice>
+    </Item>
+  </Items>
+</root>

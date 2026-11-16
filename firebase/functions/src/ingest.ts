@@ -1,0 +1,198 @@
+import { CHAINS, Chain, DEFAULT_CHAINS, chainByKey } from "./chains";
+import { latest } from "./filenames";
+import { GeoCache, geocode } from "./geocode";
+import { israelDay, mergeSnapshot } from "./history";
+import { Branch, Snapshot } from "./model";
+import { cityInScope, parsePrices, parseStores } from "./normalize";
+import { Source, sourceFor } from "./sources";
+import { decodePayload } from "./xml";
+
+/** Admin-editable settings (Firestore `config/prices`). Every field is optional. */
+export interface PriceConfig {
+  /** how often a tracked branch's prices are refreshed (hours); 24 = once a day */
+  refreshHours: number;
+  /** how often the branch lists (Stores files) are re-read (days) */
+  storesRefreshDays: number;
+  /** window of the price range shown to users (days) */
+  rangeDays: number;
+  /** cities in the data scope (Hebrew names as published) */
+  cities: string[];
+  /** chain keys to ingest (see chains.ts) */
+  chains: string[];
+  /** a user-requested refresh is skipped when the data is younger than this (minutes) */
+  manualRefreshMinutes: number;
+}
+
+export const DEFAULT_CONFIG: PriceConfig = {
+  refreshHours: 24,
+  storesRefreshDays: 7,
+  rangeDays: 90,
+  cities: ["ירושלים"],
+  chains: DEFAULT_CHAINS,
+  manualRefreshMinutes: 60,
+};
+
+export function withDefaults(raw: Partial<PriceConfig> | undefined): PriceConfig {
+  const c = { ...DEFAULT_CONFIG, ...(raw ?? {}) };
+  const pos = (v: unknown, d: number) => (typeof v === "number" && v > 0 ? v : d);
+  return {
+    refreshHours: pos(c.refreshHours, DEFAULT_CONFIG.refreshHours),
+    storesRefreshDays: pos(c.storesRefreshDays, DEFAULT_CONFIG.storesRefreshDays),
+    rangeDays: Math.min(pos(c.rangeDays, DEFAULT_CONFIG.rangeDays), 365),
+    cities: Array.isArray(c.cities) && c.cities.length ? c.cities.map(String) : DEFAULT_CONFIG.cities,
+    chains: Array.isArray(c.chains) && c.chains.length ? c.chains.map(String).filter((k) => chainByKey(k)) : DEFAULT_CONFIG.chains,
+    manualRefreshMinutes: pos(c.manualRefreshMinutes, DEFAULT_CONFIG.manualRefreshMinutes),
+  };
+}
+
+export interface BranchStatus {
+  updatedAt: string | null; // ISO of the last successful price load
+  items: number;
+  sourceFile: string;
+  sourceStamp: string;
+  lastAttemptAt: string | null;
+  error: string | null;
+}
+
+/** Persistence used by the pipeline (Firestore + Storage in production, in-memory in tests). */
+export interface PriceStore {
+  readIndex(): Promise<{ updatedAt: string | null; branches: Branch[] }>;
+  writeIndex(branches: Branch[], meta: { updatedAt: string; cities: string[]; chains: Record<string, string> }): Promise<void>;
+  readSnapshot(branchId: string): Promise<Snapshot | null>;
+  writeSnapshot(snapshot: Snapshot): Promise<void>;
+  readStatus(branchId: string): Promise<BranchStatus | null>;
+  writeStatus(branchId: string, status: BranchStatus): Promise<void>;
+  /** union of branch ids selected by any household */
+  trackedBranchIds(): Promise<string[]>;
+  geoCache: GeoCache;
+}
+
+export interface Deps {
+  store: PriceStore;
+  sourceFor?: (chain: Chain) => Source;
+  now?: () => Date;
+  log?: (msg: string) => void;
+}
+
+/** Re-reads the Stores files of the configured chains and rewrites the branch index for the in-scope cities. */
+export async function refreshBranches(config: PriceConfig, deps: Deps): Promise<{ branches: number; chains: Record<string, string> }> {
+  const log = deps.log ?? (() => {});
+  const src = deps.sourceFor ?? sourceFor;
+  const previous = await deps.store.readIndex();
+  const prevById = new Map(previous.branches.map((b) => [b.id, b]));
+  const result: Branch[] = [];
+  const chainStatus: Record<string, string> = {};
+
+  for (const key of config.chains) {
+    const chain = chainByKey(key);
+    if (!chain) continue;
+    try {
+      const files = await src(chain).list(chain, "stores");
+      const file = latest(files, "stores");
+      if (!file) throw new Error("no Stores file listed");
+      const raw = parseStores(decodePayload(await src(chain).fetch(chain, file)));
+      const inScope = raw.filter((b) => cityInScope(b.city, config.cities));
+      for (const b of inScope) {
+        const id = `${chain.key}_${b.storeId}`;
+        const old = prevById.get(id);
+        let point = old && old.address === b.address && old.city === b.city && old.lat !== null ? { lat: old.lat!, lng: old.lng!, approx: old.approx } : null;
+        if (!point) {
+          try {
+            point = await geocode(b.address, b.city, deps.store.geoCache);
+          } catch (e) {
+            log(`geocode failed for ${id}: ${(e as Error).message}`);
+          }
+        }
+        result.push({ ...b, id, chainKey: chain.key, chainName: chain.name, lat: point?.lat ?? null, lng: point?.lng ?? null, approx: point?.approx ?? true });
+      }
+      chainStatus[key] = `ok:${inScope.length}/${raw.length}`;
+      log(`${chain.key}: ${inScope.length} of ${raw.length} branches in scope (${file.name})`);
+    } catch (e) {
+      chainStatus[key] = `error:${(e as Error).message}`.slice(0, 200);
+      log(`${chain.key}: stores failed: ${(e as Error).message}`);
+      // keep what we knew about this chain rather than dropping its branches
+      result.push(...previous.branches.filter((b) => b.chainKey === key));
+    }
+  }
+  result.sort((a, b) => a.chainName.localeCompare(b.chainName, "he") || a.name.localeCompare(b.name, "he"));
+  const now = (deps.now ?? (() => new Date()))().toISOString();
+  await deps.store.writeIndex(result, { updatedAt: now, cities: config.cities, chains: chainStatus });
+  return { branches: result.length, chains: chainStatus };
+}
+
+/** Loads the newest full price file of one branch and merges it into that branch's snapshot. */
+export async function refreshBranchPrices(branch: Branch, config: PriceConfig, deps: Deps): Promise<BranchStatus> {
+  const src = deps.sourceFor ?? sourceFor;
+  const now = (deps.now ?? (() => new Date()))();
+  const chain = chainByKey(branch.chainKey);
+  const previousStatus = await deps.store.readStatus(branch.id);
+  const base: BranchStatus = previousStatus ?? { updatedAt: null, items: 0, sourceFile: "", sourceStamp: "", lastAttemptAt: null, error: null };
+  try {
+    if (!chain) throw new Error(`unknown chain ${branch.chainKey}`);
+    const files = await src(chain).list(chain, "pricefull", branch.storeId);
+    const file = latest(files, "pricefull", branch.storeId);
+    if (!file) throw new Error("no PriceFull file listed for this branch");
+    const { items } = parsePrices(decodePayload(await src(chain).fetch(chain, file)));
+    if (items.length === 0) throw new Error(`no items in ${file.name}`);
+    const previous = await deps.store.readSnapshot(branch.id);
+    const snapshot = mergeSnapshot(branch.id, previous, items, israelDay(now), config.rangeDays, {
+      file: file.name,
+      stamp: file.stamp,
+      now: now.toISOString(),
+    });
+    await deps.store.writeSnapshot(snapshot);
+    const status: BranchStatus = {
+      updatedAt: now.toISOString(),
+      items: snapshot.items.length,
+      sourceFile: file.name,
+      sourceStamp: file.stamp,
+      lastAttemptAt: now.toISOString(),
+      error: null,
+    };
+    await deps.store.writeStatus(branch.id, status);
+    return status;
+  } catch (e) {
+    const status = { ...base, lastAttemptAt: now.toISOString(), error: (e as Error).message.slice(0, 300) };
+    await deps.store.writeStatus(branch.id, status);
+    return status;
+  }
+}
+
+/** True when a branch's prices should be (re)loaded now. Failed attempts retry after an hour. */
+export function isDue(status: BranchStatus | null, config: PriceConfig, now: Date): boolean {
+  if (!status) return true;
+  const age = (iso: string | null) => (iso ? now.getTime() - Date.parse(iso) : Infinity);
+  if (status.error && age(status.lastAttemptAt) < 60 * 60_000) return false;
+  return age(status.updatedAt) >= config.refreshHours * 3600_000 - 5 * 60_000;
+}
+
+/** The hourly tick: refresh branch lists when stale, then every tracked branch that is due, within a time budget. */
+export async function tick(config: PriceConfig, deps: Deps, budgetMs: number): Promise<string[]> {
+  const started = Date.now();
+  const now = (deps.now ?? (() => new Date()))();
+  const report: string[] = [];
+  let index = await deps.store.readIndex();
+  const indexAge = index.updatedAt ? now.getTime() - Date.parse(index.updatedAt) : Infinity;
+  if (indexAge >= config.storesRefreshDays * 86_400_000 || index.branches.length === 0) {
+    const r = await refreshBranches(config, deps);
+    report.push(`branches: ${r.branches}`);
+    index = await deps.store.readIndex();
+  }
+  const byId = new Map(index.branches.map((b) => [b.id, b]));
+  const tracked = await deps.store.trackedBranchIds();
+  for (const id of tracked) {
+    if (Date.now() - started > budgetMs) {
+      report.push("time budget reached; the rest continues next tick");
+      break;
+    }
+    const branch = byId.get(id);
+    if (!branch) continue;
+    const status = await deps.store.readStatus(id);
+    if (!isDue(status, config, now)) continue;
+    const s = await refreshBranchPrices(branch, config, deps);
+    report.push(`${id}: ${s.error ? `error ${s.error}` : `${s.items} items`}`);
+  }
+  return report;
+}
+
+export { CHAINS };
