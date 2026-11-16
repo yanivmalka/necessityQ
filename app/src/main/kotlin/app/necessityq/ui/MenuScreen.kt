@@ -73,6 +73,7 @@ fun MenuScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
 
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         TopAppBar(
+            navigationIcon = { DrawerButton() },
             title = { Text("תפריט", fontWeight = FontWeight.ExtraBold) },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
         )

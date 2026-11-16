@@ -43,6 +43,15 @@ class AppPrefs(context: Context) {
 
     fun setSortFor(mode: app.necessityq.domain.ListMode, v: ListSort) = p.edit().putString("sort_" + mode.name, v.name).apply()
 
+    /** When the shop prompt was last answered; a new trip asks again after a few hours. */
+    var storeAskedAt: Long
+        get() = p.getLong("store_asked", 0L)
+        set(v) = p.edit().putLong("store_asked", v).apply()
+
+    var collapsed: Set<String>
+        get() = p.getStringSet("collapsed", emptySet()).orEmpty()
+        set(v) = p.edit().putStringSet("collapsed", v).apply()
+
     var currentStoreId: String?
         get() = p.getString("store", null)
         set(v) = p.edit().putString("store", v).apply()

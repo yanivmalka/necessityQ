@@ -186,6 +186,28 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         prefs.mode = value
         mode.value = value
         sort.value = prefs.sortFor(value)
+        checkStorePrompt()
+    }
+
+    /** "Where are we shopping?" — asked once at the start of a shopping trip; optional, editable later. */
+    val storePrompt = MutableStateFlow(false)
+
+    private fun checkStorePrompt() {
+        val newTrip = System.currentTimeMillis() - prefs.storeAskedAt > 4L * 60 * 60 * 1000
+        storePrompt.value = mode.value == ListMode.SHOP && newTrip
+    }
+
+    fun answerStorePrompt(storeId: String?, skipped: Boolean = false) {
+        if (!skipped) selectStore(storeId)
+        prefs.storeAskedAt = System.currentTimeMillis()
+        storePrompt.value = false
+    }
+
+    val collapsed = MutableStateFlow(prefs.collapsed)
+    fun toggleCollapsed(key: String) {
+        val next = if (key in collapsed.value) collapsed.value - key else collapsed.value + key
+        prefs.collapsed = next
+        collapsed.value = next
     }
 
     /** Learned collection order for the current store (used by the "pick order" sort). */
@@ -343,9 +365,22 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     fun markRead(itemId: String) {
-        prefs.markRead(itemId, System.currentTimeMillis())
+        val now = System.currentTimeMillis()
+        prefs.markRead(itemId, now)
         readTick.value++
+        val (hid, uid, _) = ctx() ?: return
+        launchSafe { container.collab.markRead(hid, uid, itemId, now) }
     }
+
+    val receipts: StateFlow<Map<String, app.necessityq.domain.Receipt>> = householdId
+        .flatMapLatest { hid -> if (hid == null) emptyFlow() else container.collab.receipts(hid) }
+        .catch { emit(emptyMap()) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
+    fun deliveryStatus(m: ItemMessage): app.necessityq.domain.DeliveryStatus =
+        app.necessityq.domain.Receipts.status(m, me, receipts.value, memberNames.value.keys)
+
+    private var lastSeenReported = 0L
 
     fun sendMessage(itemId: String, itemName: String, text: String) {
         val (hid, uid, _) = ctx() ?: return
@@ -365,6 +400,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         launchSafe { container.collab.setMissingRecipients(hid, userIds) }
     }
 
+    init { checkStorePrompt() }
+
     private var seenMessages: Set<String>? = null
     private var seenMissing: Set<String>? = null
 
@@ -375,6 +412,12 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                 seenMessages = null
                 if (hid == null) emptyFlow() else container.collab.messages(hid)
             }.catch { }.collect { all ->
+                // "received" receipt for messages from others
+                val newest = all.filter { it.authorId != me && !it.pending }.maxOfOrNull { it.atMillis } ?: 0L
+                if (newest > lastSeenReported) {
+                    lastSeenReported = newest
+                    ctx()?.let { (hid, uid, _) -> launchSafe { container.collab.markSeen(hid, uid, System.currentTimeMillis()) } }
+                }
                 val seen = seenMessages
                 if (seen == null) {
                     seenMessages = all.map { it.id }.toSet()

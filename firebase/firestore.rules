@@ -62,6 +62,12 @@ service cloud.firestore {
         allow update, delete: if isMember(hid) && resource.data.authorId == uid();
       }
 
+      // read receipts: each member writes only their own
+      match /reads/{readerId} {
+        allow read: if isMember(hid);
+        allow write: if isMember(hid) && uid() == readerId;
+      }
+
       match /lines/{id} { allow read, write: if isMember(hid); }
       match /purchases/{id} { allow read, write: if isMember(hid); }
       match /suppressions/{id} { allow read, write: if isMember(hid); }

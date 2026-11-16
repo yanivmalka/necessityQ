@@ -3,6 +3,7 @@ package app.necessityq.data.firebase
 import app.necessityq.domain.CollabRepository
 import app.necessityq.domain.ItemMessage
 import app.necessityq.domain.NotifySettings
+import app.necessityq.domain.Receipt
 import app.necessityq.domain.Store
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
@@ -41,7 +42,7 @@ class FirebaseCollabRepository(private val db: FirebaseFirestore) : CollabReposi
     }
 
     override fun messages(householdId: String): Flow<List<ItemMessage>> =
-        household(householdId).collection("messages").orderBy("at", Query.Direction.ASCENDING).limitToLast(500).observe()
+        household(householdId).collection("messages").orderBy("at", Query.Direction.ASCENDING).limitToLast(500).observe(includeMetadata = true)
             .map { snap -> snap.documents.mapNotNull(FirestoreMapping::messageFrom) }
 
     override suspend fun sendMessage(householdId: String, message: ItemMessage) {
@@ -53,6 +54,26 @@ class FirebaseCollabRepository(private val db: FirebaseFirestore) : CollabReposi
             @Suppress("UNCHECKED_CAST")
             NotifySettings(((doc.get("missingRecipients") as? List<String>) ?: emptyList()).toSet())
         }
+
+    override fun receipts(householdId: String): Flow<Map<String, Receipt>> =
+        household(householdId).collection("reads").observe().map { snap ->
+            snap.documents.associate { doc ->
+                @Suppress("UNCHECKED_CAST")
+                val read = (doc.get("read") as? Map<String, Any?>).orEmpty()
+                    .mapNotNull { (k, v) -> (v as? Number)?.toLong()?.let { k to it } }.toMap()
+                doc.id to Receipt(doc.getLong("seenAt") ?: 0L, read)
+            }
+        }
+
+    override suspend fun markSeen(householdId: String, userId: String, atMillis: Long) {
+        household(householdId).collection("reads").document(userId)
+            .set(mapOf("seenAt" to atMillis), com.google.firebase.firestore.SetOptions.merge())
+    }
+
+    override suspend fun markRead(householdId: String, userId: String, itemId: String, atMillis: Long) {
+        household(householdId).collection("reads").document(userId)
+            .set(mapOf("read" to mapOf(itemId to atMillis)), com.google.firebase.firestore.SetOptions.merge())
+    }
 
     override suspend fun setMissingRecipients(householdId: String, userIds: Set<String>) {
         household(householdId).collection("settings").document("notify").set(mapOf("missingRecipients" to userIds.toList()))

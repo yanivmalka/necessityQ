@@ -3,49 +3,34 @@ package app.necessityq.ui
 import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material.icons.filled.DragIndicator
-import androidx.compose.material.icons.filled.QrCodeScanner
-import androidx.compose.material.icons.filled.ReportProblem
-import androidx.compose.material.icons.filled.RestoreFromTrash
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material3.Badge
-import androidx.compose.material3.BadgedBox
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.runtime.snapshotFlow
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.onSizeChanged
-import app.necessityq.domain.ListMode
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlin.math.abs
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.absoluteOffset
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -53,6 +38,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -61,79 +47,98 @@ import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.DragIndicator
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Remove
-import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.ReportProblem
+import androidx.compose.material.icons.filled.RestoreFromTrash
 import androidx.compose.material.icons.filled.Storefront
-import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SuggestionChip
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.necessityq.domain.Category
-import app.necessityq.domain.ItemMessage
+import app.necessityq.domain.DeliveryStatus
+import app.necessityq.domain.ItemStats
 import app.necessityq.domain.ItemTag
 import app.necessityq.domain.ItemTags
-import app.necessityq.domain.TagKind
-import app.necessityq.domain.ItemStats
-import app.necessityq.domain.LineStatus
 import app.necessityq.domain.ListLine
+import app.necessityq.domain.ListMode
 import app.necessityq.domain.ListOrdering
 import app.necessityq.domain.ListSort
 import app.necessityq.domain.Quantity
 import app.necessityq.domain.StoreType
 import app.necessityq.domain.Suggestion
+import app.necessityq.domain.TagKind
 import app.necessityq.platform.DisplayOptions
+import kotlinx.coroutines.launch
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /** One row of the needed-items list: a group header or a product tile. */
 private sealed interface ListRow {
     val key: String
 
-    data class Header(val category: Category?, val title: String) : ListRow {
-        override val key: String = "h_" + (category?.name ?: "all")
+    data class Header(val category: Category, val count: Int, val collapsed: Boolean) : ListRow {
+        override val key: String = "h_" + category.name
     }
 
     data class Item(val line: ListLine) : ListRow {
@@ -141,10 +146,14 @@ private sealed interface ListRow {
     }
 }
 
-private fun buildRows(lines: List<ListLine>, sort: ListSort, ranks: Map<String, Double>): List<ListRow> =
+private fun buildRows(lines: List<ListLine>, sort: ListSort, ranks: Map<String, Double>, collapsed: Set<String>): List<ListRow> =
     ListOrdering.arrange(lines, sort, ranks).flatMap { (category, items) ->
-        val header = if (category != null) listOf(ListRow.Header(category, category.label)) else emptyList()
-        header + items.map { ListRow.Item(it) }
+        if (category == null) {
+            items.map { ListRow.Item(it) }
+        } else {
+            val isCollapsed = category.name in collapsed
+            listOf(ListRow.Header(category, items.size, isCollapsed)) + if (isCollapsed) emptyList() else items.map { ListRow.Item(it) }
+        }
     }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -158,20 +167,28 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
     val display by vm.display.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
     val messages by vm.itemMessages.collectAsStateWithLifecycle()
+    vm.receipts.collectAsStateWithLifecycle() // recompose ticks when receipts change
+    vm.unreadTotal.collectAsStateWithLifecycle() // recompose unread counts after reading
     val names by vm.memberNames.collectAsStateWithLifecycle()
     val pickRanks by vm.pickRanks.collectAsStateWithLifecycle()
+    val collapsed by vm.collapsed.collectAsStateWithLifecycle()
+    val storePrompt by vm.storePrompt.collectAsStateWithLifecycle()
+    val stores by vm.stores.collectAsStateWithLifecycle()
+    val currentStoreId by vm.currentStoreId.collectAsStateWithLifecycle()
     var openItem by remember { mutableStateOf<ListLine?>(null) }
     var showSortMenu by remember { mutableStateOf(false) }
-    var showDisplay by remember { mutableStateOf(false) }
     var showBin by remember { mutableStateOf(false) }
     var showScan by remember { mutableStateOf(false) }
+    var showStoreDialog by remember { mutableStateOf(false) }
     var addOpen by remember { mutableStateOf(false) }
     val shopping = mode == ListMode.SHOP
 
     // Local copy of the rows so a drag can move items immediately; re-synced from the live data when idle.
     val rows = remember { mutableStateListOf<ListRow>() }
     var dragging by remember { mutableStateOf(false) }
-    val built = remember(snapshot?.lines, sort, pickRanks) { buildRows(snapshot?.lines.orEmpty(), sort, pickRanks) }
+    val built = remember(snapshot?.lines, sort, pickRanks, collapsed) {
+        buildRows(snapshot?.lines.orEmpty(), sort, pickRanks, collapsed)
+    }
     LaunchedEffect(built, dragging) {
         if (!dragging) {
             rows.clear()
@@ -198,12 +215,29 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
 
     val today = LocalDate.now()
     val sortOptions = if (shopping) listOf(ListSort.GROUPS, ListSort.ALPHA, ListSort.PICK) else listOf(ListSort.GROUPS, ListSort.ALPHA, ListSort.ADDED)
+    val storeName = stores.firstOrNull { it.id == currentStoreId }?.name
 
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         TopAppBar(
-            title = { Text(householdName, fontWeight = FontWeight.ExtraBold) },
+            navigationIcon = { DrawerButton() },
+            title = {
+                Column {
+                    Text(householdName, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (shopping) {
+                        Text(
+                            (storeName?.let { "קונים ב$it" } ?: "בקנייה") + " ✎",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.clickable { showStoreDialog = true },
+                        )
+                    } else {
+                        Text(mode.label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            },
             actions = {
                 if (shopping) {
+                    IconButton(onClick = { addOpen = !addOpen }) { Icon(Icons.Default.Add, contentDescription = "הוספת פריט") }
                     IconButton(onClick = { showScan = true }) { Icon(Icons.Default.QrCodeScanner, contentDescription = "בדיקת מחיר בסריקה") }
                 }
                 Box {
@@ -222,31 +256,16 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
                         Icon(Icons.Default.DeleteSweep, contentDescription = "סל מחזור")
                     }
                 }
-                IconButton(onClick = { showDisplay = true }) { Icon(Icons.Default.Tune, contentDescription = "מה להציג") }
             },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
         )
 
-        // usage stage: preparing the list vs. walking the shop — each shows what matters for it
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-            ListMode.entries.forEachIndexed { i, m ->
-                SegmentedButton(
-                    selected = mode == m,
-                    onClick = { vm.setMode(m) },
-                    shape = SegmentedButtonDefaults.itemShape(i, ListMode.entries.size),
-                    icon = {},
-                ) {
-                    Text(m.label, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-
-        // Quick add: always open while preparing; tucked behind a button while shopping
+        // Quick add: always open while preparing; behind the + button while shopping
         if (!shopping || addOpen || query.isNotEmpty()) {
             OutlinedTextField(
                 value = query,
                 onValueChange = { vm.query.value = it },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                 placeholder = { Text("הוספה מהירה: 2 קוטג' 5%") },
                 singleLine = true,
                 shape = RoundedCornerShape(16.dp),
@@ -266,7 +285,6 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
                 }
             }
         }
-        StoreBar(vm, prominent = shopping, onAddItem = if (shopping && !addOpen) ({ addOpen = true }) else null)
 
         val snap = snapshot
         LazyColumn(
@@ -279,8 +297,12 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
                 return@LazyColumn
             }
 
+            if (shopping && storePrompt) {
+                item(key = "store_prompt") { StorePromptCard(vm) }
+            }
+
             if (!shopping && snap.runningLow.isNotEmpty()) {
-                item(key = "low_title") { SectionTitle("כנראה נגמר בקרוב") }
+                item(key = "low_title") { SimpleTitle("כנראה נגמר בקרוב") }
                 items(snap.runningLow, key = { "low_" + it.itemId }) { s ->
                     RunningLowCard(
                         s,
@@ -294,7 +316,7 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
             if (!shopping && snap.frequent.isNotEmpty()) {
                 item(key = "frequent") {
                     Column {
-                        SectionTitle("קונים בדרך כלל")
+                        SimpleTitle("קונים בדרך כלל")
                         FlowRow(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             snap.frequent.forEach { s ->
                                 val star = display.showFavorite && s.itemId in favorites
@@ -321,7 +343,7 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
             } else {
                 item(key = "hint") {
                     Text(
-                        "החליקו והחזיקו רגע: לצד אחד נקנה, לשני מחיקה" + if (sort == ListSort.GROUPS) " · ≡ לגרירה" else "",
+                        "משכו שמאלה: נקנה · ימינה: " + (if (shopping) "חסר" else "מחיקה") + " — והחזיקו עד שהטבעת מהבהבת",
                         Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -332,18 +354,25 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
             items(rows, key = { it.key }) { row ->
                 ReorderableItem(reorderState, key = row.key) { isDragging ->
                     when (row) {
-                        is ListRow.Header -> SectionTitle(row.title, row.category)
+                        is ListRow.Header -> GroupHeader(row, onToggle = { vm.toggleCollapsed(row.category.name) })
                         is ListRow.Item -> {
                             val line = row.line
                             val stats = snap.stats[line.itemId]
+                            val thread = messages.filter { it.itemId == line.itemId }
                             ProductTile(
                                 line = line,
                                 shopping = shopping,
-                                subline = tileInfo(line, stats, favorites, names, display, today),
+                                subline = tileInfo(line, stats, names, display, today),
                                 tags = ItemTags.of(line, stats, favorite = line.itemId in favorites)
                                     .filter { display.showFavorite || it.kind != TagKind.FAVORITE },
-                                unread = vm.unreadCount(line.itemId, messages),
-                                hasMessages = messages.any { it.itemId == line.itemId },
+                                chat = if (thread.isEmpty()) null else {
+                                    val last = thread.maxBy { it.atMillis }
+                                    ChatState(
+                                        unread = vm.unreadCount(line.itemId, messages),
+                                        lastIsMine = last.authorId == vm.me,
+                                        status = if (last.authorId == vm.me) vm.deliveryStatus(last) else null,
+                                    )
+                                },
                                 showPrices = display.showPrices,
                                 lifted = isDragging,
                                 dragHandle = if (sort == ListSort.GROUPS) {
@@ -363,10 +392,9 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
                                     }
                                 } else null,
                                 onBought = { vm.checkOff(line) },
-                                onMissing = { vm.setMissing(line, !line.missing) },
+                                onRightSwipe = { if (shopping) vm.setMissing(line, !line.missing) else vm.delete(line) },
                                 onPlus = { vm.adjustQuantity(line, +1) },
                                 onMinus = { vm.adjustQuantity(line, -1) },
-                                onDelete = { vm.delete(line) },
                                 onOpen = { openItem = line },
                             )
                         }
@@ -391,11 +419,14 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
     openItem?.let { line ->
         ItemSheet(vm, itemId = line.itemId, itemName = line.displayName, onDismiss = { openItem = null })
     }
-    if (showDisplay) {
-        DisplayOptionsDialog(display, onChange = vm::setDisplay, onDismiss = { showDisplay = false })
-    }
-    if (showBin) {
-        RecycleBinSheet(snapshot?.removed.orEmpty(), vm, onDismiss = { showBin = false })
+    if (showBin) RecycleBinSheet(snapshot?.removed.orEmpty(), vm, onDismiss = { showBin = false })
+    if (showStoreDialog) {
+        AlertDialog(
+            onDismissRequest = { showStoreDialog = false },
+            title = { Text("איפה קונים?") },
+            text = { StoreChooser(vm, allowNone = true, onChosen = { id -> vm.answerStorePrompt(id); showStoreDialog = false }) },
+            confirmButton = { TextButton(onClick = { showStoreDialog = false }) { Text("סגירה") } },
+        )
     }
     if (showScan) {
         AlertDialog(
@@ -409,6 +440,93 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
                 )
             },
             confirmButton = { TextButton(onClick = { showScan = false }) { Text("הבנתי") } },
+        )
+    }
+}
+
+// ---------- store: once at the start of a trip, optional, editable from the title ----------
+
+@Composable
+private fun StorePromptCard(vm: AppViewModel) {
+    Card(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Storefront, null)
+                Spacer(Modifier.width(8.dp))
+                Text("איפה קונים היום?", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                TextButton(onClick = { vm.answerStorePrompt(null, skipped = true) }) { Text("דלג") }
+            }
+            Text("לא חובה. עוזר ללמוד את סדר האיסוף בכל חנות. אפשר לשנות בהמשך מהכותרת.", style = MaterialTheme.typography.bodySmall)
+            StoreChooser(vm, allowNone = false, onChosen = { vm.answerStorePrompt(it) })
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun StoreChooser(vm: AppViewModel, allowNone: Boolean, onChosen: (String?) -> Unit) {
+    val stores by vm.stores.collectAsStateWithLifecycle()
+    val currentId by vm.currentStoreId.collectAsStateWithLifecycle()
+    val nearby by vm.nearbyStore.collectAsStateWithLifecycle()
+    var adding by remember { mutableStateOf(false) }
+    var hasPermission by remember { mutableStateOf(vm.hasLocationPermission()) }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        hasPermission = result.values.any { it }
+        if (hasPermission) vm.refreshLocation()
+    }
+    LaunchedEffect(stores, hasPermission) { if (hasPermission) vm.refreshLocation() }
+
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        nearby?.let { near ->
+            AssistChip(
+                onClick = { onChosen(near.id) },
+                label = { Text("ליד: ${near.name}", fontWeight = FontWeight.Bold) },
+                leadingIcon = { Icon(Icons.Default.LocationOn, null, Modifier.size(18.dp)) },
+            )
+        }
+        stores.filter { it.id != nearby?.id }.forEach { store ->
+            FilterChip(selected = store.id == currentId, onClick = { onChosen(store.id) }, label = { Text(store.name) })
+        }
+        AssistChip(onClick = { adding = true }, label = { Text("חנות חדשה כאן") }, leadingIcon = { Icon(Icons.Default.Add, null, Modifier.size(18.dp)) })
+        if (allowNone && currentId != null) AssistChip(onClick = { onChosen(null) }, label = { Text("ללא חנות") })
+        if (!hasPermission) {
+            TextButton(onClick = {
+                permission.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION))
+            }) { Text("הצעה לפי מיקום") }
+        }
+    }
+
+    if (adding) {
+        var name by remember { mutableStateOf("") }
+        var type by remember { mutableStateOf(StoreType.SUPERMARKET) }
+        AlertDialog(
+            onDismissRequest = { adding = false },
+            title = { Text("חנות חדשה") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(name, { name = it }, label = { Text("שם (למשל: רמי לוי תלפיות)") }, singleLine = true)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        StoreType.entries.forEach { t -> FilterChip(selected = type == t, onClick = { type = t }, label = { Text(t.label) }) }
+                    }
+                    Text(
+                        if (hasPermission) "המיקום הנוכחי יישמר כדי להציע את החנות כשתגיעו אליה."
+                        else "בלי הרשאת מיקום החנות תישמר בלי מיקום.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = name.isNotBlank(), onClick = {
+                    vm.addStore(name, type)
+                    vm.answerStorePrompt(vm.currentStoreId.value, skipped = true)
+                    adding = false
+                }) { Text("שמירה") }
+            },
+            dismissButton = { TextButton(onClick = { adding = false }) { Text("ביטול") } },
         )
     }
 }
@@ -430,20 +548,15 @@ private fun RecycleBinSheet(removed: List<ListLine>, vm: AppViewModel, onDismiss
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (removed.isEmpty()) {
-                Text("הסל ריק.", Modifier.padding(vertical = 24.dp))
-            }
+            if (removed.isEmpty()) Text("הסל ריק.", Modifier.padding(vertical = 24.dp))
             LazyColumn(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
                 items(removed, key = { "r_" + it.id }) { line ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(line.displayName, fontWeight = FontWeight.Bold)
                             Text(
-                                listOfNotNull(
-                                    line.removedReason?.label,
-                                    line.removedAtMillis?.let { binTime(it) },
-                                    line.quantity?.format(),
-                                ).joinToString(" · "),
+                                listOfNotNull(line.removedReason?.label, line.removedAtMillis?.let { binTime(it) }, line.quantity?.format())
+                                    .joinToString(" · "),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -489,209 +602,6 @@ fun categoryColor(category: Category): Color = when (category) {
     Category.OTHER -> Color(0xFF868E96)
 }
 
-// ---------- tile ----------
-
-private const val HOLD_MS = 650
-
-/**
- * Modern product tile. Swiping reveals an icon in the coloured area; the action only happens if the
- * tile is held past the threshold until the ring around the icon fills, so a brushed swipe never acts.
- * Every action can be undone from the snackbar.
- */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
-@Composable
-private fun ProductTile(
-    line: ListLine,
-    shopping: Boolean,
-    subline: String,
-    tags: List<ItemTag>,
-    unread: Int,
-    hasMessages: Boolean,
-    showPrices: Boolean,
-    lifted: Boolean,
-    dragHandle: (@Composable () -> Unit)?,
-    onBought: () -> Unit,
-    onMissing: () -> Unit,
-    onPlus: () -> Unit,
-    onMinus: () -> Unit,
-    onDelete: () -> Unit,
-    onOpen: () -> Unit,
-) {
-    var widthPx by remember { mutableStateOf(1f) }
-    var armedAt by remember { mutableStateOf<Long?>(null) }
-    val ring = remember { Animatable(0f) }
-    val swipe = rememberSwipeToDismissBoxState(
-        confirmValueChange = { value ->
-            if (value == SwipeToDismissBoxValue.Settled) return@rememberSwipeToDismissBoxState true
-            val held = armedAt?.let { System.currentTimeMillis() - it >= HOLD_MS } == true
-            if (held) {
-                if (value == SwipeToDismissBoxValue.StartToEnd) onBought() else onDelete()
-            }
-            false // the tile always springs back; the data change re-renders the list
-        },
-        positionalThreshold = { it * 0.3f },
-    )
-    // arm when the tile is pulled past the threshold; disarm when it goes back
-    LaunchedEffect(swipe) {
-        snapshotFlow { abs(runCatching { swipe.requireOffset() }.getOrDefault(0f)) >= widthPx * 0.3f }
-            .distinctUntilChanged()
-            .collect { past ->
-                if (past) {
-                    armedAt = System.currentTimeMillis()
-                    ring.snapTo(0f)
-                    ring.animateTo(1f, tween(HOLD_MS, easing = LinearEasing))
-                } else {
-                    armedAt = null
-                    ring.snapTo(0f)
-                }
-            }
-    }
-
-    Column(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) {
-        SwipeToDismissBox(
-            state = swipe,
-            modifier = Modifier.onSizeChanged { widthPx = it.width.toFloat().coerceAtLeast(1f) },
-            backgroundContent = {
-                val direction = swipe.dismissDirection
-                if (direction == SwipeToDismissBoxValue.Settled) return@SwipeToDismissBox
-                val toBought = direction == SwipeToDismissBoxValue.StartToEnd
-                val color = if (toBought) Color(0xFF00875A) else Color(0xFFD92D20)
-                val ready = ring.value >= 1f
-                Row(
-                    Modifier.fillMaxSize().clip(RoundedCornerShape(20.dp)).background(color).padding(horizontal = 22.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = if (toBought) Arrangement.Start else Arrangement.End,
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(
-                            progress = { ring.value },
-                            modifier = Modifier.size(44.dp),
-                            color = Color.White,
-                            trackColor = Color.White.copy(alpha = 0.3f),
-                            strokeWidth = 3.dp,
-                        )
-                        Icon(
-                            if (toBought) Icons.Default.Check else Icons.Default.Delete,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp),
-                        )
-                    }
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        when {
-                            !ready -> "החזיקו…"
-                            toBought -> "שחררו: נקנה"
-                            else -> "שחררו: מחיקה"
-                        },
-                        color = Color.White,
-                        fontWeight = FontWeight.ExtraBold,
-                    )
-                }
-            },
-        ) {
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                border = if (line.missing) BorderStroke(2.dp, MaterialTheme.colorScheme.secondary) else null,
-                colors = CardDefaults.cardColors(
-                    containerColor = when {
-                        lifted -> MaterialTheme.colorScheme.primaryContainer
-                        line.missing -> MaterialTheme.colorScheme.secondaryContainer
-                        else -> MaterialTheme.colorScheme.surface
-                    },
-                ),
-                elevation = CardDefaults.cardElevation(defaultElevation = if (lifted) 10.dp else 1.5.dp),
-            ) {
-                Row(Modifier.height(IntrinsicSize.Min)) {
-                    // category accent strip
-                    Box(Modifier.width(6.dp).fillMaxHeight().background(categoryColor(line.category)))
-                    Column(Modifier.weight(1f).clickable(onClick = onOpen).padding(start = 4.dp, end = 12.dp, top = 8.dp, bottom = 6.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            dragHandle?.invoke()
-                            // round check button — larger while shopping
-                            val checkSize = if (shopping) 48.dp else 40.dp
-                            Box(
-                                Modifier.size(checkSize).clip(CircleShape).clickable(onClick = onBought),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Box(
-                                    Modifier.size(checkSize - 16.dp)
-                                        .border(2.5.dp, MaterialTheme.colorScheme.primary, CircleShape),
-                                )
-                            }
-                            Spacer(Modifier.width(6.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(line.displayName, style = ProductNameStyle, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                if (tags.isNotEmpty() || hasMessages) {
-                                    FlowRow(
-                                        Modifier.padding(top = 3.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                                        verticalArrangement = Arrangement.spacedBy(3.dp),
-                                    ) {
-                                        tags.forEach { TagBadge(it) }
-                                        if (hasMessages) ChatBadge(unread)
-                                    }
-                                }
-                            }
-                            if (showPrices) PriceSlot(price = null, average = null)
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
-                            Text(
-                                subline,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.weight(1f).padding(start = 8.dp),
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            if (shopping) {
-                                // shopping: quick "missing / ask about a substitute" instead of delete
-                                IconButton(onClick = onMissing, modifier = Modifier.size(36.dp)) {
-                                    Icon(
-                                        Icons.Default.ReportProblem, contentDescription = "חסר",
-                                        tint = if (line.missing) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outlineVariant,
-                                    )
-                                }
-                                IconButton(onClick = onOpen, modifier = Modifier.size(36.dp)) {
-                                    Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "שאלה / תחליף", tint = MaterialTheme.colorScheme.tertiary)
-                                }
-                            }
-                            QuantityStepper(line.quantity, onMinus, onPlus)
-                            if (!shopping) {
-                                IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
-                                    Icon(Icons.Outlined.Delete, contentDescription = "מחיקה", tint = MaterialTheme.colorScheme.outlineVariant)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        // Reserved strip under the tile for a promotion from the price database (none yet).
-        PromoStrip(promo = null)
-    }
-}
-
-@Composable
-private fun ChatBadge(unread: Int) {
-    val active = unread > 0
-    Row(
-        Modifier.clip(RoundedCornerShape(50))
-            .background(if (active) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.surfaceVariant)
-            .padding(horizontal = 7.dp, vertical = 1.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            Icons.AutoMirrored.Filled.Chat, null, Modifier.size(13.dp),
-            tint = if (active) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (active) {
-            Spacer(Modifier.width(3.dp))
-            Text("$unread", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
-        }
-    }
-}
-
 // ---------- info lines ----------
 
 private fun daysAgo(stats: ItemStats?, today: LocalDate): String? {
@@ -707,47 +617,53 @@ private fun daysAgo(stats: ItemStats?, today: LocalDate): String? {
 private fun cadence(stats: ItemStats?): String? =
     stats?.cadenceDays?.let { "בערך כל ${it.roundToInt().coerceAtLeast(1)} ימים" }
 
-private fun tileInfo(
-    line: ListLine,
-    stats: ItemStats?,
-    favorites: Set<String>,
-    names: Map<String, String>,
-    display: DisplayOptions,
-    today: LocalDate,
-): String = listOfNotNull(
-    line.note,
-    if (display.showLastBought) daysAgo(stats, today) else null,
-    if (display.showFrequency) cadence(stats) else null,
-    if (display.showAddedBy) names[line.addedBy]?.let { "הוסיף/ה: $it" } else null,
-).joinToString(" · ")
+private fun tileInfo(line: ListLine, stats: ItemStats?, names: Map<String, String>, display: DisplayOptions, today: LocalDate): String =
+    listOfNotNull(
+        line.note,
+        if (display.showLastBought) daysAgo(stats, today) else null,
+        if (display.showFrequency) cadence(stats) else null,
+        if (display.showAddedBy) names[line.addedBy]?.let { "הוסיף/ה: $it" } else null,
+    ).joinToString(" · ")
 
-private fun recommendationInfo(
-    s: Suggestion,
-    stats: ItemStats?,
-    favorites: Set<String>,
-    display: DisplayOptions,
-    today: LocalDate,
-): String = listOfNotNull(
-    if (display.showReason) s.reason else null,
-    if (display.showLastBought && !display.showReason) daysAgo(stats, today) else null,
-    if (display.showFrequency && !display.showReason) cadence(stats) else null,
-    if (display.showFavorite && s.itemId in favorites) "★ במועדפים" else null,
-).joinToString(" · ")
+private fun recommendationInfo(s: Suggestion, stats: ItemStats?, favorites: Set<String>, display: DisplayOptions, today: LocalDate): String =
+    listOfNotNull(
+        if (display.showReason) s.reason else null,
+        if (display.showLastBought && !display.showReason) daysAgo(stats, today) else null,
+        if (display.showFrequency && !display.showReason) cadence(stats) else null,
+        if (display.showFavorite && s.itemId in favorites) "★ במועדפים" else null,
+    ).joinToString(" · ")
 
 // ---------- building blocks ----------
 
 @Composable
-private fun SectionTitle(text: String, category: Category? = null) {
+private fun SimpleTitle(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(start = 18.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
+    )
+}
+
+/** Category header; tap to collapse or expand the group. */
+@Composable
+private fun GroupHeader(row: ListRow.Header, onToggle: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)
-            .padding(start = 18.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
+        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).clickable(onClick = onToggle)
+            .padding(start = 18.dp, end = 12.dp, top = 12.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (category != null) {
-            Box(Modifier.size(10.dp).clip(CircleShape).background(categoryColor(category)))
-            Spacer(Modifier.width(8.dp))
-        }
-        Text(text, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Box(Modifier.size(10.dp).clip(CircleShape).background(categoryColor(row.category)))
+        Spacer(Modifier.width(8.dp))
+        Text(row.category.label, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(6.dp))
+        Text("${row.count}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outlineVariant)
+        Spacer(Modifier.weight(1f))
+        Icon(
+            if (row.collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+            contentDescription = if (row.collapsed) "הרחבת הקבוצה" else "כיווץ הקבוצה",
+            tint = MaterialTheme.colorScheme.outline,
+        )
     }
 }
 
@@ -765,6 +681,220 @@ private fun RunningLowCard(s: Suggestion, info: String, onAdd: () -> Unit, onDis
             }
             IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "לא עכשיו") }
             IconButton(onClick = onAdd) { Icon(Icons.Default.Add, contentDescription = "הוסף לרשימה") }
+        }
+    }
+}
+
+/** Conversation state of an item shown on its tile. */
+data class ChatState(val unread: Int, val lastIsMine: Boolean, val status: DeliveryStatus?)
+
+private const val HOLD_MS = 650
+
+private class SwipeAction(val label: String, val icon: ImageVector, val color: Color, val run: () -> Unit)
+
+/**
+ * Physical-direction swipe: left = bought, right = missing (shopping) / delete (preparing).
+ * The icon and label sit at the edge of the phone the tile was pulled away from. The action only
+ * runs if the tile is held past the threshold until the ring fills and blinks; pulling back cancels.
+ */
+@Composable
+private fun SwipeableTile(left: SwipeAction, right: SwipeAction, content: @Composable () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var width by remember { mutableFloatStateOf(1f) }
+    val offset = remember { Animatable(0f) }
+    val ring = remember { Animatable(0f) }
+    var armedAt by remember { mutableStateOf<Long?>(null) }
+    val threshold = width * 0.3f
+    val past = abs(offset.value) >= threshold
+    LaunchedEffect(past) {
+        if (past) {
+            armedAt = System.currentTimeMillis()
+            ring.snapTo(0f)
+            ring.animateTo(1f, tween(HOLD_MS, easing = LinearEasing))
+        } else {
+            armedAt = null
+            ring.snapTo(0f)
+        }
+    }
+    val ready = past && ring.value >= 1f
+    val blink by rememberInfiniteTransition(label = "blink").animateFloat(
+        initialValue = 1f,
+        targetValue = 0.2f,
+        animationSpec = infiniteRepeatable(tween(260), RepeatMode.Reverse),
+        label = "blinkAlpha",
+    )
+
+    Box(Modifier.onSizeChanged { width = it.width.toFloat().coerceAtLeast(1f) }) {
+        if (offset.value != 0f) {
+            val toRight = offset.value > 0
+            val action = if (toRight) right else left
+            Box(
+                Modifier.matchParentSize().clip(RoundedCornerShape(20.dp)).background(action.color).padding(horizontal = 18.dp),
+                contentAlignment = if (toRight) AbsoluteAlignment.CenterLeft else AbsoluteAlignment.CenterRight,
+            ) {
+                // ring pinned to the phone edge, label beside it
+                CompositionLocalProvider(LocalLayoutDirection provides if (toRight) LayoutDirection.Ltr else LayoutDirection.Rtl) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.alpha(if (ready) blink else 1f)) {
+                            CircularProgressIndicator(
+                                progress = { if (past) ring.value else 0f },
+                                modifier = Modifier.size(44.dp),
+                                color = Color.White,
+                                trackColor = Color.White.copy(alpha = 0.3f),
+                                strokeWidth = 3.dp,
+                            )
+                            Icon(action.icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            when {
+                                !past -> action.label
+                                !ready -> "החזיקו…"
+                                else -> "שחררו: ${action.label}"
+                            },
+                            color = Color.White,
+                            fontWeight = FontWeight.ExtraBold,
+                        )
+                    }
+                }
+            }
+        }
+        Box(
+            Modifier
+                .absoluteOffset { IntOffset(offset.value.roundToInt(), 0) }
+                .draggable(
+                    orientation = Orientation.Horizontal,
+                    state = rememberDraggableState { delta ->
+                        scope.launch { offset.snapTo((offset.value + delta).coerceIn(-width, width)) }
+                    },
+                    onDragStopped = {
+                        val held = armedAt?.let { System.currentTimeMillis() - it >= HOLD_MS } == true
+                        val stillPast = abs(offset.value) >= width * 0.3f
+                        if (held && stillPast) (if (offset.value > 0) right else left).run()
+                        offset.animateTo(0f, tween(220))
+                    },
+                ),
+        ) { content() }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ProductTile(
+    line: ListLine,
+    shopping: Boolean,
+    subline: String,
+    tags: List<ItemTag>,
+    chat: ChatState?,
+    showPrices: Boolean,
+    lifted: Boolean,
+    dragHandle: (@Composable () -> Unit)?,
+    onBought: () -> Unit,
+    onRightSwipe: () -> Unit,
+    onPlus: () -> Unit,
+    onMinus: () -> Unit,
+    onOpen: () -> Unit,
+) {
+    val right = if (shopping) {
+        SwipeAction(if (line.missing) "ביטול חסר" else "חסר", Icons.Default.ReportProblem, Color(0xFFE8590C), onRightSwipe)
+    } else {
+        SwipeAction("מחיקה", Icons.Default.Delete, Color(0xFFD92D20), onRightSwipe)
+    }
+    val left = SwipeAction("נקנה", Icons.Default.Check, Color(0xFF00875A), onBought)
+
+    Column(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) {
+        SwipeableTile(left = left, right = right) {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                border = if (line.missing) BorderStroke(2.dp, MaterialTheme.colorScheme.secondary) else null,
+                colors = CardDefaults.cardColors(
+                    containerColor = when {
+                        lifted -> MaterialTheme.colorScheme.primaryContainer
+                        line.missing -> MaterialTheme.colorScheme.secondaryContainer
+                        else -> MaterialTheme.colorScheme.surface
+                    },
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = if (lifted) 10.dp else 1.5.dp),
+            ) {
+                Row(Modifier.height(IntrinsicSize.Min)) {
+                    Box(Modifier.width(6.dp).fillMaxHeight().background(categoryColor(line.category)))
+                    Column(Modifier.weight(1f).clickable(onClick = onOpen).padding(start = 4.dp, end = 12.dp, top = 8.dp, bottom = 6.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            dragHandle?.invoke()
+                            val checkSize = if (shopping) 48.dp else 40.dp
+                            Box(Modifier.size(checkSize).clip(CircleShape).clickable(onClick = onBought), contentAlignment = Alignment.Center) {
+                                Box(Modifier.size(checkSize - 16.dp).border(2.5.dp, MaterialTheme.colorScheme.primary, CircleShape))
+                            }
+                            Spacer(Modifier.width(6.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(line.displayName, style = ProductNameStyle, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                if (tags.isNotEmpty() || chat != null) {
+                                    FlowRow(
+                                        Modifier.padding(top = 3.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                                    ) {
+                                        tags.forEach { TagBadge(it) }
+                                        chat?.let { ChatIndicator(it) }
+                                    }
+                                }
+                            }
+                            if (showPrices) PriceSlot(price = null, average = null)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                            Text(
+                                subline,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f).padding(start = 8.dp),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            QuantityStepper(line.quantity, onMinus, onPlus)
+                        }
+                    }
+                }
+            }
+        }
+        // Reserved strip under the tile for a promotion from the price database (none yet).
+        PromoStrip(promo = null)
+    }
+}
+
+/** Ticks for my last message: o written · ✓ sent · ✓✓ received (grey) · ✓✓ read (blue). */
+@Composable
+fun DeliveryTicks(status: DeliveryStatus) {
+    val readBlue = Color(0xFF1570EF)
+    val grey = MaterialTheme.colorScheme.outline
+    val (text, color) = when (status) {
+        DeliveryStatus.PENDING -> "o" to grey
+        DeliveryStatus.SENT -> "✓" to grey
+        DeliveryStatus.DELIVERED -> "✓✓" to grey
+        DeliveryStatus.READ -> "✓✓" to readBlue
+    }
+    Text(text, color = color, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.bodySmall)
+}
+
+/** On the tile only when the item has a conversation: new-message count, or ticks of my last message. */
+@Composable
+private fun ChatIndicator(state: ChatState) {
+    val active = state.unread > 0
+    Row(
+        Modifier.clip(RoundedCornerShape(50))
+            .background(if (active) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 7.dp, vertical = 1.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.AutoMirrored.Filled.Chat, null, Modifier.size(13.dp), tint = if (active) Color.White else MaterialTheme.colorScheme.onSurfaceVariant)
+        when {
+            active -> {
+                Spacer(Modifier.width(3.dp))
+                Text("${state.unread}", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+            }
+            state.lastIsMine && state.status != null -> {
+                Spacer(Modifier.width(3.dp))
+                DeliveryTicks(state.status)
+            }
         }
     }
 }
@@ -807,12 +937,7 @@ fun QuantityStepper(quantity: Quantity?, onMinus: () -> Unit, onPlus: () -> Unit
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onMinus, modifier = Modifier.size(38.dp)) { Icon(Icons.Default.Remove, contentDescription = "פחות", Modifier.size(20.dp)) }
-        Text(
-            quantity?.format() ?: "—",
-            fontWeight = FontWeight.ExtraBold,
-            modifier = Modifier.widthIn(min = 36.dp),
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-        )
+        Text(quantity?.format() ?: "—", fontWeight = FontWeight.ExtraBold, modifier = Modifier.widthIn(min = 36.dp), textAlign = TextAlign.Center)
         IconButton(onClick = onPlus, modifier = Modifier.size(38.dp)) {
             Icon(Icons.Default.Add, contentDescription = "יותר", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
         }
@@ -838,127 +963,7 @@ private fun BoughtRow(line: ListLine, onReopen: () -> Unit) {
     }
 }
 
-// ---------- store bar ----------
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun StoreBar(vm: AppViewModel, prominent: Boolean, onAddItem: (() -> Unit)?) {
-    val stores by vm.stores.collectAsStateWithLifecycle()
-    val currentId by vm.currentStoreId.collectAsStateWithLifecycle()
-    val nearby by vm.nearbyStore.collectAsStateWithLifecycle()
-    var menu by remember { mutableStateOf(false) }
-    var adding by remember { mutableStateOf(false) }
-    var hasPermission by remember { mutableStateOf(vm.hasLocationPermission()) }
-    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
-        hasPermission = result.values.any { it }
-        if (hasPermission) vm.refreshLocation()
-    }
-    LaunchedEffect(stores, hasPermission) { if (hasPermission) vm.refreshLocation() }
-    val current = stores.firstOrNull { it.id == currentId }
-
-    FlowRow(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Box {
-            FilterChip(
-                selected = current != null,
-                onClick = { menu = true },
-                label = { Text(current?.let { "קונים ב: ${it.name}" } ?: "איפה קונים?") },
-                leadingIcon = { Icon(Icons.Default.Storefront, null, Modifier.size(18.dp)) },
-            )
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                stores.forEach { store ->
-                    DropdownMenuItem(
-                        text = { Text("${store.name} · ${store.type.label}") },
-                        onClick = { vm.selectStore(store.id); menu = false },
-                    )
-                }
-                DropdownMenuItem(text = { Text("הוספת חנות כאן…") }, onClick = { menu = false; adding = true })
-                if (current != null) DropdownMenuItem(text = { Text("ללא חנות") }, onClick = { vm.selectStore(null); menu = false })
-            }
-        }
-        val near = nearby
-        if (near != null && near.id != currentId) {
-            AssistChip(
-                onClick = { vm.selectStore(near.id) },
-                label = { Text("אתם ליד ${near.name} — לבחור?") },
-                leadingIcon = { Icon(Icons.Default.LocationOn, null, Modifier.size(18.dp)) },
-            )
-        } else if (!hasPermission && prominent) {
-            TextButton(onClick = {
-                permission.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION))
-            }) { Text("מיקום להצעת חנות") }
-        }
-        if (onAddItem != null) {
-            AssistChip(onClick = onAddItem, label = { Text("הוספת פריט") }, leadingIcon = { Icon(Icons.Default.Add, null, Modifier.size(18.dp)) })
-        }
-    }
-
-    if (adding) {
-        var name by remember { mutableStateOf("") }
-        var type by remember { mutableStateOf(StoreType.SUPERMARKET) }
-        AlertDialog(
-            onDismissRequest = { adding = false },
-            title = { Text("חנות חדשה") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(name, { name = it }, label = { Text("שם (למשל: רמי לוי תלפיות)") }, singleLine = true)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        StoreType.entries.forEach { t ->
-                            FilterChip(selected = type == t, onClick = { type = t }, label = { Text(t.label) })
-                        }
-                    }
-                    Text(
-                        if (hasPermission) "המיקום הנוכחי יישמר כדי להציע את החנות כשתגיעו אליה."
-                        else "בלי הרשאת מיקום החנות תישמר בלי מיקום.",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(enabled = name.isNotBlank(), onClick = { vm.addStore(name, type); adding = false }) { Text("שמירה") }
-            },
-            dismissButton = { TextButton(onClick = { adding = false }) { Text("ביטול") } },
-        )
-    }
-}
-
-// ---------- display options ----------
-
-@Composable
-private fun DisplayOptionsDialog(current: DisplayOptions, onChange: (DisplayOptions) -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("מה להציג ברשימה ובהמלצות") },
-        text = {
-            Column {
-                OptionRow("סיבת ההמלצה", current.showReason) { onChange(current.copy(showReason = it)) }
-                OptionRow("מתי נקנה לאחרונה", current.showLastBought) { onChange(current.copy(showLastBought = it)) }
-                OptionRow("תדירות קנייה", current.showFrequency) { onChange(current.copy(showFrequency = it)) }
-                OptionRow("סימון מועדפים ★", current.showFavorite) { onChange(current.copy(showFavorite = it)) }
-                OptionRow("מי הוסיף", current.showAddedBy) { onChange(current.copy(showAddedBy = it)) }
-                OptionRow("מקום למחיר ולמחיר ממוצע", current.showPrices) { onChange(current.copy(showPrices = it)) }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("סגירה") } },
-    )
-}
-
-@Composable
-private fun OptionRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }, verticalAlignment = Alignment.CenterVertically) {
-        Checkbox(checked = checked, onCheckedChange = onChange)
-        Text(label)
-    }
-}
-
-@Suppress("unused")
-private fun unreadFor(itemId: String, all: List<ItemMessage>, me: String, readAt: Long) =
-    all.count { it.itemId == itemId && it.authorId != me && it.atMillis > readAt }
-
-/** Coloured badge: routine green, occasional blue, special purple, favourite gold, missing orange, recipe teal. */
+/** Coloured pill: routine green, occasional blue, special purple, favourite gold, missing orange, recipe teal. */
 @Composable
 fun TagBadge(tag: ItemTag) {
     val (bg, fg) = when (tag.kind) {

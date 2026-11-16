@@ -13,8 +13,9 @@ import kotlinx.coroutines.flow.callbackFlow
  * server updates, including pending local writes — so the UI reacts instantly to the user's own
  * edits and within a moment to other members' edits.
  */
-internal fun Query.observe(): Flow<QuerySnapshot> = callbackFlow {
-    val registration = addSnapshotListener { snapshot, error ->
+internal fun Query.observe(includeMetadata: Boolean = false): Flow<QuerySnapshot> = callbackFlow {
+    val changes = if (includeMetadata) com.google.firebase.firestore.MetadataChanges.INCLUDE else com.google.firebase.firestore.MetadataChanges.EXCLUDE
+    val registration = addSnapshotListener(changes) { snapshot, error ->
         if (error != null) {
             close(error)
             return@addSnapshotListener

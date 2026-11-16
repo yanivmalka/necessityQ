@@ -171,7 +171,7 @@ fun HistoryScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
     val zone = ZoneId.systemDefault()
 
     Column(modifier.fillMaxSize()) {
-        TopAppBar(title = { Text("הרגלי הקנייה") })
+        TopAppBar(navigationIcon = { DrawerButton() }, title = { Text("היסטוריה והרגלי קנייה") })
         LazyColumn(Modifier.fillMaxSize()) {
             if (stats.isEmpty()) {
                 item {

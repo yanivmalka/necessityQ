@@ -135,6 +135,7 @@ internal object FirestoreMapping {
             authorName = doc.getString("authorName") ?: "",
             text = text,
             atMillis = doc.getLong("at") ?: 0L,
+            pending = doc.metadata.hasPendingWrites(),
         )
     }
 

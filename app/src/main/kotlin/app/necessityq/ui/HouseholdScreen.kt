@@ -75,6 +75,7 @@ fun HouseholdScreen(
 
     Column(modifier) {
         TopAppBar(
+            navigationIcon = { DrawerButton() },
             title = { Text(household.name) },
             actions = {
                 if (vm.supportsAccounts && isOwner) {
@@ -120,21 +121,10 @@ fun HouseholdScreen(
                 Text("מצב מכשיר יחיד: הנתונים נשמרים במכשיר בלבד.", style = MaterialTheme.typography.bodyMedium)
             }
 
-            if (vm.supportsAccounts) {
-                HorizontalDivider()
-                AccountCard(vm, account)
-            }
-
-            HorizontalDivider()
-            DisplayCard(vm)
-
             if (vm.isShared) {
                 HorizontalDivider()
                 NotifyCard(vm, members, userId)
             }
-
-            HorizontalDivider()
-            UpdateCard(vm)
 
             HorizontalDivider()
             SectionTitle("נתוני דוגמה")
@@ -334,7 +324,7 @@ fun UpdateCard(vm: AppViewModel) {
 // ---------- display ----------
 
 @Composable
-private fun DisplayCard(vm: AppViewModel) {
+fun DisplayCard(vm: AppViewModel) {
     val bright by vm.brightTheme.collectAsStateWithLifecycle()
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {

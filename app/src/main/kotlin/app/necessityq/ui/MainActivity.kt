@@ -1,6 +1,29 @@
 package app.necessityq.ui
 
 import android.Manifest
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
+import app.necessityq.domain.ListMode
+import kotlinx.coroutines.launch
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -129,6 +152,13 @@ fun NecessityTheme(bright: Boolean, content: @Composable () -> Unit) {
 /** Product names on tiles: bold and large in every theme. */
 val ProductNameStyle = TextStyle(fontWeight = FontWeight.ExtraBold, fontSize = 21.sp)
 
+/** Destinations of the navigation drawer. */
+private enum class Dest(val title: String) {
+    PLAN("הכנת רשימה"), SHOP("בקנייה"), MENU("תפריט"), MESSAGES("הודעות"), HISTORY("היסטוריה"),
+    HOUSEHOLD("הבית ומשתתפים"), ACCOUNT("חשבון"), SETTINGS("הגדרות תצוגה"), APPEARANCE("מראה"),
+    UPDATES("עדכונים"), ABOUT("אודות"),
+}
+
 @Composable
 private fun Root(vm: AppViewModel) {
     val session by vm.session.collectAsStateWithLifecycle()
@@ -156,44 +186,92 @@ private fun Root(vm: AppViewModel) {
                 Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
                     OnboardingScreen(vm, s.account, Modifier.padding(padding))
                 }
-            } else {
-                var tab by rememberSaveable { mutableIntStateOf(0) }
-                val unread by vm.unreadTotal.collectAsStateWithLifecycle()
-                // a conversation opened from the messages tab
-                var openChat by remember { mutableStateOf<Pair<String, String>?>(null) }
-                Scaffold(
-                    snackbarHost = { SnackbarHost(snackbar) },
-                    bottomBar = {
-                        NavigationBar {
-                            NavigationBarItem(tab == 0, { tab = 0 }, { Icon(Icons.AutoMirrored.Filled.List, null) }, label = { Text("רשימה") })
-                            NavigationBarItem(
-                                tab == 1, { tab = 1 },
-                                {
-                                    BadgedBox(badge = { if (unread > 0) Badge { Text("$unread") } }) {
-                                        Icon(Icons.AutoMirrored.Filled.Chat, null)
-                                    }
-                                },
-                                label = { Text("הודעות") },
+                return
+            }
+            val mode by vm.mode.collectAsStateWithLifecycle()
+            var dest by rememberSaveable { mutableStateOf(if (mode == ListMode.SHOP) Dest.SHOP else Dest.PLAN) }
+            val unread by vm.unreadTotal.collectAsStateWithLifecycle()
+            val update by vm.update.collectAsStateWithLifecycle()
+            val drawer = rememberDrawerState(DrawerValue.Closed)
+            val scope = rememberCoroutineScope()
+            var openChat by remember { mutableStateOf<Pair<String, String>?>(null) }
+
+            fun go(d: Dest) {
+                when (d) {
+                    Dest.PLAN -> vm.setMode(ListMode.PLAN)
+                    Dest.SHOP -> vm.setMode(ListMode.SHOP)
+                    else -> Unit
+                }
+                dest = d
+                scope.launch { drawer.close() }
+            }
+
+            BackHandler(enabled = drawer.isOpen || (dest != Dest.PLAN && dest != Dest.SHOP)) {
+                if (drawer.isOpen) scope.launch { drawer.close() } else dest = if (mode == ListMode.SHOP) Dest.SHOP else Dest.PLAN
+            }
+
+            ModalNavigationDrawer(
+                drawerState = drawer,
+                drawerContent = {
+                    ModalDrawerSheet(Modifier.widthIn(max = 320.dp)) {
+                        Column(Modifier.verticalScroll(rememberScrollState()).padding(vertical = 8.dp)) {
+                            Text(
+                                household.name,
+                                style = MaterialTheme.typography.titleLarge,
+                                modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
                             )
-                            NavigationBarItem(tab == 2, { tab = 2 }, { Icon(Icons.Default.Restaurant, null) }, label = { Text("תפריט") })
-                            NavigationBarItem(tab == 3, { tab = 3 }, { Icon(Icons.Default.History, null) }, label = { Text("היסטוריה") })
-                            NavigationBarItem(tab == 4, { tab = 4 }, { Icon(Icons.Default.Home, null) }, label = { Text("הבית") })
+                            DrawerItem("הכנת רשימה", Icons.AutoMirrored.Filled.List, dest == Dest.PLAN) { go(Dest.PLAN) }
+                            DrawerItem("בקנייה", Icons.Default.ShoppingCart, dest == Dest.SHOP) { go(Dest.SHOP) }
+                            DrawerItem("תפריט", Icons.Default.Restaurant, dest == Dest.MENU) { go(Dest.MENU) }
+                            DrawerItem("הודעות", Icons.AutoMirrored.Filled.Chat, dest == Dest.MESSAGES, badge = unread.takeIf { it > 0 }?.toString()) { go(Dest.MESSAGES) }
+                            DrawerItem("היסטוריה", Icons.Default.History, dest == Dest.HISTORY) { go(Dest.HISTORY) }
+                            HorizontalDivider(Modifier.padding(vertical = 8.dp, horizontal = 24.dp))
+                            DrawerItem("הבית ומשתתפים", Icons.Default.Group, dest == Dest.HOUSEHOLD) { go(Dest.HOUSEHOLD) }
+                            DrawerItem("חשבון", Icons.Default.AccountCircle, dest == Dest.ACCOUNT) { go(Dest.ACCOUNT) }
+                            DrawerItem("הגדרות תצוגה", Icons.Default.Tune, dest == Dest.SETTINGS) { go(Dest.SETTINGS) }
+                            DrawerItem("מראה", Icons.Default.Palette, dest == Dest.APPEARANCE) { go(Dest.APPEARANCE) }
+                            DrawerItem(
+                                "עדכונים", Icons.Default.SystemUpdate, dest == Dest.UPDATES,
+                                badge = if (update is UpdateState.Available) "חדש" else null,
+                            ) { go(Dest.UPDATES) }
+                            DrawerItem("אודות", Icons.Default.Info, dest == Dest.ABOUT) { go(Dest.ABOUT) }
                         }
-                    },
-                ) { padding ->
-                    val modifier = Modifier.padding(padding)
-                    when (tab) {
-                        0 -> ListScreen(vm, household.name, modifier)
-                        1 -> MessagesScreen(vm, modifier, onOpen = { itemId, name -> openChat = itemId to name })
-                        2 -> MenuScreen(vm, modifier)
-                        3 -> HistoryScreen(vm, modifier)
-                        else -> HouseholdScreen(vm, household, s.account, s.userId, modifier)
+                    }
+                },
+            ) {
+                CompositionLocalProvider(LocalOpenDrawer provides { scope.launch { drawer.open() } }) {
+                    Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
+                        val modifier = Modifier.padding(padding)
+                        when (dest) {
+                            Dest.PLAN, Dest.SHOP -> ListScreen(vm, household.name, modifier)
+                            Dest.MENU -> MenuScreen(vm, modifier)
+                            Dest.MESSAGES -> MessagesScreen(vm, modifier, onOpen = { itemId, name -> openChat = itemId to name })
+                            Dest.HISTORY -> HistoryScreen(vm, modifier)
+                            Dest.HOUSEHOLD -> HouseholdScreen(vm, household, s.account, s.userId, modifier)
+                            Dest.ACCOUNT -> AccountScreen(vm, s.account, modifier)
+                            Dest.SETTINGS -> DisplaySettingsScreen(vm, modifier)
+                            Dest.APPEARANCE -> AppearanceScreen(vm, modifier)
+                            Dest.UPDATES -> UpdatesScreen(vm, modifier)
+                            Dest.ABOUT -> AboutScreen(modifier)
+                        }
                     }
                 }
-                openChat?.let { (itemId, name) ->
-                    ItemSheet(vm, itemId = itemId, itemName = name, onDismiss = { openChat = null })
-                }
+            }
+            openChat?.let { (itemId, name) ->
+                ItemSheet(vm, itemId = itemId, itemName = name, onDismiss = { openChat = null })
             }
         }
     }
+}
+
+@Composable
+private fun DrawerItem(label: String, icon: ImageVector, selected: Boolean, badge: String? = null, onClick: () -> Unit) {
+    NavigationDrawerItem(
+        label = { Text(label, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) },
+        icon = { Icon(icon, null) },
+        selected = selected,
+        onClick = onClick,
+        badge = badge?.let { { Badge { Text(it) } } },
+        modifier = Modifier.padding(horizontal = 12.dp),
+    )
 }

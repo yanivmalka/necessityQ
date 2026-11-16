@@ -56,7 +56,25 @@ data class ItemMessage(
     val authorName: String,
     val text: String,
     val atMillis: Long,
+    /** Written on this device but not yet confirmed by the server. */
+    val pending: Boolean = false,
 )
+
+/** What one member has received and read. */
+data class Receipt(val seenAt: Long = 0, val read: Map<String, Long> = emptyMap())
+
+/** WhatsApp-style ticks for my own message: o written · ✓ sent · ✓✓ received (grey) · ✓✓ read (blue). */
+enum class DeliveryStatus { PENDING, SENT, DELIVERED, READ }
+
+object Receipts {
+    fun status(m: ItemMessage, me: String, receipts: Map<String, Receipt>, members: Collection<String>): DeliveryStatus {
+        if (m.pending) return DeliveryStatus.PENDING
+        val others = members.filter { it != me && it != m.authorId }
+        if (others.any { (receipts[it]?.read?.get(m.itemId) ?: 0L) >= m.atMillis }) return DeliveryStatus.READ
+        if (others.any { (receipts[it]?.seenAt ?: 0L) >= m.atMillis }) return DeliveryStatus.DELIVERED
+        return DeliveryStatus.SENT
+    }
+}
 
 /** Who gets notified when someone flags an item as missing. */
 data class NotifySettings(val missingRecipients: Set<String> = emptySet())
@@ -76,6 +94,11 @@ interface CollabRepository {
 
     fun notifySettings(householdId: String): Flow<NotifySettings>
     suspend fun setMissingRecipients(householdId: String, userIds: Set<String>)
+
+    /** Per member: when they last received messages, and when they read each item's conversation. */
+    fun receipts(householdId: String): Flow<Map<String, Receipt>>
+    suspend fun markSeen(householdId: String, userId: String, atMillis: Long)
+    suspend fun markRead(householdId: String, userId: String, itemId: String, atMillis: Long)
 }
 
 /** Non-persistent implementation for the single-device mode and tests. */
@@ -96,6 +119,16 @@ class InMemoryCollabRepository : CollabRepository {
     override suspend fun setMissingRecipients(householdId: String, userIds: Set<String>) {
         notifyState.value = NotifySettings(userIds)
     }
+
+    private val receiptState = MutableStateFlow<Map<String, Receipt>>(emptyMap())
+    override fun receipts(householdId: String): Flow<Map<String, Receipt>> = receiptState
+    override suspend fun markSeen(householdId: String, userId: String, atMillis: Long) =
+        receiptState.update { it + (userId to (it[userId] ?: Receipt()).copy(seenAt = atMillis)) }
+    override suspend fun markRead(householdId: String, userId: String, itemId: String, atMillis: Long) =
+        receiptState.update { m ->
+            val r = m[userId] ?: Receipt()
+            m + (userId to r.copy(read = r.read + (itemId to atMillis)))
+        }
 }
 
 // ---------- ordering, sorting, quantity steps ----------

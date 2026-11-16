@@ -16,6 +16,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.ReportProblem
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
@@ -87,13 +91,36 @@ fun ItemSheet(vm: AppViewModel, itemId: String, itemName: String, onDismiss: () 
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(line?.displayName ?: itemName, style = ProductNameStyle, modifier = Modifier.weight(1f))
-                IconButton(onClick = { vm.toggleFavorite(itemId) }) {
-                    Icon(
-                        if (favorite) Icons.Default.Star else Icons.Default.StarBorder,
-                        contentDescription = if (favorite) "הסרה מהמועדפים" else "הוספה למועדפים",
-                        tint = Color(0xFFC77700),
-                    )
+                if (favorite) Icon(Icons.Default.Star, "מועדף", tint = Color(0xFFC77700))
+                Text(line?.displayName ?: itemName, style = ProductNameStyle, modifier = Modifier.weight(1f).padding(horizontal = 4.dp))
+                // ⋮ actions — on the left edge in Hebrew layout
+                androidx.compose.foundation.layout.Box {
+                    var menu by remember { mutableStateOf(false) }
+                    IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "פעולות") }
+                    androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text(if (favorite) "הסרה מהמועדפים" else "הוספה למועדפים") },
+                            leadingIcon = { Icon(if (favorite) Icons.Default.StarBorder else Icons.Default.Star, null) },
+                            onClick = { vm.toggleFavorite(itemId); menu = false },
+                        )
+                        if (line != null) {
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text(if (line.missing) "ביטול סימון חסר" else "סימון כחסר") },
+                                leadingIcon = { Icon(Icons.Default.ReportProblem, null) },
+                                onClick = { vm.setMissing(line, !line.missing); menu = false },
+                            )
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text("עריכת כמות והערה") },
+                                leadingIcon = { Icon(Icons.Default.Edit, null) },
+                                onClick = { editing = true; menu = false },
+                            )
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text("הסרה מהרשימה") },
+                                leadingIcon = { Icon(Icons.Default.Delete, null) },
+                                onClick = { vm.delete(line); menu = false; onDismiss() },
+                            )
+                        }
+                    }
                 }
             }
 
@@ -107,16 +134,14 @@ fun ItemSheet(vm: AppViewModel, itemId: String, itemName: String, onDismiss: () 
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { vm.checkOff(line); onDismiss() }) { Text("נקנה ✓") }
-                    FilterChip(
-                        selected = line.missing,
-                        onClick = { vm.setMissing(line, !line.missing) },
-                        label = { Text(if (line.missing) "מסומן כחסר" else "סימון כחסר ⚠") },
-                    )
-                    OutlinedButton(onClick = { editing = true }) { Text("עריכה") }
+                    OutlinedButton(onClick = { vm.delete(line); onDismiss() }) {
+                        Icon(Icons.Default.Delete, null, Modifier.padding(end = 4.dp))
+                        Text("הסרה")
+                    }
                 }
                 if (line.missing) {
                     Text(
-                        "בני הבית שנבחרו לקבל התראות יקבלו הודעה (ההגדרה בלשונית \"הבית\").",
+                        "מסומן כחסר — בני הבית שנבחרו לקבל התראות יקבלו הודעה (בתפריט ← הבית ומשתתפים).",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -140,7 +165,8 @@ fun ItemSheet(vm: AppViewModel, itemId: String, itemName: String, onDismiss: () 
 
             HorizontalDivider()
             Text("שיחה על המוצר", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-            ChatThread(thread, me = vm.me)
+            vm.receipts.collectAsStateWithLifecycle()
+            ChatThread(thread, me = vm.me, status = vm::deliveryStatus)
             var draft by remember(itemId) { mutableStateOf("") }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
@@ -182,7 +208,7 @@ private fun InfoLine(label: String, value: String?) {
 }
 
 @Composable
-private fun ChatThread(thread: List<ItemMessage>, me: String) {
+private fun ChatThread(thread: List<ItemMessage>, me: String, status: (ItemMessage) -> app.necessityq.domain.DeliveryStatus) {
     if (thread.isEmpty()) {
         Text("אין עדיין הודעות. כתבו כאן שאלה או פרט על המוצר, וכל בני הבית יראו.", style = MaterialTheme.typography.bodySmall)
         return
@@ -201,6 +227,7 @@ private fun ChatThread(thread: List<ItemMessage>, me: String) {
             ) {
                 Text("${if (mine) "אני" else m.authorName} · ${fmt(m.atMillis)}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
                 Text(m.text)
+                if (mine) androidx.compose.foundation.layout.Box(Modifier.align(Alignment.End)) { DeliveryTicks(status(m)) }
             }
         }
     }
@@ -219,7 +246,7 @@ fun MessagesScreen(vm: AppViewModel, modifier: Modifier = Modifier, onOpen: (ite
         .sortedByDescending { it.first.atMillis }
 
     Column(modifier.fillMaxSize()) {
-        TopAppBar(title = { Text("הודעות על מוצרים", fontWeight = FontWeight.ExtraBold) })
+        TopAppBar(navigationIcon = { DrawerButton() }, title = { Text("הודעות על מוצרים", fontWeight = FontWeight.ExtraBold) })
         if (threads.isEmpty()) {
             Text(
                 "כאן יופיעו כל השיחות על מוצרים. פותחים שיחה בהקשה על מוצר ברשימה.",
@@ -243,7 +270,7 @@ fun MessagesScreen(vm: AppViewModel, modifier: Modifier = Modifier, onOpen: (ite
                         )
                         Text(fmt(last.atMillis), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    if (unread > 0) Badge { Text("$unread") }
+                    if (unread > 0) Badge { Text("$unread") } else if (last.authorId == vm.me) DeliveryTicks(vm.deliveryStatus(last))
                 }
                 HorizontalDivider()
             }
