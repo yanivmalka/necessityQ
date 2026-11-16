@@ -157,6 +157,33 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    // ---------- list from past purchases, reset ----------
+
+    fun proposeList(mode: app.necessityq.domain.GenerateMode): List<app.necessityq.domain.GeneratedItem> {
+        val snap = snapshot.value ?: return emptyList()
+        return app.necessityq.domain.ListGenerator.propose(
+            mode, snap.stats.values, purchases.value, snap.lines, java.time.LocalDate.now(),
+        )
+    }
+
+    fun addGenerated(items: List<app.necessityq.domain.GeneratedItem>) {
+        val (hid, uid, lines) = ctx() ?: return
+        if (items.isEmpty()) return
+        launchSafe {
+            val added = container.service.addGenerated(hid, uid, items, lines)
+            _undo.tryEmit(UndoEvent("נוספו ${added.size} פריטים מקניות עבר") { launchSafe { container.service.undoGenerated(hid, added) } })
+        }
+    }
+
+    fun resetList(scope: app.necessityq.domain.ResetScope) {
+        val (hid, _, lines) = ctx() ?: return
+        launchSafe {
+            val moved = container.service.resetList(hid, scope, lines)
+            if (moved.isEmpty()) _messages.tryEmit("אין מה לאפס")
+            else _undo.tryEmit(UndoEvent("${moved.size} פריטים עברו לסל המחזור") { moved.forEach { restore(it, it.status) } })
+        }
+    }
+
     fun deletePurchase(purchase: Purchase) {
         val (hid, _, _) = ctx() ?: return
         launchSafe { container.service.deletePurchase(hid, purchase) }
@@ -186,8 +213,17 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         prefs.mode = value
         mode.value = value
         sort.value = prefs.sortFor(value)
+        descending.value = prefs.descendingFor(value)
         checkStorePrompt()
     }
+
+    /** Sort direction (per stage of use). */
+    val descending = MutableStateFlow(prefs.descendingFor(prefs.mode))
+    fun setDescending(value: Boolean) { prefs.setDescendingFor(mode.value, value); descending.value = value }
+
+    /** Filter of the open lines (not persisted: a filter is for the moment). */
+    val filter = MutableStateFlow(app.necessityq.domain.ListFilter())
+    fun setFilter(value: app.necessityq.domain.ListFilter) { filter.value = value }
 
     /** "Where are we shopping?" — asked once at the start of a shopping trip; optional, editable later. */
     val storePrompt = MutableStateFlow(false)
@@ -206,6 +242,13 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     val collapsed = MutableStateFlow(prefs.collapsed)
     fun toggleCollapsed(key: String) {
         val next = if (key in collapsed.value) collapsed.value - key else collapsed.value + key
+        prefs.collapsed = next
+        collapsed.value = next
+    }
+
+    /** Collapse every given section, or (null) expand them all. */
+    fun setAllCollapsed(keys: Set<String>?) {
+        val next = keys ?: emptySet()
         prefs.collapsed = next
         collapsed.value = next
     }
@@ -274,6 +317,17 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         .flatMapLatest { hid -> if (hid == null) emptyFlow() else container.collab.favorites(hid) }
         .catch { emit(emptySet()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    /** Unit prices the household entered (until a price database is connected). */
+    val prices: StateFlow<Map<String, Double>> = householdId
+        .flatMapLatest { hid -> if (hid == null) emptyFlow() else container.collab.prices(hid) }
+        .catch { emit(emptyMap()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    fun setPrice(itemId: String, price: Double?) {
+        val (hid, _, _) = ctx() ?: return
+        launchSafe { container.collab.setPrice(hid, itemId, price?.takeIf { it > 0 }) }
+    }
 
     /** A known store near the device right now (set by [refreshLocation]). */
     val nearbyStore = MutableStateFlow<Store?>(null)
@@ -382,18 +436,74 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     private var lastSeenReported = 0L
 
-    fun sendMessage(itemId: String, itemName: String, text: String) {
+    private fun authorName(uid: String) =
+        memberNames.value[uid] ?: (session.value as? Session.SignedIn)?.account?.displayName ?: "אני"
+
+    fun sendMessage(itemId: String, itemName: String, text: String, replyToId: String? = null) {
         val (hid, uid, _) = ctx() ?: return
         val clean = text.trim()
         if (clean.isEmpty()) return
-        val author = memberNames.value[uid] ?: (session.value as? Session.SignedIn)?.account?.displayName ?: "אני"
         launchSafe {
             container.collab.sendMessage(
                 hid,
-                ItemMessage(java.util.UUID.randomUUID().toString(), itemId, itemName, uid, author, clean, System.currentTimeMillis()),
+                ItemMessage(
+                    java.util.UUID.randomUUID().toString(), itemId, itemName, uid, authorName(uid), clean,
+                    System.currentTimeMillis(), replyToId = replyToId,
+                ),
             )
         }
     }
+
+    /** Sends a picture or a recording: the bytes first, then the message that points at them. */
+    fun sendMedia(
+        itemId: String,
+        itemName: String,
+        kind: app.necessityq.domain.MessageKind,
+        media: app.necessityq.domain.MediaBlob,
+        caption: String = "",
+        durationMs: Long? = null,
+        replyToId: String? = null,
+    ) {
+        val (hid, uid, _) = ctx() ?: return
+        if (media.bytes.size > 900_000) { _messages.tryEmit("הקובץ גדול מדי לשליחה"); return }
+        val mediaId = java.util.UUID.randomUUID().toString()
+        mediaCache[mediaId] = media
+        launchSafe {
+            container.collab.saveMedia(hid, mediaId, uid, media)
+            container.collab.sendMessage(
+                hid,
+                ItemMessage(
+                    java.util.UUID.randomUUID().toString(), itemId, itemName, uid, authorName(uid), caption.trim(),
+                    System.currentTimeMillis(), kind = kind, mediaId = mediaId, durationMs = durationMs, replyToId = replyToId,
+                ),
+            )
+        }
+    }
+
+    private val mediaCache = java.util.Collections.synchronizedMap(
+        object : LinkedHashMap<String, app.necessityq.domain.MediaBlob>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, app.necessityq.domain.MediaBlob>?) = size > 40
+        },
+    )
+
+    /** Loads a message's picture / recording (cached). */
+    suspend fun loadMedia(mediaId: String): app.necessityq.domain.MediaBlob? {
+        mediaCache[mediaId]?.let { return it }
+        val (hid, _, _) = ctx() ?: return null
+        return runCatching { container.collab.loadMedia(hid, mediaId) }.getOrNull()?.also { mediaCache[mediaId] = it }
+    }
+
+    val recorder = app.necessityq.platform.VoiceRecorder(container.appContext)
+    val player = app.necessityq.platform.VoicePlayer(container.appContext)
+
+    override fun onCleared() {
+        recorder.stopQuietly()
+        player.stop()
+    }
+
+    /** Sound for new messages — a quick toggle in the conversation and the messages screen. */
+    val chatSound = MutableStateFlow(prefs.chatSound)
+    fun setChatSound(on: Boolean) { prefs.chatSound = on; chatSound.value = on }
 
     fun setMissingRecipients(userIds: Set<String>) {
         val (hid, _, _) = ctx() ?: return
@@ -423,7 +533,9 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                     seenMessages = all.map { it.id }.toSet()
                 } else {
                     all.filter { it.id !in seen && it.authorId != me }.forEach {
-                        container.notifier.notify(it.id.hashCode(), "הודעה על ${it.itemName}", "${it.authorName}: ${it.text}")
+                        container.notifier.notify(
+                            it.id.hashCode(), "הודעה על ${it.itemName}", "${it.authorName}: ${it.preview}", sound = chatSound.value,
+                        )
                     }
                     seenMessages = all.map { it.id }.toSet()
                 }

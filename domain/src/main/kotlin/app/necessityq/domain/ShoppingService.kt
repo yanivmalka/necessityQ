@@ -162,6 +162,51 @@ class ShoppingService(
     suspend fun clearBought(householdId: String, lines: List<ListLine>) =
         repository.removeLines(householdId, lines.filter { it.status == LineStatus.BOUGHT }, RemoveReason.CLEARED, clock.nowMillis())
 
+    /**
+     * Adds the confirmed items of a generated list ([ListGenerator]) as [LineSource.AUTO] lines.
+     * Returns the new line ids (for undo). Items already open on the list are skipped.
+     */
+    suspend fun addGenerated(householdId: String, userId: String, items: List<GeneratedItem>, current: List<ListLine>): List<String> {
+        val onList = current.filter { it.status == LineStatus.NEEDED }.map { it.itemId }.toMutableSet()
+        val now = clock.nowMillis()
+        val added = mutableListOf<String>()
+        items.forEachIndexed { index, item ->
+            if (!onList.add(item.identity.id)) return@forEachIndexed
+            val id = ids.newId()
+            repository.addLine(
+                householdId,
+                ListLine(
+                    id = id,
+                    itemId = item.identity.id,
+                    name = item.identity.name,
+                    variant = item.identity.variant,
+                    category = item.identity.category,
+                    quantity = item.quantity,
+                    note = null,
+                    status = LineStatus.NEEDED,
+                    source = LineSource.AUTO,
+                    addedBy = userId,
+                    // keep the proposal's order as the order of adding
+                    addedAtMillis = now + index,
+                    updatedAtMillis = now,
+                ),
+            )
+            added += id
+        }
+        return added
+    }
+
+    /** Undo of [addGenerated]: the lines never really existed, so they are removed for good. */
+    suspend fun undoGenerated(householdId: String, lineIds: List<String>) =
+        repository.purgeLines(householdId, lineIds)
+
+    /** Starts a fresh list: the lines in [scope] go to the recycle bin (restorable). Returns them for undo. */
+    suspend fun resetList(householdId: String, scope: ResetScope, lines: List<ListLine>): List<ListLine> {
+        val targets = ListReset.linesFor(scope, lines)
+        if (targets.isNotEmpty()) repository.removeLines(householdId, targets, RemoveReason.RESET, clock.nowMillis())
+        return targets
+    }
+
     suspend fun deletePurchase(householdId: String, purchase: Purchase) =
         repository.deletePurchase(householdId, purchase.id)
 
