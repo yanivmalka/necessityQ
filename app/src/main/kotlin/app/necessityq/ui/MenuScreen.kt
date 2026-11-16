@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -208,7 +207,7 @@ private fun tasteSummary(data: MealData, dish: Dish): String {
 @Composable
 private fun MenuCard(title: String, content: @Composable () -> Unit) {
     Card(
-        shape = RoundedCornerShape(20.dp),
+        shape = NqShapes.Tile,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp),
     ) {

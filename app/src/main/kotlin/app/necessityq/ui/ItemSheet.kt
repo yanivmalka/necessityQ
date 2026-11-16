@@ -61,7 +61,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandMore
@@ -95,7 +94,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -158,7 +156,7 @@ fun ItemSheet(vm: AppViewModel, itemId: String, itemName: String, onDismiss: () 
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (favorite) Icon(Icons.Default.Star, "מועדף", tint = Color(0xFFC77700))
+                if (favorite) Icon(Icons.Default.Star, "מועדף", tint = NqPalette.FavoriteStar)
                 Text(line?.displayName ?: itemName, style = ProductNameStyle, modifier = Modifier.weight(1f).padding(horizontal = 4.dp))
                 // ⋮ actions — on the left edge in Hebrew layout
                 androidx.compose.foundation.layout.Box {
@@ -267,7 +265,7 @@ fun ItemSheet(vm: AppViewModel, itemId: String, itemName: String, onDismiss: () 
                 if (pastOpen) {
                     pastThreads.forEach { thread ->
                         Column(
-                            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)).padding(10.dp),
+                            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, NqShapes.Panel).padding(10.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -478,7 +476,7 @@ private fun ChatThread(
                         .align(if (mine) Alignment.Start else Alignment.End)
                         .background(
                             if (mine) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                            RoundedCornerShape(12.dp),
+                            NqShapes.Panel,
                         )
                         .combinedClickable(onClick = {}, onLongClick = { menu = true })
                         .padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 6.dp),
@@ -529,7 +527,7 @@ private fun ChatThread(
                         val quoted = byId[id]
                         Column(
                             Modifier.padding(end = 6.dp, bottom = 4.dp).fillMaxWidth()
-                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f), NqShapes.Inset)
                                 .padding(horizontal = 8.dp, vertical = 3.dp),
                         ) {
                             Text(
@@ -608,14 +606,14 @@ private fun ImageAttachment(vm: AppViewModel, mediaId: String) {
     if (bmp == null) {
         Box(
             Modifier.padding(end = 6.dp).fillMaxWidth().height(140.dp)
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), RoundedCornerShape(8.dp)),
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), NqShapes.Inset),
             contentAlignment = Alignment.Center,
         ) { CircularProgressIndicator(Modifier.size(24.dp)) }
         return
     }
     Image(
         bmp, contentDescription = "תמונה",
-        modifier = Modifier.padding(end = 6.dp).fillMaxWidth().heightIn(max = 220.dp).clip(RoundedCornerShape(8.dp)).clickable { full = true },
+        modifier = Modifier.padding(end = 6.dp).fillMaxWidth().heightIn(max = 220.dp).clip(NqShapes.Inset).clickable { full = true },
         contentScale = ContentScale.Crop,
     )
     if (full) {
@@ -776,7 +774,7 @@ private fun ChatComposer(
 
     replyTo?.let { m ->
         Row(
-            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(10.dp))
+            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, NqShapes.Strip)
                 .padding(start = 10.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -790,7 +788,7 @@ private fun ChatComposer(
     }
     editing?.let { m ->
         Row(
-            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.tertiaryContainer, RoundedCornerShape(10.dp))
+            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.tertiaryContainer, NqShapes.Strip)
                 .padding(start = 10.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -808,7 +806,7 @@ private fun ChatComposer(
 
     if (recording) {
         Row(
-            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(16.dp)).padding(horizontal = 8.dp),
+            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.errorContainer, NqShapes.Field).padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = { vm.recorder.stopQuietly(); recording = false }) { Icon(Icons.Default.Delete, contentDescription = "ביטול ההקלטה") }

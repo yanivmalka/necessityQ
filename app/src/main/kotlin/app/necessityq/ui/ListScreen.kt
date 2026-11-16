@@ -337,7 +337,7 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                 placeholder = { Text("הוספה מהירה: 2 קוטג' 5%") },
                 singleLine = true,
-                shape = RoundedCornerShape(16.dp),
+                shape = NqShapes.Field,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { vm.submitQuery() }),
                 trailingIcon = {
@@ -466,7 +466,7 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
                                     onClick = { vm.accept(s) },
                                     label = { Text((if (star) "★ " else "") + s.identity.displayName) },
                                     leadingIcon = { Icon(Icons.Default.Add, null) },
-                                    shape = RoundedCornerShape(50),
+                                    shape = NqShapes.Pill,
                                 )
                             }
                         }
@@ -632,7 +632,7 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
 private fun StorePromptCard(vm: AppViewModel) {
     Card(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-        shape = RoundedCornerShape(20.dp),
+        shape = NqShapes.Tile,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -768,22 +768,6 @@ private fun binTime(millis: Long): String =
     java.time.Instant.ofEpochMilli(millis).atZone(java.time.ZoneId.systemDefault())
         .format(java.time.format.DateTimeFormatter.ofPattern("d.M HH:mm"))
 
-/** Accent colour per category: a thin strip on each tile and a dot on the group header. */
-fun categoryColor(category: Category): Color = when (category) {
-    Category.PRODUCE -> Color(0xFF2F9E44)
-    Category.DAIRY -> Color(0xFF1C7ED6)
-    Category.BAKERY -> Color(0xFFE8890C)
-    Category.MEAT_FISH -> Color(0xFFE03131)
-    Category.PANTRY -> Color(0xFF9C6B30)
-    Category.BREAKFAST_SNACKS -> Color(0xFFD6336C)
-    Category.DRINKS -> Color(0xFF1098AD)
-    Category.FROZEN -> Color(0xFF4DABF7)
-    Category.CLEANING -> Color(0xFF7048E8)
-    Category.TOILETRIES -> Color(0xFFAE3EC9)
-    Category.BABY -> Color(0xFFF783AC)
-    Category.OTHER -> Color(0xFF868E96)
-}
-
 // ---------- info lines ----------
 
 private fun daysAgo(stats: ItemStats?, today: LocalDate): String? {
@@ -855,7 +839,7 @@ private fun GroupHeader(row: ListRow.Header, onToggle: () -> Unit) {
 private fun RunningLowCard(s: Suggestion, info: String, onAdd: () -> Unit, onDismiss: () -> Unit) {
     Card(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
-        shape = RoundedCornerShape(20.dp),
+        shape = NqShapes.Tile,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
     ) {
         Row(Modifier.padding(start = 14.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -918,7 +902,7 @@ private fun SwipeableTile(left: SwipeAction, right: SwipeAction, content: @Compo
             val toRight = offset.value > 0
             val action = if (toRight) right else left
             Box(
-                Modifier.matchParentSize().clip(RoundedCornerShape(20.dp)).background(action.color).padding(horizontal = 18.dp),
+                Modifier.matchParentSize().clip(NqShapes.Tile).background(action.color).padding(horizontal = 18.dp),
                 contentAlignment = if (toRight) AbsoluteAlignment.CenterLeft else AbsoluteAlignment.CenterRight,
             ) {
                 // ring pinned to the phone edge, the action's name beside it and the instruction below the name
@@ -928,22 +912,22 @@ private fun SwipeableTile(left: SwipeAction, right: SwipeAction, content: @Compo
                             CircularProgressIndicator(
                                 progress = { if (past) ring.value else 0f },
                                 modifier = Modifier.size(44.dp),
-                                color = Color.White,
-                                trackColor = Color.White.copy(alpha = 0.3f),
+                                color = NqPalette.OnAction,
+                                trackColor = NqPalette.OnAction.copy(alpha = 0.3f),
                                 strokeWidth = 3.dp,
                             )
-                            Icon(action.icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
+                            Icon(action.icon, contentDescription = null, tint = NqPalette.OnAction, modifier = Modifier.size(24.dp))
                         }
                         Spacer(Modifier.width(10.dp))
                         Column {
-                            Text(action.label, color = Color.White, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium)
+                            Text(action.label, color = NqPalette.OnAction, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium)
                             Text(
                                 when {
                                     !past -> "משכו עוד"
                                     !ready -> "החזיקו…"
                                     else -> "שחררו"
                                 },
-                                color = Color.White.copy(alpha = 0.9f),
+                                color = NqPalette.OnAction.copy(alpha = 0.9f),
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         }
@@ -994,11 +978,11 @@ private fun ProductTile(
     onInfo: () -> Unit,
 ) {
     val right = if (shopping) {
-        SwipeAction(if (line.missing) "ביטול חסר" else "חסר", Icons.Default.ReportProblem, Color(0xFFE8590C), onRightSwipe)
+        SwipeAction(if (line.missing) "ביטול חסר" else "חסר", Icons.Default.ReportProblem, NqPalette.SwipeMissing, onRightSwipe)
     } else {
-        SwipeAction("מחיקה", Icons.Default.Delete, Color(0xFFD92D20), onRightSwipe)
+        SwipeAction("מחיקה", Icons.Default.Delete, NqPalette.SwipeDelete, onRightSwipe)
     }
-    val left = SwipeAction("נקנה", Icons.Default.Check, Color(0xFF00875A), onBought)
+    val left = SwipeAction("נקנה", Icons.Default.Check, NqPalette.SwipeBought, onBought)
     val controlsMode = display.tapMode == TapMode.CONTROLS
     // stepper: always (info mode, if enabled) or only after a tap (controls mode)
     val showStepper = if (controlsMode) controlsOpen else display.showStepper
@@ -1007,7 +991,7 @@ private fun ProductTile(
     Column(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) {
         SwipeableTile(left = left, right = right) {
             Card(
-                shape = RoundedCornerShape(20.dp),
+                shape = NqShapes.Tile,
                 border = when {
                     line.missing -> BorderStroke(2.dp, MaterialTheme.colorScheme.secondary)
                     controlsOpen && controlsMode -> BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
@@ -1051,7 +1035,7 @@ private fun ProductTile(
                                             line.quantity!!.format(),
                                             fontWeight = FontWeight.ExtraBold,
                                             color = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.clip(RoundedCornerShape(50))
+                                            modifier = Modifier.clip(NqShapes.Pill)
                                                 .background(MaterialTheme.colorScheme.surfaceVariant)
                                                 .padding(horizontal = 8.dp, vertical = 1.dp),
                                         )
@@ -1133,7 +1117,7 @@ private fun FilterPanel(filter: ListFilter, lines: List<ListLine>, onChange: (Li
             modifier = Modifier.fillMaxWidth(),
             placeholder = { Text("חיפוש ברשימה") },
             singleLine = true,
-            shape = RoundedCornerShape(16.dp),
+            shape = NqShapes.Field,
             trailingIcon = {
                 if (filter.isActive) IconButton(onClick = { onChange(ListFilter()) }) { Icon(Icons.Default.Close, contentDescription = "ניקוי הסינון") }
             },
@@ -1262,7 +1246,7 @@ private fun ResetDialog(lines: List<ListLine>, onReset: (ResetScope) -> Unit, on
 /** Ticks for my last message: o written · ✓ sent · ✓✓ received (grey) · ✓✓ read (blue). */
 @Composable
 fun DeliveryTicks(status: DeliveryStatus) {
-    val readBlue = Color(0xFF1570EF)
+    val readBlue = NqTheme.colors.readBlue
     val grey = MaterialTheme.colorScheme.outline
     val (text, color) = when (status) {
         DeliveryStatus.PENDING -> "o" to grey
@@ -1278,16 +1262,16 @@ fun DeliveryTicks(status: DeliveryStatus) {
 private fun ChatIndicator(state: ChatState) {
     val active = state.unread > 0
     Row(
-        Modifier.clip(RoundedCornerShape(50))
+        Modifier.clip(NqShapes.Pill)
             .background(if (active) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.surfaceVariant)
             .padding(horizontal = 7.dp, vertical = 1.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.AutoMirrored.Filled.Chat, null, Modifier.size(13.dp), tint = if (active) Color.White else MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(Icons.AutoMirrored.Filled.Chat, null, Modifier.size(13.dp), tint = if (active) NqPalette.OnAction else MaterialTheme.colorScheme.onSurfaceVariant)
         when {
             active -> {
                 Spacer(Modifier.width(3.dp))
-                Text("${state.unread}", color = Color.White, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                Text("${state.unread}", color = NqPalette.OnAction, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
             }
             state.lastIsMine && state.status != null -> {
                 Spacer(Modifier.width(3.dp))
@@ -1301,7 +1285,7 @@ private fun ChatIndicator(state: ChatState) {
 @Composable
 fun PriceSlot(price: Double?, average: Double?) {
     Column(
-        Modifier.widthIn(min = 68.dp).clip(RoundedCornerShape(12.dp))
+        Modifier.widthIn(min = 68.dp).clip(NqShapes.Panel)
             .background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 8.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.End,
     ) {
@@ -1321,17 +1305,17 @@ fun PromoStrip(promo: String?) {
     Text(
         "🏷 $promo",
         Modifier.fillMaxWidth().padding(horizontal = 6.dp)
-            .background(Color(0xFFFFF1B8), RoundedCornerShape(bottomStart = 10.dp, bottomEnd = 10.dp))
+            .background(NqTheme.colors.promoBackground, RoundedCornerShape(bottomStart = 10.dp, bottomEnd = 10.dp))
             .padding(horizontal = 10.dp, vertical = 2.dp),
         fontWeight = FontWeight.Bold,
-        color = Color(0xFF5C4400),
+        color = NqTheme.colors.promoInk,
     )
 }
 
 @Composable
 fun QuantityStepper(quantity: Quantity?, onMinus: () -> Unit, onPlus: () -> Unit) {
     Row(
-        Modifier.clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.surfaceVariant),
+        Modifier.clip(NqShapes.Pill).background(MaterialTheme.colorScheme.surfaceVariant),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Hebrew layout: the first child is on the right — "+" sits next to the product text
@@ -1365,18 +1349,10 @@ private fun BoughtRow(line: ListLine, onReopen: () -> Unit) {
 /** Coloured pill: routine green, occasional blue, special purple, favourite gold, missing orange, recipe teal. */
 @Composable
 fun TagBadge(tag: ItemTag) {
-    val (bg, fg) = when (tag.kind) {
-        TagKind.ROUTINE -> Color(0xFFDDF4E8) to Color(0xFF05603A)
-        TagKind.OCCASIONAL -> Color(0xFFE0EAFF) to Color(0xFF2D3FA8)
-        TagKind.SPECIAL -> Color(0xFFF1E4FF) to Color(0xFF6B21A8)
-        TagKind.FAVORITE -> Color(0xFFFFF0C2) to Color(0xFF7A4D00)
-        TagKind.MISSING -> Color(0xFFFFE2D6) to Color(0xFF9A3412)
-        TagKind.RECIPE -> Color(0xFFD5F5F0) to Color(0xFF0F5F55)
-        TagKind.AUTO -> Color(0xFFE9ECEF) to Color(0xFF343A40)
-    }
+    val (bg, fg) = NqTheme.colors.tag(tag.kind)
     Text(
         tag.label,
-        Modifier.clip(RoundedCornerShape(50)).background(bg).padding(horizontal = 8.dp, vertical = 1.dp),
+        Modifier.clip(NqShapes.Pill).background(bg).padding(horizontal = 8.dp, vertical = 1.dp),
         color = fg,
         fontWeight = FontWeight.Bold,
         style = MaterialTheme.typography.bodySmall,
