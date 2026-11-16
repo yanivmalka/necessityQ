@@ -93,7 +93,7 @@ jobs:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
-      - name: Deploy Firestore rules
+      - name: Deploy Firestore rules and indexes
         env:
           FIREBASE_TOKEN_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
@@ -104,4 +104,4 @@ jobs:
           echo "$FIREBASE_TOKEN_JSON" > "$RUNNER_TEMP/sa.json"
           export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
           cd firebase
-          npx --yes firebase-tools@13 deploy --only firestore:rules --project "$FIREBASE_PROJECT_ID" --non-interactive
+          npx --yes firebase-tools@13 deploy --only firestore --project "$FIREBASE_PROJECT_ID" --non-interactive

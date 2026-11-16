@@ -74,6 +74,38 @@ app/      Android (Jetpack Compose)
 4. מורידים את `google-services.json` ושומרים את תוכנו בסוד `GOOGLE_SERVICES_JSON`.
 5. מפרסמים את הכללים מ-`firebase/firestore.rules`, ידנית או דרך הסודות לפריסה.
 
+## מחירים מקבצי השקיפות (סניפים ומחירים)
+
+הנתונים מגיעים מהקבצים שרשתות המזון מחויבות לפרסם לפי חוק המזון (שקיפות מחירים). שירות קליטה רץ ב-Cloud Functions באזור **`me-west1` (תל אביב)**, כי חלק מאתרי הרשתות חוסמים גישה מחו"ל. הקוד נמצא ב-[`firebase/functions`](firebase/functions).
+
+**מה השירות עושה:**
+
+1. **רשימת סניפים:** קורא את קובצי ה-Stores של הרשתות המוגדרות, משאיר רק סניפים בערים שבהיקף (ברירת מחדל: ירושלים), וממיר כתובות לקואורדינטות דרך OpenStreetMap Nominatim, עם מטמון. התוצאה נשמרת ב-`prices/branchIndex`.
+2. **מחירים לסניפים שנבחרו:** לכל סניף שבית כלשהו בחר (`households/{hid}/settings/priceBranches`), השירות טוען את קובץ ה-PriceFull העדכני. הוא שומר תמונת מצב דחוסה ב-Storage (`prices/{branchId}.json.gz`) עם היסטוריית שינויים וטווח מחירים (מינימום ומקסימום לאורך חלון זמן). הסטטוס נשמר ב-`priceBranches/{branchId}`.
+3. **תזמון:** הפונקציה `pricesTick` רצה כל שעה, אבל טוענת סניף רק כשעבר `refreshHours` מהטעינה הקודמת. ברירת המחדל היא 24, כלומר פעם ביום. בנוסף, כשנכנסים למצב "בקנייה", האפליקציה מבקשת רענון לסניפים שעודכנו לפני יותר מ-12 שעות (הפונקציה `refreshBranch`).
+
+**פלטפורמות נתמכות:** שופרסל, Cerberus/PublishedPrices (רמי לוי, אושר עד, יוחננוף, טיב טעם, סופר יודה, קשת טעמים ועוד), PublishPrice (קרפור/יינות ביתן) ו-Laibcatalog (ויקטורי, מחסני השוק).
+
+**הגדרות מנהל:** מסמך `config/prices` ב-Firestore, שעורכים בקונסולה. כל השדות אופציונליים:
+
+| שדה | ברירת מחדל | משמעות |
+| --- | --- | --- |
+| `refreshHours` | `24` | תדירות רענון המחירים לכל סניף (רזולוציית העדכון) |
+| `storesRefreshDays` | `7` | תדירות קריאה מחדש של רשימות הסניפים |
+| `rangeDays` | `90` | חלון טווח המחירים שמוצג למשתמש |
+| `cities` | `["ירושלים"]` | הערים שבהיקף הנתונים |
+| `chains` | שופרסל, רמי לוי, אושר עד, יוחננוף, ויקטורי, קרפור, סופר יודה, טיב טעם | מפתחות רשתות מתוך `chains.ts` |
+| `manualRefreshMinutes` | `60` | בקשת רענון מהאפליקציה נדחית אם הנתונים צעירים מזה |
+| `admins` | `[]` | מזהי UID שמורשים להפעיל את `refreshBranchList` |
+
+**הפעלה (פעם אחת):**
+
+1. לעבור לתוכנית **Blaze** בפרויקט Firebase, ולהפעיל את **Storage**.
+2. לחשבון השירות שבסוד `FIREBASE_SERVICE_ACCOUNT` צריכות להיות ההרשאות Cloud Functions Admin, Service Account User, Cloud Scheduler Admin ו-Firebase Rules Admin, או התפקיד Editor.
+3. ב-GitHub, תחת Settings ← Secrets and variables ← Actions ← Variables, להגדיר משתנה `PRICES_DEPLOY` עם הערך `true`. מאותו רגע כל דחיפה ל-`main` שנוגעת ב-`firebase/` פורסת את הפונקציות ואת כללי ה-Storage, דרך [`.github/workflows/functions.yml`](.github/workflows/functions.yml).
+
+בדיקות: `cd firebase/functions && npm ci && npm run check`.
+
 ## פיתוח מקומי
 
 Android Studio (Narwhal ומעלה) עם JDK 17.

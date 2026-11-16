@@ -1,0 +1,58 @@
+name: Price ingestion (Cloud Functions)
+
+on:
+  push:
+    branches: [main]
+    paths: ["firebase/**", ".github/workflows/functions.yml"]
+  pull_request:
+    paths: ["firebase/**", ".github/workflows/functions.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: functions-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firebase/functions
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: firebase/functions/package-lock.json
+      - run: npm ci
+      - name: Type check + unit tests
+        run: npm run check
+      - name: Build
+        run: npm run build
+
+  # Needs the Blaze plan and Cloud Storage enabled. Turn on by setting the repository
+  # variable PRICES_DEPLOY=true (Settings → Secrets and variables → Actions → Variables).
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.PRICES_DEPLOY == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+        working-directory: firebase/functions
+      - name: Deploy functions + storage rules (region me-west1)
+        env:
+          FIREBASE_TOKEN_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+        run: |
+          if [ -z "$FIREBASE_TOKEN_JSON" ] || [ -z "$FIREBASE_PROJECT_ID" ]; then
+            echo "Firebase deploy secrets not set; skipping."; exit 0
+          fi
+          echo "$FIREBASE_TOKEN_JSON" > "$RUNNER_TEMP/sa.json"
+          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
+          cd firebase
+          npx --yes firebase-tools@14 deploy --only functions,storage --project "$FIREBASE_PROJECT_ID" --non-interactive --force

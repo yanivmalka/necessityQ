@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.DrawerValue
@@ -88,7 +89,7 @@ class MainActivity : ComponentActivity() {
 /** Destinations of the navigation drawer. */
 private enum class Dest(val title: String) {
     PLAN("הכנת רשימה"), SHOP("בקנייה"), MENU("תפריט"), MESSAGES("הודעות"), HISTORY("היסטוריה"),
-    HOUSEHOLD("הבית ומשתתפים"), ACCOUNT("חשבון"), SETTINGS("הגדרות תצוגה"), APPEARANCE("מראה"),
+    PRICES("סניפים ומחירים"), HOUSEHOLD("הבית ומשתתפים"), ACCOUNT("חשבון"), SETTINGS("הגדרות תצוגה"), APPEARANCE("מראה"),
     UPDATES("עדכונים"), ABOUT("אודות"),
 }
 
@@ -158,6 +159,7 @@ private fun Root(vm: AppViewModel) {
                             DrawerItem("תפריט", Icons.Default.Restaurant, dest == Dest.MENU) { go(Dest.MENU) }
                             DrawerItem("הודעות", Icons.AutoMirrored.Filled.Chat, dest == Dest.MESSAGES, badge = unread.takeIf { it > 0 }?.toString()) { go(Dest.MESSAGES) }
                             DrawerItem("היסטוריה", Icons.Default.History, dest == Dest.HISTORY) { go(Dest.HISTORY) }
+                            DrawerItem("סניפים ומחירים", Icons.Default.Storefront, dest == Dest.PRICES) { go(Dest.PRICES) }
                             HorizontalDivider(Modifier.padding(vertical = 8.dp, horizontal = 24.dp))
                             DrawerItem("הבית ומשתתפים", Icons.Default.Group, dest == Dest.HOUSEHOLD) { go(Dest.HOUSEHOLD) }
                             DrawerItem("חשבון", Icons.Default.AccountCircle, dest == Dest.ACCOUNT) { go(Dest.ACCOUNT) }
@@ -183,6 +185,7 @@ private fun Root(vm: AppViewModel) {
                             Dest.MENU -> MenuScreen(vm, modifier)
                             Dest.MESSAGES -> MessagesScreen(vm, modifier, onOpen = { itemId, name -> openChat = itemId to name })
                             Dest.HISTORY -> HistoryScreen(vm, modifier)
+                            Dest.PRICES -> PricesScreen(vm, modifier)
                             Dest.HOUSEHOLD -> HouseholdScreen(vm, household, s.account, s.userId, modifier)
                             Dest.ACCOUNT -> AccountScreen(vm, s.account, modifier)
                             Dest.SETTINGS -> DisplaySettingsScreen(vm, modifier)
