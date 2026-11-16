@@ -76,8 +76,29 @@ open class InMemoryShoppingRepository(
             )
         }
 
-    override suspend fun clearBought(householdId: String, lineIds: List<String>) =
+    override suspend fun purgeLines(householdId: String, lineIds: List<String>) =
         mutate { it.copy(lines = it.lines - lineIds.toSet()) }
+
+    override suspend fun removeLines(householdId: String, lines: List<ListLine>, reason: RemoveReason, atMillis: Long) =
+        mutate { s ->
+            val updated = lines.mapNotNull { l -> s.lines[l.id] }.associate { l ->
+                l.id to l.copy(
+                    status = LineStatus.REMOVED, removedAtMillis = atMillis, removedReason = reason,
+                    removedFrom = l.status, updatedAtMillis = atMillis,
+                )
+            }
+            s.copy(lines = s.lines + updated)
+        }
+
+    override suspend fun restoreLine(householdId: String, lineId: String, status: LineStatus, atMillis: Long) =
+        mutate { s ->
+            val line = s.lines[lineId] ?: return@mutate s
+            s.copy(
+                lines = s.lines + (lineId to line.copy(
+                    status = status, removedAtMillis = null, removedReason = null, removedFrom = null, updatedAtMillis = atMillis,
+                )),
+            )
+        }
 
     override suspend fun addPurchase(householdId: String, purchase: Purchase) =
         mutate { it.copy(purchases = it.purchases + (purchase.id to purchase)) }

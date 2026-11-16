@@ -26,7 +26,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.Typography
@@ -77,26 +80,30 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun NecessityTheme(bright: Boolean, content: @Composable () -> Unit) {
     val colors = when {
+        // modern, high-contrast: white tiles floating on a cool light-grey canvas, ink-dark text
         bright -> lightColorScheme(
-            primary = Color(0xFF0B5D1E),
+            primary = Color(0xFF00875A),
             onPrimary = Color.White,
-            primaryContainer = Color(0xFFC8F2CF),
-            onPrimaryContainer = Color(0xFF00210A),
-            secondary = Color(0xFFB34700),
+            primaryContainer = Color(0xFFD3F4E4),
+            onPrimaryContainer = Color(0xFF00301F),
+            secondary = Color(0xFFE8590C),
             onSecondary = Color.White,
-            secondaryContainer = Color(0xFFFFE0C7),
-            onSecondaryContainer = Color(0xFF331100),
-            tertiary = Color(0xFF0040A0),
-            background = Color.White,
-            onBackground = Color(0xFF0A0A0A),
+            secondaryContainer = Color(0xFFFFE8D9),
+            onSecondaryContainer = Color(0xFF3D1300),
+            tertiary = Color(0xFF3B5BDB),
+            onTertiary = Color.White,
+            background = Color(0xFFF2F4F7),
+            onBackground = Color(0xFF101828),
             surface = Color.White,
-            onSurface = Color(0xFF0A0A0A),
-            surfaceVariant = Color(0xFFF0F0F0),
-            onSurfaceVariant = Color(0xFF262626),
-            surfaceContainerLow = Color(0xFFFAFAFA),
-            outline = Color(0xFF3D3D3D),
-            outlineVariant = Color(0xFF8A8A8A),
-            error = Color(0xFFB00020),
+            onSurface = Color(0xFF101828),
+            surfaceVariant = Color(0xFFEEF1F5),
+            onSurfaceVariant = Color(0xFF344054),
+            surfaceContainer = Color.White,
+            surfaceContainerLow = Color(0xFFF9FAFB),
+            surfaceContainerHigh = Color.White,
+            outline = Color(0xFF667085),
+            outlineVariant = Color(0xFF98A2B3),
+            error = Color(0xFFD92D20),
         )
         isSystemInDarkTheme() -> darkColorScheme(primary = Color(0xFF81C784), secondary = Color(0xFFFFB74D))
         else -> lightColorScheme(primary = Color(0xFF2E7D32), secondary = Color(0xFFEF6C00), background = Color(0xFFF7FAF5))
@@ -127,6 +134,12 @@ private fun Root(vm: AppViewModel) {
     val session by vm.session.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(Unit) { vm.messages.collect { snackbar.showSnackbar(it) } }
+    LaunchedEffect(Unit) {
+        vm.undo.collect { event ->
+            val result = snackbar.showSnackbar(event.text, actionLabel = "ביטול", duration = SnackbarDuration.Long)
+            if (result == SnackbarResult.ActionPerformed) event.undo()
+        }
+    }
 
     // notifications (Android 13+) — asked once
     val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -162,8 +175,9 @@ private fun Root(vm: AppViewModel) {
                                 },
                                 label = { Text("הודעות") },
                             )
-                            NavigationBarItem(tab == 2, { tab = 2 }, { Icon(Icons.Default.History, null) }, label = { Text("היסטוריה") })
-                            NavigationBarItem(tab == 3, { tab = 3 }, { Icon(Icons.Default.Home, null) }, label = { Text("הבית") })
+                            NavigationBarItem(tab == 2, { tab = 2 }, { Icon(Icons.Default.Restaurant, null) }, label = { Text("תפריט") })
+                            NavigationBarItem(tab == 3, { tab = 3 }, { Icon(Icons.Default.History, null) }, label = { Text("היסטוריה") })
+                            NavigationBarItem(tab == 4, { tab = 4 }, { Icon(Icons.Default.Home, null) }, label = { Text("הבית") })
                         }
                     },
                 ) { padding ->
@@ -171,7 +185,8 @@ private fun Root(vm: AppViewModel) {
                     when (tab) {
                         0 -> ListScreen(vm, household.name, modifier)
                         1 -> MessagesScreen(vm, modifier, onOpen = { itemId, name -> openChat = itemId to name })
-                        2 -> HistoryScreen(vm, modifier)
+                        2 -> MenuScreen(vm, modifier)
+                        3 -> HistoryScreen(vm, modifier)
                         else -> HouseholdScreen(vm, household, s.account, s.userId, modifier)
                     }
                 }

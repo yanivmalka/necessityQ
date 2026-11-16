@@ -12,6 +12,11 @@ import app.necessityq.domain.LineSource
 import app.necessityq.domain.ListLine
 import app.necessityq.domain.ListSnapshot
 import app.necessityq.domain.ItemMessage
+import app.necessityq.domain.ListMode
+import app.necessityq.domain.MealData
+import app.necessityq.domain.MealPlanner
+import app.necessityq.domain.PickOrder
+import kotlinx.coroutines.flow.first
 import app.necessityq.domain.LineStatus
 import app.necessityq.domain.ListSort
 import app.necessityq.domain.Member
@@ -119,6 +124,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun checkOff(line: ListLine) {
         val (hid, uid, _) = ctx() ?: return
         launchSafe { container.service.checkOff(hid, uid, line, currentStoreId.value) }
+        _undo.tryEmit(UndoEvent("${line.displayName} סומן כנקנה") { reopen(line) })
     }
 
     fun reopen(line: ListLine) {
@@ -139,11 +145,16 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun delete(line: ListLine) {
         val (hid, _, _) = ctx() ?: return
         launchSafe { container.service.delete(hid, line) }
+        _undo.tryEmit(UndoEvent("${line.displayName} הועבר לסל המחזור") { restore(line, line.status) })
     }
 
     fun clearBought() {
         val (hid, _, lines) = ctx() ?: return
+        val bought = lines.filter { it.status == LineStatus.BOUGHT }
         launchSafe { container.service.clearBought(hid, lines) }
+        if (bought.isNotEmpty()) {
+            _undo.tryEmit(UndoEvent("${bought.size} פריטים שנקנו עברו לסל המחזור") { bought.forEach { restore(it, LineStatus.BOUGHT) } })
+        }
     }
 
     fun deletePurchase(purchase: Purchase) {
@@ -164,12 +175,71 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     private val prefs get() = container.prefs
 
     val brightTheme = MutableStateFlow(prefs.brightTheme)
-    val sort = MutableStateFlow(prefs.sort)
+    val mode = MutableStateFlow(prefs.mode)
+    val sort = MutableStateFlow(prefs.sortFor(prefs.mode))
     val display = MutableStateFlow(prefs.display)
     val currentStoreId = MutableStateFlow(prefs.currentStoreId)
 
     fun setBrightTheme(on: Boolean) { prefs.brightTheme = on; brightTheme.value = on }
-    fun setSort(value: ListSort) { prefs.sort = value; sort.value = value }
+    fun setSort(value: ListSort) { prefs.setSortFor(mode.value, value); sort.value = value }
+    fun setMode(value: ListMode) {
+        prefs.mode = value
+        mode.value = value
+        sort.value = prefs.sortFor(value)
+    }
+
+    /** Learned collection order for the current store (used by the "pick order" sort). */
+    val pickRanks: StateFlow<Map<String, Double>> = combine(purchases, currentStoreId) { list, store ->
+        PickOrder.ranks(list, store)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    // ---------- undo ----------
+
+    /** A reversible action just done; the UI offers "ביטול" for a few seconds. */
+    class UndoEvent(val text: String, val undo: () -> Unit)
+    private val _undo = MutableSharedFlow<UndoEvent>(extraBufferCapacity = 4)
+    val undo: SharedFlow<UndoEvent> = _undo
+
+    fun restore(line: ListLine, status: LineStatus = line.removedFrom?.takeIf { it != LineStatus.REMOVED } ?: LineStatus.NEEDED) {
+        val (hid, _, _) = ctx() ?: return
+        launchSafe { container.service.restore(hid, line, status) }
+    }
+
+    fun restoreToList(line: ListLine) = restore(line, LineStatus.NEEDED)
+
+    fun emptyBin() {
+        val (hid, _, lines) = ctx() ?: return
+        launchSafe { container.service.purge(hid, lines) }
+    }
+
+    // ---------- meal planning (conceptual) ----------
+
+    val meals: StateFlow<MealData> = householdId
+        .flatMapLatest { hid -> if (hid == null) emptyFlow() else container.meals.meals(hid) }
+        .catch { emit(MealData()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MealData())
+
+    fun updateMeals(change: (MealData) -> MealData) {
+        val (hid, _, _) = ctx() ?: return
+        val next = change(meals.value)
+        launchSafe { container.meals.save(hid, next) }
+    }
+
+    /** Adds the ingredients of one week of the menu to the list, tagged with their dish. */
+    fun addMenuToList(week: Int) {
+        val (hid, uid, _) = ctx() ?: return
+        val items = MealPlanner.ingredientsForWeek(meals.value, week)
+        if (items.isEmpty()) { _messages.tryEmit("אין מאכלים בשבוע הזה"); return }
+        launchSafe {
+            var lines = snapshot.value?.lines.orEmpty()
+            items.forEach { (ingredient, dish) ->
+                val parsed = QuickEntryParser.parse(ingredient) ?: return@forEach
+                container.service.add(hid, uid, parsed.item, parsed.quantity, LineSource.SUGGESTED, lines, recipe = dish)
+                lines = container.service.snapshot(hid).first().lines
+            }
+            _messages.tryEmit("נוספו ${items.size} מרכיבים מהתפריט לרשימה")
+        }
+    }
     fun setDisplay(value: DisplayOptions) { prefs.display = value; display.value = value }
     fun selectStore(id: String?) { prefs.currentStoreId = id; currentStoreId.value = id }
 
@@ -237,6 +307,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun setMissing(line: ListLine, missing: Boolean) {
         val (hid, uid, _) = ctx() ?: return
         launchSafe { container.service.setMissing(hid, uid, line, missing) }
+        if (missing) _undo.tryEmit(UndoEvent("${line.displayName} סומן כחסר") { setMissing(line, false) })
     }
 
     // ---------- item conversations, notifications ----------

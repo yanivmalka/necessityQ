@@ -14,6 +14,8 @@ data class ListSnapshot(
     val stats: Map<String, ItemStats>,
     val runningLow: List<Suggestion>,
     val frequent: List<Suggestion>,
+    /** Recycle bin: deleted lines and bought lines that were cleared, newest first. */
+    val removed: List<ListLine> = emptyList(),
 )
 
 /**
@@ -46,6 +48,7 @@ class ShoppingService(
             stats = stats,
             runningLow = suggestions.runningLow,
             frequent = suggestions.frequent,
+            removed = lines.filter { it.status == LineStatus.REMOVED }.sortedByDescending { it.removedAtMillis ?: 0 },
         )
     }
 
@@ -65,6 +68,7 @@ class ShoppingService(
         quantity: Quantity?,
         source: LineSource,
         current: List<ListLine>,
+        recipe: String? = null,
     ) {
         val now = clock.nowMillis()
         when (val decision = ListRules.decideAdd(current, item.id, quantity)) {
@@ -85,6 +89,7 @@ class ShoppingService(
                     addedBy = userId,
                     addedAtMillis = now,
                     updatedAtMillis = now,
+                    recipe = recipe,
                 ),
             )
         }
@@ -106,7 +111,17 @@ class ShoppingService(
     suspend fun changeNote(householdId: String, line: ListLine, note: String?) =
         repository.updateLineNote(householdId, line.id, note?.trim()?.ifBlank { null }, clock.nowMillis())
 
-    suspend fun delete(householdId: String, line: ListLine) = repository.deleteLine(householdId, line.id)
+    /** Moves the line to the recycle bin. */
+    suspend fun delete(householdId: String, line: ListLine) =
+        repository.removeLines(householdId, listOf(line), RemoveReason.DELETED, clock.nowMillis())
+
+    /** Back from the bin: to the list, or (undo of "clear") back to bought. */
+    suspend fun restore(householdId: String, line: ListLine, status: LineStatus = LineStatus.NEEDED) =
+        repository.restoreLine(householdId, line.id, status, clock.nowMillis())
+
+    /** Empties the bin for good. */
+    suspend fun purge(householdId: String, lines: List<ListLine>) =
+        repository.purgeLines(householdId, lines.filter { it.status == LineStatus.REMOVED }.map { it.id })
 
     suspend fun adjustQuantity(householdId: String, line: ListLine, delta: Int) {
         val next = QuantitySteps.step(line.quantity, delta)
@@ -145,7 +160,7 @@ class ShoppingService(
         repository.reopen(householdId, line.id, purchaseIdFor(line.id), clock.nowMillis())
 
     suspend fun clearBought(householdId: String, lines: List<ListLine>) =
-        repository.clearBought(householdId, lines.filter { it.status == LineStatus.BOUGHT }.map { it.id })
+        repository.removeLines(householdId, lines.filter { it.status == LineStatus.BOUGHT }, RemoveReason.CLEARED, clock.nowMillis())
 
     suspend fun deletePurchase(householdId: String, purchase: Purchase) =
         repository.deletePurchase(householdId, purchase.id)

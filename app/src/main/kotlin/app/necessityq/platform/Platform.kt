@@ -33,9 +33,15 @@ class AppPrefs(context: Context) {
         get() = p.getBoolean("bright", true)
         set(v) = p.edit().putBoolean("bright", v).apply()
 
-    var sort: ListSort
-        get() = runCatching { ListSort.valueOf(p.getString("sort", null) ?: "") }.getOrDefault(ListSort.GROUPS)
-        set(v) = p.edit().putString("sort", v.name).apply()
+    var mode: app.necessityq.domain.ListMode
+        get() = runCatching { app.necessityq.domain.ListMode.valueOf(p.getString("mode", null) ?: "") }
+            .getOrDefault(app.necessityq.domain.ListMode.PLAN)
+        set(v) = p.edit().putString("mode", v.name).apply()
+
+    fun sortFor(mode: app.necessityq.domain.ListMode): ListSort =
+        runCatching { ListSort.valueOf(p.getString("sort_" + mode.name, null) ?: "") }.getOrDefault(ListSort.GROUPS)
+
+    fun setSortFor(mode: app.necessityq.domain.ListMode, v: ListSort) = p.edit().putString("sort_" + mode.name, v.name).apply()
 
     var currentStoreId: String?
         get() = p.getString("store", null)

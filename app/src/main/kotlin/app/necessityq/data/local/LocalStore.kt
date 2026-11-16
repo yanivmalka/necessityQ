@@ -30,6 +30,8 @@ internal data class LineDto(
     val category: String, val quantity: QuantityDto? = null, val note: String? = null,
     val status: String, val source: String, val addedBy: String,
     val addedAt: Long, val updatedAt: Long, val boughtAt: Long? = null,
+    val position: Long = 0, val missing: Boolean = false, val recipe: String? = null,
+    val removedAt: Long? = null, val removedReason: String? = null, val removedFrom: String? = null,
 )
 
 @Serializable
@@ -110,6 +112,7 @@ private fun category(name: String) = runCatching { Category.valueOf(name) }.getO
 private fun ListLine.toDto() = LineDto(
     id, itemId, name, variant, category.name, quantity?.toDto(), note, status.name, source.name,
     addedBy, addedAtMillis, updatedAtMillis, boughtAtMillis,
+    position, missing, recipe, removedAtMillis, removedReason?.name, removedFrom?.name,
 )
 
 private fun Purchase.toDto() = PurchaseDto(
@@ -124,6 +127,9 @@ private fun StateDto.toDomain(): LocalState = LocalState(
             status = runCatching { LineStatus.valueOf(d.status) }.getOrDefault(LineStatus.NEEDED),
             source = runCatching { LineSource.valueOf(d.source) }.getOrDefault(LineSource.MANUAL),
             addedBy = d.addedBy, addedAtMillis = d.addedAt, updatedAtMillis = d.updatedAt, boughtAtMillis = d.boughtAt,
+            position = d.position, missing = d.missing, recipe = d.recipe, removedAtMillis = d.removedAt,
+            removedReason = d.removedReason?.let { runCatching { app.necessityq.domain.RemoveReason.valueOf(it) }.getOrNull() },
+            removedFrom = d.removedFrom?.let { runCatching { LineStatus.valueOf(it) }.getOrNull() },
         )
     },
     purchases = purchases.associate { d ->

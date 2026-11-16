@@ -104,13 +104,47 @@ enum class ListSort(val label: String) {
     GROUPS("לפי קבוצות"),
     ALPHA("א–ב"),
     ADDED("לפי סדר הוספה"),
+    PICK("לפי סדר איסוף"),
+}
+
+/** The two ways the list is used: preparing it at home, and walking the shop. */
+enum class ListMode(val label: String) { PLAN("הכנת רשימה"), SHOP("בקנייה") }
+
+/**
+ * Learns the order items are collected in: within each trip (one day, one store) the n-th checked-off
+ * item gets rank n/(size-1); an item's rank is its average over trips. Trips at the chosen store are
+ * preferred; with too little history there, all trips are used.
+ */
+object PickOrder {
+    fun ranks(purchases: List<Purchase>, storeId: String?, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): Map<String, Double> {
+        fun build(source: List<Purchase>): Map<String, Double> {
+            val sums = HashMap<String, Pair<Double, Int>>()
+            source.groupBy { java.time.Instant.ofEpochMilli(it.boughtAtMillis).atZone(zone).toLocalDate() to it.storeId }
+                .values.filter { it.size >= 2 }
+                .forEach { trip ->
+                    val ordered = trip.sortedBy { it.boughtAtMillis }
+                    ordered.forEachIndexed { i, p ->
+                        val r = i.toDouble() / (ordered.size - 1)
+                        val (sum, n) = sums[p.itemId] ?: (0.0 to 0)
+                        sums[p.itemId] = (sum + r) to (n + 1)
+                    }
+                }
+            return sums.mapValues { (_, v) -> v.first / v.second }
+        }
+        val atStore = if (storeId != null) build(purchases.filter { it.storeId == storeId }) else emptyMap()
+        return if (atStore.size >= 5) atStore else build(purchases) + atStore
+    }
 }
 
 object ListOrdering {
     private val collator: Collator = Collator.getInstance(Locale("he", "IL"))
 
     /** Groups for the list screen; [ListSort.GROUPS] keeps the store-walk categories, the others use one group. */
-    fun arrange(lines: List<ListLine>, sort: ListSort): List<Pair<Category?, List<ListLine>>> {
+    fun arrange(
+        lines: List<ListLine>,
+        sort: ListSort,
+        pickRanks: Map<String, Double> = emptyMap(),
+    ): List<Pair<Category?, List<ListLine>>> {
         val needed = lines.filter { it.status == LineStatus.NEEDED }
         return when (sort) {
             ListSort.GROUPS -> needed.groupBy { it.category }
@@ -120,6 +154,12 @@ object ListOrdering {
             else listOf(null to needed.sortedWith { a, b -> collator.compare(a.displayName, b.displayName) })
             ListSort.ADDED -> if (needed.isEmpty()) emptyList()
             else listOf(null to needed.sortedBy { it.addedAtMillis })
+            ListSort.PICK -> if (needed.isEmpty()) emptyList()
+            else listOf(
+                null to needed.sortedWith(
+                    compareBy<ListLine>({ pickRanks[it.itemId] ?: 2.0 }, { it.category.order }, { it.addedAtMillis }),
+                ),
+            )
         }
     }
 

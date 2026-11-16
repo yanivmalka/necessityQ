@@ -2,6 +2,7 @@ package app.necessityq.data.firebase
 
 import app.necessityq.domain.Category
 import app.necessityq.domain.LineStatus
+import app.necessityq.domain.RemoveReason
 import app.necessityq.domain.ListLine
 import app.necessityq.domain.Purchase
 import app.necessityq.domain.Quantity
@@ -92,7 +93,38 @@ class FirebaseShoppingRepository(
             .commit()
     }
 
-    override suspend fun clearBought(householdId: String, lineIds: List<String>) {
+    override suspend fun removeLines(householdId: String, lines: List<ListLine>, reason: RemoveReason, atMillis: Long) {
+        lines.chunked(400).forEach { chunk ->
+            val batch = db.batch()
+            chunk.forEach { line ->
+                batch.update(
+                    linesRef(householdId).document(line.id),
+                    mapOf(
+                        "status" to LineStatus.REMOVED.name,
+                        "removedAt" to atMillis,
+                        "removedReason" to reason.name,
+                        "removedFrom" to line.status.name,
+                        "updatedAt" to atMillis,
+                    ),
+                )
+            }
+            batch.commit()
+        }
+    }
+
+    override suspend fun restoreLine(householdId: String, lineId: String, status: LineStatus, atMillis: Long) {
+        linesRef(householdId).document(lineId).update(
+            mapOf(
+                "status" to status.name,
+                "removedAt" to FieldValue.delete(),
+                "removedReason" to FieldValue.delete(),
+                "removedFrom" to FieldValue.delete(),
+                "updatedAt" to atMillis,
+            ),
+        )
+    }
+
+    override suspend fun purgeLines(householdId: String, lineIds: List<String>) {
         lineIds.chunked(400).forEach { chunk ->
             val batch = db.batch()
             chunk.forEach { batch.delete(linesRef(householdId).document(it)) }

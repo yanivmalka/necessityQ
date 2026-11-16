@@ -61,7 +61,12 @@ interface ShoppingRepository {
     suspend fun checkOff(householdId: String, lineId: String, purchase: Purchase)
     /** Atomically reopens the line and removes its purchase. */
     suspend fun reopen(householdId: String, lineId: String, purchaseId: String, atMillis: Long)
-    suspend fun clearBought(householdId: String, lineIds: List<String>)
+    /** Hard delete (recycle-bin purge). */
+    suspend fun purgeLines(householdId: String, lineIds: List<String>)
+    /** Soft delete into the recycle bin. */
+    suspend fun removeLines(householdId: String, lines: List<ListLine>, reason: RemoveReason, atMillis: Long)
+    /** Takes a line out of the recycle bin with the given status. */
+    suspend fun restoreLine(householdId: String, lineId: String, status: LineStatus, atMillis: Long)
 
     suspend fun deletePurchase(householdId: String, purchaseId: String)
     /** Records a purchase directly (history import). Idempotent: the purchase id decides the document. */

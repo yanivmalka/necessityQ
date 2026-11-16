@@ -1,6 +1,9 @@
 package app.necessityq.domain
 
-enum class LineStatus { NEEDED, BOUGHT }
+enum class LineStatus { NEEDED, BOUGHT, REMOVED }
+
+/** Why a line went to the recycle bin. */
+enum class RemoveReason(val label: String) { DELETED("נמחק"), CLEARED("נוקה אחרי קנייה") }
 
 enum class LineSource { MANUAL, SUGGESTED, QUICK_ADD }
 
@@ -26,6 +29,11 @@ data class ListLine(
     val missingBy: String? = null,
     /** Set when the line came from a planned menu / recipe (future meal planning). */
     val recipe: String? = null,
+    /** Recycle bin: set while [status] is REMOVED. */
+    val removedAtMillis: Long? = null,
+    val removedReason: RemoveReason? = null,
+    /** Status before removal, so a cleared bought line can be put back as bought. */
+    val removedFrom: LineStatus? = null,
 ) {
     val identity: ItemIdentity get() = ItemIdentity(name, variant, category)
     val displayName: String get() = identity.displayName

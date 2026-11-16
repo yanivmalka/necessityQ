@@ -2,6 +2,7 @@ package app.necessityq.data.firebase
 
 import app.necessityq.domain.Category
 import app.necessityq.domain.Household
+import app.necessityq.domain.RemoveReason
 import app.necessityq.domain.ItemMessage
 import app.necessityq.domain.Store
 import app.necessityq.domain.StoreType
@@ -50,6 +51,9 @@ internal object FirestoreMapping {
         "missing" to line.missing,
         "missingBy" to line.missingBy,
         "recipe" to line.recipe,
+        "removedAt" to line.removedAtMillis,
+        "removedReason" to line.removedReason?.name,
+        "removedFrom" to line.removedFrom?.name,
     )
 
     fun lineFrom(doc: DocumentSnapshot): ListLine? {
@@ -73,6 +77,9 @@ internal object FirestoreMapping {
             missing = doc.getBoolean("missing") ?: false,
             missingBy = doc.getString("missingBy"),
             recipe = doc.getString("recipe"),
+            removedAtMillis = doc.getLong("removedAt"),
+            removedReason = doc.getString("removedReason")?.let { runCatching { RemoveReason.valueOf(it) }.getOrNull() },
+            removedFrom = doc.getString("removedFrom")?.let { runCatching { LineStatus.valueOf(it) }.getOrNull() },
         )
     }
 
