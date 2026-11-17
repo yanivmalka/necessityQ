@@ -138,4 +138,31 @@ class ListCostTest {
         assertEquals(4, e.openLines)
         assertEquals(true, e.isRange)
     }
+
+    @Test
+    fun produceMatchesSingularNamesAndPrefersTheFreshItem() {
+        fun kilo(code: String, name: String, price: Double) =
+            BranchProduct(code, name, "", 1.0, "ק\"ג", true, true, price, price, "2026-11-01", price, price)
+        val index = ProductIndex(
+            "b", 0,
+            listOf(
+                kilo("101", "עגבניה", 6.9),
+                kilo("102", "עגבניה שרי", 12.9),
+                kilo("103", "מלפפון", 5.9),
+                kilo("104", "בצל יבש", 3.9),
+                kilo("105", "תפוח אדמה לבן", 4.5),
+                BranchProduct("7290001", "מלפפון חמוץ במלח", "", null, "", false, false, 9.9, null, "", 9.9, 9.9),
+                BranchProduct("7290002", "רסק עגבניות", "", null, "", false, false, 3.5, null, "", 3.5, 3.5),
+            ),
+        )
+        assertEquals(listOf("101", "102"), ItemPrices.candidates(index, "עגבניות", null).map { it.code })
+        assertEquals(listOf("103"), ItemPrices.candidates(index, "מלפפונים", null).map { it.code })
+        assertEquals(listOf("104"), ItemPrices.candidates(index, "בצל", null).map { it.code })
+        assertEquals(listOf("105"), ItemPrices.candidates(index, "תפוחי אדמה", null).map { it.code })
+        // a packaged product still matches its own name
+        assertEquals(listOf("7290002"), ItemPrices.candidates(index, "רסק עגבניות", null).map { it.code })
+        val all = listOf(kilo("101", "עגבניה", 6.9), kilo("103", "מלפפון", 5.9))
+        assertEquals(listOf("101"), PriceData.search(all, "עגבניות").map { it.code })
+        assertEquals(listOf("103"), PriceData.search(all, "מלפפונים").map { it.code })
+    }
 }

@@ -101,12 +101,16 @@ object PriceData {
     fun search(products: List<BranchProduct>, query: String, limit: Int = 100): List<BranchProduct> {
         val words = HebrewText.matchKey(query).split(' ').filter { it.isNotBlank() }
         if (words.isEmpty()) return emptyList()
+        val stems = HebrewStem.words(query)
         val code = query.trim()
         return products.asSequence()
             .filter { p ->
                 if (p.code == code) return@filter true
                 val hay = HebrewText.matchKey("${p.name} ${p.brand} ${p.code}")
-                words.all { hay.contains(it) }
+                if (words.all { hay.contains(it) }) return@filter true
+                // singular/plural: "עגבניות" finds "עגבניה"
+                val hayStems = HebrewStem.words("${p.name} ${p.brand}")
+                stems.all { s -> HebrewStem.matchesAny(hayStems, s) }
             }
             .sortedWith(compareBy<BranchProduct>({ if (it.code == code) 0 else 1 }, { it.name.length }, { it.price }))
             .take(limit)
@@ -180,6 +184,7 @@ data class ItemPriceInfo(
 /** Products of a branch with their search keys computed once (searching runs per list item). */
 class ProductIndex(val branchId: String, val updatedAtMillis: Long, products: List<BranchProduct>) {
     internal val entries: List<Pair<BranchProduct, String>> = products.map { it to HebrewText.matchKey("${it.name} ${it.brand}") }
+    internal val stems: List<List<String>> = products.map { HebrewStem.words(it.name + " " + it.brand) }
     internal val byCode: Map<String, BranchProduct> = products.associateBy { it.code }
 }
 
@@ -193,18 +198,25 @@ object ItemPrices {
      */
     fun candidates(index: ProductIndex, name: String, variant: String?): List<BranchProduct> {
         val nameKey = HebrewText.matchKey(name)
-        val words = nameKey.split(' ').filter { it.isNotBlank() }
-        if (words.isEmpty()) return emptyList()
+        // stems, so the generic plural matches the files' singular ("עגבניות" ↔ "עגבניה", "מלפפונים" ↔ "מלפפון")
+        val stems = HebrewStem.words(name)
+        if (stems.isEmpty()) return emptyList()
         val variantKey = variant?.let { HebrewText.matchKey(it) }.orEmpty()
         val percents = percent.findAll(variantKey).map { it.value }.toList()
-        val otherVariantWords = percent.replace(variantKey, " ").split(' ').filter { it.isNotBlank() }
-        val matches = index.entries.filter { (_, key) ->
-            words.all { key.contains(it) } &&
-                otherVariantWords.all { key.contains(it) } &&
+        val otherVariantStems = HebrewStem.words(percent.replace(variantKey, " "))
+        fun has(words: List<String>, stem: String) = HebrewStem.matchesAny(words, stem)
+        val matches = index.entries.indices.filter { i ->
+            val (_, key) = index.entries[i]
+            val words = index.stems[i]
+            stems.all { has(words, it) } &&
+                otherVariantStems.all { has(words, it) } &&
                 percents.all { p -> Regex("""(?<![\d.])${Regex.escape(p)}""").containsMatchIn(key) }
         }
-        val leading = matches.filter { (_, key) -> key.startsWith(nameKey) }
-        return (leading.ifEmpty { matches }).map { it.first }.sortedBy { it.price }
+        val leading = matches.filter { i -> index.stems[i].firstOrNull()?.startsWith(stems.first()) == true || index.entries[i].second.startsWith(nameKey) }
+        val found = leading.ifEmpty { matches }.map { index.entries[it].first }
+        // produce: the fresh item sold by the kilo, not pickles or juice that share its name
+        val fresh = if (PieceWeights.gramsPerPiece(name) != null) found.filter { it.soldByWeight } else emptyList()
+        return fresh.ifEmpty { found }.sortedBy { it.price }
     }
 
     /** Typical range: the cheapest and dearest 10% are left out (from ten products on), otherwise min–max. */

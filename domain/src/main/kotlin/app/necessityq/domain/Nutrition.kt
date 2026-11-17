@@ -135,7 +135,9 @@ class NutritionIndex(val foods: List<NutritionFood>, val updatedAtMillis: Long =
 object HebrewStem {
     /** "עגבנייה" and "עגבניות" → "עגבני"; "ביצה"/"ביצים" → "ביצ". */
     fun stem(word: String): String {
+        // final letters as regular ones, so "מלפפון" and "מלפפונים" share a stem
         var w = HebrewText.matchKey(word).replace("יי", "י").replace("וו", "ו")
+            .replace('ך', 'כ').replace('ם', 'מ').replace('ן', 'נ').replace('ף', 'פ').replace('ץ', 'צ')
         if (w.length <= 3) return w
         for (suffix in listOf("ות", "ים", "ה", "ת")) {
             if (w.length - suffix.length >= 2 && w.endsWith(suffix)) {
@@ -147,6 +149,14 @@ object HebrewStem {
     }
 
     /** Words of a name, each stemmed; commas and parentheses split words. */
+    /**
+     * True when [stem] (of a query word) starts one of [words]; a plural construct ending in י also matches
+     * its singular ("תפוחי אדמה" ↔ "תפוח אדמה").
+     */
+    fun matchesAny(words: List<String>, stem: String): Boolean =
+        words.any { it.startsWith(stem) } ||
+            (stem.length > 3 && stem.endsWith("י") && stem.dropLast(1).let { base -> words.any { it == base || it.startsWith(base) && it.length <= base.length + 1 } })
+
     fun words(text: String): List<String> =
         HebrewText.matchKey(text).split(' ', ',', '(', ')', '/').filter { it.isNotBlank() }.map(::stem)
 }
