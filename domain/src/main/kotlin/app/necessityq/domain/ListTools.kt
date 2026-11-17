@@ -140,6 +140,11 @@ data class ListFilter(
     val isActive: Boolean
         get() = text.isNotBlank() || source != SourceFilter.ALL || categories.isNotEmpty() || missingOnly || withChatOnly
 
+    /** How many criteria are on (each category counts). */
+    val activeCount: Int
+        get() = (if (text.isNotBlank()) 1 else 0) + (if (source != SourceFilter.ALL) 1 else 0) +
+            categories.size + (if (missingOnly) 1 else 0) + (if (withChatOnly) 1 else 0)
+
     /** What is being filtered, in words (null when nothing is). Shown while the filter controls are hidden. */
     fun summary(): String? {
         if (!isActive) return null
