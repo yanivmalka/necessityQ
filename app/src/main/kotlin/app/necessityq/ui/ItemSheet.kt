@@ -222,6 +222,16 @@ fun ItemSheet(
                         Icon(Icons.Default.Delete, null, Modifier.padding(end = 4.dp))
                         Text("הסרה")
                     }
+                    // the exact product (for price only — the name stays as written); remembered for next time
+                    val scanProduct = rememberBarcodeScan(vm) { vm.linkScannedProduct(itemId, it) }
+                    OutlinedButton(onClick = scanProduct) {
+                        Icon(Icons.Default.QrCodeScanner, null, Modifier.padding(end = 4.dp))
+                        Text("סריקת המוצר")
+                    }
+                    OutlinedButton(onClick = { editing = true }) {
+                        Icon(Icons.Default.Edit, null, Modifier.padding(end = 4.dp))
+                        Text("עריכה")
+                    }
                 }
                 if (line.missing) {
                     Text(
@@ -420,7 +430,8 @@ fun ItemSheet(
         EditLineDialog(
             line = line,
             onDismiss = { editing = false },
-            onSave = { quantity, note ->
+            onSave = { name, quantity, note ->
+                if (name != line.displayName) vm.renameLine(line, name)
                 if (quantity != line.quantity) vm.changeQuantity(line, quantity)
                 if (note != line.note) vm.changeNote(line, note)
                 editing = false
@@ -1116,14 +1127,6 @@ private fun BranchPriceSection(vm: AppViewModel, itemId: String, name: String, v
             )
         }
         if (info != null) Icon(if (open) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = if (open) "כיווץ" else "דיוק לפי מוצר")
-    }
-    // scanning the exact product: when choosing one, or when no product matched the name
-    if (open || (info == null && loaded.containsKey(branch.id))) {
-        val scanProduct = rememberBarcodeScan(vm) { vm.linkScannedProduct(itemId, it) }
-        androidx.compose.material3.TextButton(onClick = scanProduct) {
-            Icon(Icons.Default.QrCodeScanner, null)
-            Text("  סריקת המוצר שאתם קונים")
-        }
     }
     if (!open || info == null) return
 

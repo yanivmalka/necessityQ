@@ -160,6 +160,22 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         launchSafe { container.service.changeQuantity(hid, line, quantity) }
     }
 
+    /**
+     * Renames the product as the user wrote it. The exact product the household chose for it (by
+     * scan or from the branch list) and an entered price move with it, unless the new name has its own.
+     */
+    fun renameLine(line: ListLine, text: String) {
+        val (hid, _, _) = ctx() ?: return
+        launchSafe {
+            val renamed = container.service.rename(hid, line, text) ?: return@launchSafe
+            if (renamed.id == line.itemId) return@launchSafe
+            val chosen = preferredProducts.value[line.itemId]
+            if (chosen != null && preferredProducts.value[renamed.id] == null) container.prices.setPreferredProduct(hid, renamed.id, chosen)
+            val price = prices.value[line.itemId]
+            if (price != null && prices.value[renamed.id] == null) container.collab.setPrice(hid, renamed.id, price)
+        }
+    }
+
     fun changeNote(line: ListLine, note: String?) {
         val (hid, _, _) = ctx() ?: return
         launchSafe { container.service.changeNote(hid, line, note) }
@@ -756,11 +772,19 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         if (raw == null) return
         scanBusy.value = true
         viewModelScope.launch {
+            val code = app.necessityq.domain.Barcodes.normalize(raw)
             val product = runCatching { lookupScan(raw) }.getOrNull()?.product
-            if (product == null) _messages.tryEmit("הברקוד לא נמצא בסניפים שאתם עוקבים אחריהם")
-            else {
-                setPreferredProduct(itemId, product.code)
-                _messages.tryEmit("נבחר: ${product.name}")
+            when {
+                code == null -> _messages.tryEmit("זה לא נראה כמו ברקוד של מוצר: $raw")
+                product == null -> {
+                    // remembered anyway: the price appears once a followed branch lists the barcode
+                    setPreferredProduct(itemId, code)
+                    _messages.tryEmit("הברקוד נשמר למוצר. עוד אין לו מחיר בסניפים שאתם עוקבים אחריהם.")
+                }
+                else -> {
+                    setPreferredProduct(itemId, product.code)
+                    _messages.tryEmit("נשמר: ${product.name} — יזכר גם כשהמוצר יתווסף שוב")
+                }
             }
             scanBusy.value = false
         }

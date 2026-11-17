@@ -51,6 +51,12 @@ open class InMemoryShoppingRepository(
             s.copy(lines = s.lines + (lineId to line.copy(note = note, updatedAtMillis = atMillis)))
         }
 
+    override suspend fun renameLine(householdId: String, lineId: String, item: ItemIdentity, atMillis: Long) =
+        mutate { s ->
+            val line = s.lines[lineId] ?: return@mutate s
+            s.copy(lines = s.lines + (lineId to line.copy(itemId = item.id, name = item.name, variant = item.variant, category = item.category, updatedAtMillis = atMillis)))
+        }
+
     override suspend fun deleteLine(householdId: String, lineId: String) =
         mutate { it.copy(lines = it.lines - lineId) }
 

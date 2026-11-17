@@ -67,4 +67,17 @@ class ShoppingServiceTest {
         assertTrue(repo.current.value.purchases.isEmpty())
         assertEquals(LineStatus.NEEDED, repo.current.value.lines.getValue(line.id).status)
     }
+
+    @Test fun `rename changes the identity and keeps the quantity`() = runBlocking {
+        val repo = InMemoryShoppingRepository()
+        val service = ShoppingService(repo, FakeClock(day0), SeqIds(), zone)
+        service.addFromText("h", "u1", "2 קוטג 5%", emptyList())
+        val line = service.snapshot("h").first().lines.single()
+        val renamed = service.rename("h", line, "קוטג 9%")!!
+        val after = service.snapshot("h").first().lines.single()
+        assertEquals(renamed.id, after.itemId)
+        assertEquals("9%", after.variant)
+        assertEquals(line.quantity, after.quantity)
+        assertEquals(null, service.rename("h", after, "קוטג' 9%"))
+    }
 }

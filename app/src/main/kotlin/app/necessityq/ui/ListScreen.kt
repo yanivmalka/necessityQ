@@ -69,6 +69,7 @@ import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.ReportProblem
 import androidx.compose.material.icons.filled.RestoreFromTrash
 import androidx.compose.material.icons.filled.Storefront
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Tune
@@ -131,6 +132,7 @@ import app.necessityq.domain.Category
 import app.necessityq.domain.GenerateMode
 import app.necessityq.domain.LineStatus
 import app.necessityq.domain.ListFilter
+import app.necessityq.domain.QuickEntryParser
 import app.necessityq.domain.ListReset
 import app.necessityq.domain.ListSection
 import app.necessityq.domain.PriceEstimate
@@ -240,10 +242,15 @@ fun ListScreen(
     val rows = remember { mutableStateListOf<ListRow>() }
     var dragging by remember { mutableStateOf(false) }
     val chatItemIds = remember(messages) { messages.map { it.itemId }.toSet() }
-    val sections = remember(snapshot?.lines, sort, pickRanks, descending, display.chilledLast, filter, chatItemIds) {
-        buildSections(snapshot?.lines.orEmpty(), sort, pickRanks, descending, display.chilledLast, filter, chatItemIds)
+    // the quick-add box also searches the list: what is typed narrows the open lines (on top of the filter)
+    val searchText = remember(query) { if (query.isBlank()) "" else QuickEntryParser.parse(query)?.item?.displayName ?: query.trim() }
+    val listFilter = remember(filter, searchText) { if (searchText.isBlank() || filter.text.isNotBlank()) filter else filter.copy(text = searchText) }
+    val sections = remember(snapshot?.lines, sort, pickRanks, descending, display.chilledLast, listFilter, chatItemIds) {
+        buildSections(snapshot?.lines.orEmpty(), sort, pickRanks, descending, display.chilledLast, listFilter, chatItemIds)
     }
-    val built = remember(sections, collapsed) { buildRows(sections, collapsed) }
+    val searchMatches = if (searchText.isBlank()) 0 else sections.sumOf { sec -> sec.lines.count { it.status == LineStatus.NEEDED } }
+    // while searching every group is open, so matches are never hidden in a collapsed group
+    val built = remember(sections, collapsed, searchText) { buildRows(sections, if (searchText.isBlank()) collapsed else emptySet()) }
     val titledKeys = sections.filter { it.title != null }.map { it.key }.toSet()
     val allCollapsed = titledKeys.isNotEmpty() && titledKeys.all { it in collapsed }
     LaunchedEffect(built, dragging) {
@@ -387,15 +394,29 @@ fun ListScreen(
                 value = query,
                 onValueChange = { vm.query.value = it },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                placeholder = { Text("הוספה מהירה: 2 קוטג' 5%") },
-                leadingIcon = { IconButton(onClick = scan) { Icon(Icons.Default.QrCodeScanner, contentDescription = "הוספה בסריקת ברקוד") } },
+                placeholder = { Text("חיפוש ברשימה או הוספה: 2 קוטג' 5%") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                supportingText = if (searchText.isBlank()) null else {
+                    {
+                        Text(
+                            if (searchMatches == 0) "לא נמצא ברשימה — ➤ או Enter יוסיפו \"$searchText\""
+                            else "נמצא ברשימה ($searchMatches) · ➤ יוסיף כמות אם כתבתם, ✕ לניקוי",
+                        )
+                    }
+                },
                 singleLine = true,
                 shape = NqShapes.Field,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { vm.submitQuery() }),
                 trailingIcon = {
-                    IconButton(onClick = vm::submitQuery, enabled = query.isNotBlank()) {
-                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "הוסף")
+                    Row {
+                        when {
+                            query.isBlank() -> IconButton(onClick = scan) { Icon(Icons.Default.QrCodeScanner, contentDescription = "הוספה בסריקת ברקוד") }
+                            searchMatches > 0 -> IconButton(onClick = { vm.query.value = "" }) { Icon(Icons.Default.Close, contentDescription = "ניקוי החיפוש") }
+                        }
+                        IconButton(onClick = vm::submitQuery, enabled = query.isNotBlank()) {
+                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "הוספה לרשימה")
+                        }
                     }
                 },
             )
@@ -546,6 +567,7 @@ fun ListScreen(
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
                             when {
+                                searchText.isNotBlank() && !filter.isActive -> "\"$searchText\" לא ברשימה. ➤ או Enter יוסיפו אותו."
                                 filter.isActive -> "אין פריטים שמתאימים לסינון."
                                 shopping -> "אין מה לקנות — הרשימה ריקה."
                                 else -> "הרשימה ריקה. הוסיפו מוצרים בשורה למעלה, בהקשה על אחת ההצעות, או צרו רשימה מקניות עבר."
