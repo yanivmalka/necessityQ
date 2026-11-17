@@ -61,6 +61,18 @@ class FirebaseShoppingRepository(
         )
     }
 
+    override suspend fun updateLineRecipes(
+        householdId: String,
+        lineId: String,
+        recipe: String?,
+        parts: List<app.necessityq.domain.RecipePart>,
+        atMillis: Long,
+    ) {
+        linesRef(householdId).document(lineId).update(
+            mapOf("recipe" to recipe, "recipeParts" to FirestoreMapping.recipePartsToList(parts), "updatedAt" to atMillis),
+        )
+    }
+
     override suspend fun updateLineNote(householdId: String, lineId: String, note: String?, atMillis: Long) {
         linesRef(householdId).document(lineId).update(mapOf("note" to note, "updatedAt" to atMillis))
     }

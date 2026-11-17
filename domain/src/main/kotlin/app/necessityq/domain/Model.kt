@@ -18,6 +18,26 @@ enum class LineSource(val label: String) {
     MENU("נוסף מתפריט"),
 }
 
+/** How much of a line is for one dish ("שקשוקה: 2 יח'"); [fromMenu] = added from the menu rather than the recipe screen. */
+data class RecipePart(val dish: String, val quantity: Quantity?, val fromMenu: Boolean = false)
+
+object RecipeParts {
+    /** Adds [part] to the parts: the same dish (and origin) sums its quantity. */
+    fun merge(parts: List<RecipePart>, part: RecipePart): List<RecipePart> {
+        val same = parts.firstOrNull { it.dish == part.dish && it.fromMenu == part.fromMenu } ?: return parts + part
+        val q = when {
+            same.quantity == null -> part.quantity
+            part.quantity == null -> same.quantity
+            else -> (same.quantity + part.quantity) ?: part.quantity
+        }
+        return parts.map { if (it === same) it.copy(quantity = q) else it }
+    }
+
+    /** Sets the dish's part to [part] (used when a recipe's servings change). */
+    fun replace(parts: List<RecipePart>, part: RecipePart): List<RecipePart> =
+        parts.filterNot { it.dish == part.dish && it.fromMenu == part.fromMenu } + part
+}
+
 /** One entry on the household's shared shopping list. */
 data class ListLine(
     val id: String,
@@ -40,6 +60,8 @@ data class ListLine(
     val missingBy: String? = null,
     /** The dish name when the line came from a menu or a recipe. */
     val recipe: String? = null,
+    /** The dishes this line is (also) for, with the amount each needs. The line's [quantity] is the total. */
+    val recipeParts: List<RecipePart> = emptyList(),
     /** Recycle bin: set while [status] is REMOVED. */
     val removedAtMillis: Long? = null,
     val removedReason: RemoveReason? = null,
@@ -53,10 +75,15 @@ data class ListLine(
     val isAuto: Boolean get() = source == LineSource.AUTO
 
     /** Added from a recipe screen. */
-    val isFromRecipe: Boolean get() = source == LineSource.RECIPE
+    val isFromRecipe: Boolean get() = source == LineSource.RECIPE || recipeParts.any { !it.fromMenu }
 
     /** Added from the menu (older versions tagged menu lines as suggestions with a recipe name). */
-    val isFromMenu: Boolean get() = source == LineSource.MENU || (source == LineSource.SUGGESTED && recipe != null)
+    val isFromMenu: Boolean get() =
+        source == LineSource.MENU || recipeParts.any { it.fromMenu } || (source == LineSource.SUGGESTED && recipe != null)
+
+    /** Put there by a person (typed or a tap), not generated and not from a recipe or the menu. */
+    val isManual: Boolean get() =
+        source != LineSource.AUTO && source != LineSource.RECIPE && source != LineSource.MENU && !(source == LineSource.SUGGESTED && recipe != null)
 
     /** Sort key honouring manual moves while preserving the order of adding for untouched lines. */
     val orderKey: Long get() = if (position != 0L) position else addedAtMillis

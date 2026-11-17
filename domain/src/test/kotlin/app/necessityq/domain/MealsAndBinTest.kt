@@ -103,4 +103,25 @@ class MealsAndBinTest {
         assertEquals("5 חודשים", FamilyMember("b", "תינוק", birthYear = 2026, birthMonth = 6).ageLabel(today))
         assertEquals(null, FamilyMember("p", "אבא").ageLabel(today))
     }
+
+    @Test fun `adding a recipe ingredient already on the list adds to it and records the dish`() = runBlocking {
+        val repo = InMemoryShoppingRepository()
+        val s = ShoppingService(repo, clock, Ids())
+        s.addFromText("h", "u", "3 תפוחי אדמה", emptyList())
+        val potatoes = ItemIdentity.fromText("תפוחי אדמה")
+        s.add("h", "u", potatoes, Quantity.pieces(2), LineSource.RECIPE, s.snapshot("h").first().lines, recipe = "פירה")
+        val line = s.snapshot("h").first().lines.single()
+        assertEquals(5.0, line.quantity!!.amount, 1e-9)
+        assertEquals(listOf(RecipePart("פירה", Quantity.pieces(2))), line.recipeParts)
+        assertTrue(line.isFromRecipe && line.isManual)
+        assertTrue(ItemTags.of(line, null, false).any { it.label == "מתכון: פירה · 2 יח'" })
+    }
+
+    @Test fun `produce priced per kilo is sold by weight even without the flag`() {
+        fun p(code: String, unit: String, internal: Boolean) = BranchProduct(code, "תפוחי אדמה", "", 1.0, unit, false, internal, 4.9, null, "", 4.9, 4.9)
+        assertTrue(p("7290000000001", "ק\"ג", internal = true).soldByWeight)
+        assertTrue(p("4011", "קילוגרם", internal = false).soldByWeight)
+        assertTrue(!p("7290000000002", "ק\"ג", internal = false).soldByWeight)
+        assertTrue(!p("4011", "יחידה", internal = false).soldByWeight)
+    }
 }

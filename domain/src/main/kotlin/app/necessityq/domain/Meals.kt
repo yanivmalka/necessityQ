@@ -376,7 +376,9 @@ object Recipes {
         val parsed = QuickEntryParser.parse(text) ?: return text
         val q = parsed.quantity ?: return parsed.item.displayName
         val factor = servings.toDouble() / dish.servings.coerceAtLeast(1)
-        return "${parsed.item.displayName} · ${scale(q, factor)?.format() ?: q.format()}"
+        val scaled = scale(q, factor) ?: q
+        val weight = PieceWeights.estimate(parsed.item.name, scaled)?.let { "  " + PieceWeights.label(it) } ?: ""
+        return "${parsed.item.displayName} · ${scaled.format()}$weight"
     }
 }
 
@@ -387,7 +389,7 @@ object Recipes {
  */
 object RecipeListSync {
     sealed interface Change {
-        data class Update(val lineId: String, val quantity: Quantity?) : Change
+        data class Update(val lineId: String, val quantity: Quantity?, val recipeQuantity: Quantity?) : Change
         data class Add(val ingredient: ScaledIngredient) : Change
     }
 
@@ -395,7 +397,7 @@ object RecipeListSync {
         val before = Recipes.scaled(dish, fromServings).associateBy { it.item.id }
         return Recipes.scaled(dish, toServings).mapNotNull { now ->
             val open = lines.filter { it.status == LineStatus.NEEDED && it.itemId == now.item.id }
-                .sortedByDescending { it.recipe == dish.name }
+                .sortedByDescending { l -> l.recipe == dish.name || l.recipeParts.any { it.dish == dish.name } }
                 .firstOrNull()
                 ?: return@mapNotNull Change.Add(now)
             val was = before[now.item.id]?.quantity
@@ -409,13 +411,16 @@ object RecipeListSync {
                     if (base <= 0) target else if (current.dimension == Dimension.COUNT) Quantity(base, current.unit) else Quantity.fromBase(base, current.dimension)
                 }
             }
-            if (next == current) null else Change.Update(open.id, next)
+            if (next == current) null else Change.Update(open.id, next, target)
         }
     }
 
     /** Open lines that came from this recipe. */
     fun onList(lines: List<ListLine>, dish: Dish): List<ListLine> =
-        lines.filter { it.status == LineStatus.NEEDED && it.recipe == dish.name && it.source == LineSource.RECIPE }
+        lines.filter { l ->
+            l.status == LineStatus.NEEDED &&
+                ((l.recipe == dish.name && l.source == LineSource.RECIPE) || l.recipeParts.any { it.dish == dish.name && !it.fromMenu })
+        }
 }
 
 /** Port for the household's meal-planning data (stored as one document). */

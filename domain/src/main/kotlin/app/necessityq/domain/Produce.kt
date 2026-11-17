@@ -57,6 +57,14 @@ object PieceWeights {
         return Quantity.fromBase(rounded, Dimension.WEIGHT)
     }
 
+    private val kiloUnits = setOf("קג", "קילו", "קילוגרם", "kg", "1קג", "1 קג", "לקג")
+
+    /** True for a price-file unit meaning a kilo ("ק\"ג", "קילוגרם", "1 ק\"ג"). */
+    fun isKiloUnit(unit: String): Boolean {
+        val k = HebrewText.matchKey(unit).replace(".", "").trim()
+        return k in kiloUnits || k.endsWith("קג") || k.contains("קילו")
+    }
+
     /** "≈1.7 ק\"ג" */
     fun label(estimate: Quantity): String = "≈${estimate.format()}"
 }
@@ -75,8 +83,8 @@ object LineCosts {
     fun weighted(line: ListLine, info: ItemPriceInfo): LineCost? {
         val quantity = line.quantity ?: return null
         val (low, high) = when {
-            info.preferred != null -> if (info.preferred.weighted) info.preferred.price to info.preferred.price else return null
-            else -> ItemPrices.typicalRange(info.candidates.filter { it.weighted }.map { it.price }) ?: return null
+            info.preferred != null -> if (info.preferred.soldByWeight) info.preferred.price to info.preferred.price else return null
+            else -> ItemPrices.typicalRange(info.candidates.filter { it.soldByWeight }.map { it.price }) ?: return null
         }
         val kilos = ListCost.packages(quantity, true, PieceWeights.gramsPerPiece(line.name)) ?: return null
         return LineCost(low * kilos, high * kilos, PieceWeights.estimate(line.name, quantity))

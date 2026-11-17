@@ -421,6 +421,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                         is app.necessityq.domain.RecipeListSync.Change.Update -> {
                             val line = current.firstOrNull { it.id == change.lineId } ?: return@forEach
                             container.service.changeQuantity(hid, line, change.quantity)
+                            container.service.setRecipePart(hid, line, app.necessityq.domain.RecipePart(dish.name, change.recipeQuantity))
                         }
                         is app.necessityq.domain.RecipeListSync.Change.Add ->
                             container.service.add(hid, uid, change.ingredient.item, change.ingredient.quantity, LineSource.RECIPE, current, recipe = dish.name)

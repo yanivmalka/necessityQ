@@ -163,7 +163,7 @@ data class ListFilter(
         if (text.isNotBlank() && !HebrewText.matchKey(line.displayName).contains(HebrewText.matchKey(text))) return false
         when (source) {
             SourceFilter.ALL -> Unit
-            SourceFilter.MANUAL -> if (line.isAuto || line.isFromRecipe || line.isFromMenu) return false
+            SourceFilter.MANUAL -> if (!line.isManual) return false
             SourceFilter.AUTO -> if (!line.isAuto) return false
             SourceFilter.RECIPE -> if (!line.isFromRecipe) return false
             SourceFilter.MENU -> if (!line.isFromMenu) return false

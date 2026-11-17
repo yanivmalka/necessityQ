@@ -31,6 +31,16 @@ internal object FirestoreMapping {
         return if (amount > 0) Quantity(amount, unit) else null
     }
 
+    fun recipePartsToList(parts: List<app.necessityq.domain.RecipePart>): List<Map<String, Any?>> =
+        parts.map { mapOf("dish" to it.dish, "quantity" to quantityToMap(it.quantity), "menu" to it.fromMenu) }
+
+    fun recipePartsFrom(raw: Any?): List<app.necessityq.domain.RecipePart> =
+        (raw as? List<*>).orEmpty().mapNotNull { item ->
+            val map = item as? Map<*, *> ?: return@mapNotNull null
+            val dish = map["dish"] as? String ?: return@mapNotNull null
+            app.necessityq.domain.RecipePart(dish, quantityFrom(map["quantity"]), map["menu"] as? Boolean ?: false)
+        }
+
     private fun category(raw: Any?): Category =
         (raw as? String)?.let { runCatching { Category.valueOf(it) }.getOrNull() } ?: Category.OTHER
 
@@ -51,6 +61,7 @@ internal object FirestoreMapping {
         "missing" to line.missing,
         "missingBy" to line.missingBy,
         "recipe" to line.recipe,
+        "recipeParts" to recipePartsToList(line.recipeParts),
         "removedAt" to line.removedAtMillis,
         "removedReason" to line.removedReason?.name,
         "removedFrom" to line.removedFrom?.name,
@@ -77,6 +88,7 @@ internal object FirestoreMapping {
             missing = doc.getBoolean("missing") ?: false,
             missingBy = doc.getString("missingBy"),
             recipe = doc.getString("recipe"),
+            recipeParts = recipePartsFrom(doc.get("recipeParts")),
             removedAtMillis = doc.getLong("removedAt"),
             removedReason = doc.getString("removedReason")?.let { runCatching { RemoveReason.valueOf(it) }.getOrNull() },
             removedFrom = doc.getString("removedFrom")?.let { runCatching { LineStatus.valueOf(it) }.getOrNull() },
