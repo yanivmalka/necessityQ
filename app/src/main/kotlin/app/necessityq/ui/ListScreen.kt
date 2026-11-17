@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -49,7 +50,6 @@ import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.FilterList
-import androidx.compose.material.icons.filled.FilterListOff
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.UnfoldLess
@@ -91,6 +91,8 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.InputChip
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -344,11 +346,6 @@ fun ListScreen(
                         Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = if (unreadTotal > 0) "$unreadTotal הודעות חדשות" else "הודעות")
                     }
                 }
-                IconButton(onClick = { showBin = true }) {
-                    BadgedBox(badge = { snapshot?.removed?.size?.takeIf { it > 0 }?.let { Badge { Text("$it") } } }) {
-                        Icon(Icons.Default.DeleteSweep, contentDescription = "סל מחזור")
-                    }
-                }
                 Box {
                     IconButton(onClick = { showMore = true }) { Icon(Icons.Default.MoreVert, contentDescription = "פעולות על הרשימה") }
                     DropdownMenu(expanded = showMore, onDismissRequest = { showMore = false }) {
@@ -357,6 +354,12 @@ fun ListScreen(
                             leadingIcon = { Icon(Icons.Default.AutoAwesome, null) },
                             onClick = { showGenerate = true; showMore = false },
                         )
+                        DropdownMenuItem(
+                            text = { Text("סל מחזור" + (snapshot?.removed?.size?.takeIf { it > 0 }?.let { " ($it)" } ?: "")) },
+                            leadingIcon = { Icon(Icons.Default.RestoreFromTrash, null) },
+                            onClick = { showBin = true; showMore = false },
+                        )
+                        HorizontalDivider()
                         DropdownMenuItem(
                             text = { Text("ריקון הרשימה") },
                             leadingIcon = { Icon(Icons.Default.DeleteSweep, null) },
@@ -394,7 +397,7 @@ fun ListScreen(
                 value = query,
                 onValueChange = { vm.query.value = it },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                placeholder = { Text("חיפוש ברשימה או הוספה: 2 קוטג' 5%") },
+                placeholder = { Text("הוספה או חיפוש, למשל 2 קוטג'", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 supportingText = if (searchText.isBlank()) null else {
                     {
@@ -476,16 +479,11 @@ fun ListScreen(
                 }
             }
             FilterChip(
-                selected = filter.isActive || showFilter,
-                onClick = { showFilter = !showFilter },
-                label = { Text(if (filter.isActive) "מסונן" else "סינון") },
+                selected = filter.isActive,
+                onClick = { showFilter = true },
+                label = { Text(if (filter.isActive) "סינון · ${filter.activeCount}" else "סינון") },
                 leadingIcon = { Icon(Icons.Default.FilterList, null, Modifier.size(18.dp)) },
             )
-            if (filter.isActive) {
-                IconButton(onClick = { vm.setFilter(ListFilter()) }) {
-                    Icon(Icons.Default.FilterListOff, contentDescription = "ביטול כל הסינון")
-                }
-            }
             Spacer(Modifier.weight(1f))
             if (titledKeys.isNotEmpty()) {
                 IconButton(onClick = { vm.setAllCollapsed(if (allCollapsed) null else titledKeys) }) {
@@ -496,26 +494,8 @@ fun ListScreen(
                 }
             }
         }
-        if (showFilter) {
-            FilterPanel(filter, snapshot?.lines.orEmpty(), onChange = vm::setFilter)
-        } else {
-            // the controls are hidden: say what is filtered, with a way out
-            filter.summary()?.let { text ->
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "מסונן: $text",
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    TextButton(onClick = { vm.setFilter(ListFilter()) }) { Text("ביטול הסינון") }
-                }
-            }
-        }
+        // what is filtered, one removable chip per criterion
+        if (filter.isActive) ActiveFilterRow(filter, onChange = vm::setFilter)
 
         val snap = snapshot
         LazyColumn(
@@ -674,6 +654,15 @@ fun ListScreen(
         }
     }
 
+    if (showFilter) {
+        FilterSheet(
+            filter = filter,
+            lines = snapshot?.lines.orEmpty(),
+            resultCount = sections.sumOf { sec -> sec.lines.count { it.status == LineStatus.NEEDED } },
+            onChange = vm::setFilter,
+            onDismiss = { showFilter = false },
+        )
+    }
     if (showGenerate) GenerateSheet(vm, onDismiss = { showGenerate = false })
     if (showEmpty) {
         val count = ListReset.linesFor(ResetScope.ALL, snapshot?.lines.orEmpty()).size
@@ -1229,48 +1218,92 @@ private fun TotalBar(estimate: app.necessityq.domain.ListCostEstimate) {
 
 // ---------- filter ----------
 
-@OptIn(ExperimentalLayoutApi::class)
+/** The active filter as small removable chips under the toolbar, so the list keeps its room. */
 @Composable
-private fun FilterPanel(filter: ListFilter, lines: List<ListLine>, onChange: (ListFilter) -> Unit) {
-    val present = lines.filter { it.status == LineStatus.NEEDED }.map { it.category }.toSet().sortedBy { it.order }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        OutlinedTextField(
-            filter.text, { onChange(filter.copy(text = it)) },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("חיפוש ברשימה") },
-            singleLine = true,
-            shape = NqShapes.Field,
-            trailingIcon = {
-                if (filter.text.isNotEmpty()) IconButton(onClick = { onChange(filter.copy(text = "")) }) { Icon(Icons.Default.Close, contentDescription = "מחיקת הטקסט") }
-            },
-        )
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            SourceFilter.entries.forEach { option ->
-                FilterChip(selected = filter.source == option, onClick = { onChange(filter.copy(source = option)) }, label = { Text(option.label) })
-            }
-            FilterChip(selected = filter.missingOnly, onClick = { onChange(filter.copy(missingOnly = !filter.missingOnly)) }, label = { Text("חסרים") })
-            FilterChip(selected = filter.withChatOnly, onClick = { onChange(filter.copy(withChatOnly = !filter.withChatOnly)) }, label = { Text("עם שיחה") })
-            if (filter.isActive) {
-                androidx.compose.material3.AssistChip(
-                    onClick = { onChange(ListFilter()) },
-                    label = { Text("ביטול כל הסינון") },
-                    leadingIcon = { Icon(Icons.Default.FilterListOff, null, Modifier.size(18.dp)) },
-                )
-            }
+private fun ActiveFilterRow(filter: ListFilter, onChange: (ListFilter) -> Unit) {
+    val chips = buildList<Pair<String, ListFilter>> {
+        if (filter.text.isNotBlank()) add("\"${filter.text.trim()}\"" to filter.copy(text = ""))
+        if (filter.source != SourceFilter.ALL) add(filter.source.label to filter.copy(source = SourceFilter.ALL))
+        if (filter.missingOnly) add("חסרים" to filter.copy(missingOnly = false))
+        if (filter.withChatOnly) add("עם שיחה" to filter.copy(withChatOnly = false))
+        filter.categories.sortedBy { it.order }.forEach { c -> add(c.label to filter.copy(categories = filter.categories - c)) }
+    }
+    LazyRow(
+        Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        items(chips, key = { it.first }) { (label, without) ->
+            InputChip(
+                selected = true,
+                onClick = { onChange(without) },
+                label = { Text(label, maxLines = 1) },
+                trailingIcon = { Icon(Icons.Default.Close, contentDescription = "הסרת $label", Modifier.size(16.dp)) },
+                shape = NqShapes.Pill,
+            )
         }
-        if (present.size > 1) {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                present.forEach { c ->
-                    val on = c in filter.categories
-                    FilterChip(
-                        selected = on,
-                        onClick = { onChange(filter.copy(categories = if (on) filter.categories - c else filter.categories + c)) },
-                        label = { Text(c.label) },
-                        leadingIcon = { Box(Modifier.size(10.dp).clip(CircleShape).background(categoryColor(c))) },
-                    )
+        if (chips.size > 1) {
+            item(key = "clear_all") { TextButton(onClick = { onChange(ListFilter()) }) { Text("ניקוי הכל") } }
+        }
+    }
+}
+
+/** Filter controls in a sheet, grouped by kind; changes apply live and the button shows how many remain. */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun FilterSheet(
+    filter: ListFilter,
+    lines: List<ListLine>,
+    resultCount: Int,
+    onChange: (ListFilter) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val present = lines.filter { it.status == LineStatus.NEEDED }.map { it.category }.toSet().sortedBy { it.order }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("סינון הרשימה", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                if (filter.isActive) TextButton(onClick = { onChange(ListFilter()) }) { Text("ניקוי") }
+            }
+            FilterSection("מקור") {
+                SourceFilter.entries.forEach { option ->
+                    FilterChip(selected = filter.source == option, onClick = { onChange(filter.copy(source = option)) }, label = { Text(option.label) })
                 }
             }
+            FilterSection("מצב") {
+                FilterChip(selected = filter.missingOnly, onClick = { onChange(filter.copy(missingOnly = !filter.missingOnly)) }, label = { Text("חסרים") })
+                FilterChip(selected = filter.withChatOnly, onClick = { onChange(filter.copy(withChatOnly = !filter.withChatOnly)) }, label = { Text("עם שיחה") })
+            }
+            if (present.size > 1) {
+                FilterSection("קטגוריות") {
+                    present.forEach { c ->
+                        val on = c in filter.categories
+                        FilterChip(
+                            selected = on,
+                            onClick = { onChange(filter.copy(categories = if (on) filter.categories - c else filter.categories + c)) },
+                            label = { Text(c.label) },
+                            leadingIcon = { Box(Modifier.size(10.dp).clip(CircleShape).background(categoryColor(c))) },
+                        )
+                    }
+                }
+            }
+            Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                Text(if (filter.isActive) "הצגת $resultCount פריטים" else "סגירה")
+            }
         }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun FilterSection(title: String, content: @Composable () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { content() }
     }
 }
 
