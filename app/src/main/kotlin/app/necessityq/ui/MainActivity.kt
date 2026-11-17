@@ -199,6 +199,7 @@ private fun Root(vm: AppViewModel) {
             openChat?.let { (itemId, name) ->
                 ItemSheet(vm, itemId = itemId, itemName = name, onDismiss = { openChat = null })
             }
+            ScanSheet(vm)
         }
     }
 }

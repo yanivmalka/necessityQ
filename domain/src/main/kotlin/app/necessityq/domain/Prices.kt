@@ -236,10 +236,14 @@ data class ListCostEstimate(val low: Double, val high: Double, val pricedLines: 
 }
 
 object ListCost {
-    /** Packages to buy for a branch price: counted units as is; weights only for products sold by weight. */
-    fun packages(quantity: Quantity?, weighted: Boolean): Double = when (quantity?.unit) {
+    /**
+     * Packages to buy for a branch price: counted units as is; weights only for products sold by weight.
+     * Null when it cannot be priced: produce sold by weight but counted in pieces ("7 לימונים") —
+     * the weight of a piece is not known, so no number is made up.
+     */
+    fun packages(quantity: Quantity?, weighted: Boolean): Double? = when (quantity?.unit) {
         null -> 1.0
-        QuantityUnit.PIECE, QuantityUnit.PACKAGE -> quantity.amount
+        QuantityUnit.PIECE, QuantityUnit.PACKAGE -> if (weighted && quantity.unit == QuantityUnit.PIECE) null else quantity.amount
         QuantityUnit.KILOGRAM, QuantityUnit.LITER -> if (weighted) quantity.amount else 1.0
         QuantityUnit.GRAM, QuantityUnit.MILLILITER -> if (weighted) quantity.amount / 1000.0 else 1.0
     }
@@ -254,9 +258,12 @@ object ListCost {
             val info = branch[line.itemId]
             when {
                 own != null -> (own * PriceEstimate.units(line.quantity)).let { low += it; high += it }
-                info?.preferred != null -> (info.preferred.price * packages(line.quantity, info.preferred.weighted)).let { low += it; high += it }
+                info?.preferred != null -> {
+                    val n = packages(line.quantity, info.preferred.weighted) ?: continue
+                    (info.preferred.price * n).let { low += it; high += it }
+                }
                 info != null -> {
-                    val n = packages(line.quantity, info.candidates.firstOrNull()?.weighted == true)
+                    val n = packages(line.quantity, info.candidates.firstOrNull()?.weighted == true) ?: continue
                     low += info.low * n
                     high += info.high * n
                 }

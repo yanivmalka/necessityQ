@@ -219,7 +219,7 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
     /** Tiles whose controls are open (tap mode "controls"). */
     var expanded by remember { mutableStateOf(emptySet<String>()) }
     var showBin by remember { mutableStateOf(false) }
-    var showScan by remember { mutableStateOf(false) }
+    val scan = rememberBarcodeScan(vm) { vm.onScanned(it) }
     var showStoreDialog by remember { mutableStateOf(false) }
     var addOpen by remember { mutableStateOf(false) }
     val shopping = mode == ListMode.SHOP
@@ -286,6 +286,7 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
             },
             actions = {
                 if (shopping) {
+                    IconButton(onClick = scan) { Icon(Icons.Default.QrCodeScanner, contentDescription = "סריקת ברקוד") }
                     IconButton(onClick = { addOpen = !addOpen }) { Icon(Icons.Default.Add, contentDescription = "הוספת פריט") }
                 }
                 // new messages, visible from the list itself
@@ -317,13 +318,11 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
                             leadingIcon = { Icon(Icons.Default.RestartAlt, null) },
                             onClick = { showReset = true; showMore = false },
                         )
-                        if (shopping) {
-                            DropdownMenuItem(
-                                text = { Text("בדיקת מחיר בסריקה") },
-                                leadingIcon = { Icon(Icons.Default.QrCodeScanner, null) },
-                                onClick = { showScan = true; showMore = false },
-                            )
-                        }
+                        DropdownMenuItem(
+                            text = { Text("סריקת ברקוד: מחיר והוספה") },
+                            leadingIcon = { Icon(Icons.Default.QrCodeScanner, null) },
+                            onClick = { showMore = false; scan() },
+                        )
                     }
                 }
             },
@@ -612,20 +611,6 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
             confirmButton = { TextButton(onClick = { showStoreDialog = false }) { Text("סגירה") } },
         )
     }
-    if (showScan) {
-        AlertDialog(
-            onDismissRequest = { showScan = false },
-            icon = { Icon(Icons.Default.QrCodeScanner, null) },
-            title = { Text("בדיקת מחיר בסריקה") },
-            text = {
-                Text(
-                    "סריקת הברקוד במצלמה תציג את המחיר והמבצע בסניף שבו אתם נמצאים (לפי המיקום). " +
-                        "האפשרות תופעל כשיחובר מאגר מחירים עדכני.",
-                )
-            },
-            confirmButton = { TextButton(onClick = { showScan = false }) { Text("הבנתי") } },
-        )
-    }
 }
 
 // ---------- store: once at the start of a trip, optional, editable from the title ----------
@@ -656,19 +641,38 @@ private fun StoreChooser(vm: AppViewModel, allowNone: Boolean, onChosen: (String
     val stores by vm.stores.collectAsStateWithLifecycle()
     val currentId by vm.currentStoreId.collectAsStateWithLifecycle()
     val nearby by vm.nearbyStore.collectAsStateWithLifecycle()
+    val hereBranch by vm.hereBranch.collectAsStateWithLifecycle()
+    val locating by vm.locating.collectAsStateWithLifecycle()
     var adding by remember { mutableStateOf(false) }
     var hasPermission by remember { mutableStateOf(vm.hasLocationPermission()) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         hasPermission = result.values.any { it }
         if (hasPermission) vm.refreshLocation()
     }
-    LaunchedEffect(stores, hasPermission) { if (hasPermission) vm.refreshLocation() }
+    LaunchedEffect(hasPermission) { if (hasPermission) vm.refreshLocation() }
 
     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         nearby?.let { near ->
             AssistChip(
                 onClick = { onChosen(near.id) },
                 label = { Text("ליד: ${near.name}", fontWeight = FontWeight.Bold) },
+                leadingIcon = { Icon(Icons.Default.LocationOn, null, Modifier.size(18.dp)) },
+            )
+        }
+        // not a household store yet, but the coordinates match a chain branch: offer it by name
+        val branchHere = hereBranch?.branch?.takeIf { nearby == null }
+        branchHere?.let { b ->
+            AssistChip(
+                onClick = { vm.addStoreFromBranch(b)?.let(onChosen) },
+                label = { Text("כאן: ${app.necessityq.domain.BranchLocator.storeName(b)}", fontWeight = FontWeight.Bold) },
+                leadingIcon = { Icon(Icons.Default.LocationOn, null, Modifier.size(18.dp)) },
+            )
+        }
+        if (hasPermission && nearby == null && branchHere == null) {
+            AssistChip(
+                onClick = { vm.locate(quiet = false) },
+                enabled = !locating,
+                label = { Text(if (locating) "מאתר מיקום…" else "איתור לפי מיקום") },
                 leadingIcon = { Icon(Icons.Default.LocationOn, null, Modifier.size(18.dp)) },
             )
         }

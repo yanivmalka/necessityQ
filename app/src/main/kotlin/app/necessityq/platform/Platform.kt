@@ -14,6 +14,8 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import app.necessityq.R
 import app.necessityq.domain.ListSort
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.launch
 
 /** What a tap on a product tile does. */
 enum class TapMode(val label: String, val hint: String) {
@@ -163,6 +165,12 @@ object LocationHelper {
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
+    /** Location is switched on in the device settings (some provider is enabled). */
+    fun isEnabled(context: Context): Boolean {
+        val manager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        return runCatching { manager.getProviders(true).any { it != LocationManager.PASSIVE_PROVIDER } }.getOrDefault(false)
+    }
+
     /** Most recent known position from any provider (no Play Services needed), or null. */
     @SuppressLint("MissingPermission")
     fun lastKnown(context: Context): Location? {
@@ -172,4 +180,57 @@ object LocationHelper {
             .mapNotNull { runCatching { manager.getLastKnownLocation(it) }.getOrNull() }
             .maxByOrNull { it.time }
     }
+
+    /**
+     * A fresh position: a recent, accurate last-known fix is used as is; otherwise every enabled
+     * provider (fused, network, GPS) is asked for one fix and the first answer wins. Falls back to the
+     * last known position when nothing answers within [timeoutMs]. Works without Play Services.
+     */
+    @SuppressLint("MissingPermission")
+    suspend fun current(context: Context, timeoutMs: Long = 10_000): Location? {
+        if (!hasPermission(context)) return null
+        val last = lastKnown(context)
+        val ageMs = last?.let { (android.os.SystemClock.elapsedRealtimeNanos() - it.elapsedRealtimeNanos) / 1_000_000 }
+        if (last != null && ageMs != null && ageMs < 60_000 && last.hasAccuracy() && last.accuracy <= 60f) return last
+
+        val manager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        val enabled = runCatching { manager.getProviders(true) }.getOrDefault(emptyList())
+        val providers = buildList {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && LocationManager.FUSED_PROVIDER in enabled) add(LocationManager.FUSED_PROVIDER)
+            if (LocationManager.NETWORK_PROVIDER in enabled) add(LocationManager.NETWORK_PROVIDER)
+            if (LocationManager.GPS_PROVIDER in enabled) add(LocationManager.GPS_PROVIDER)
+        }
+        if (providers.isEmpty()) return last
+        val fresh = kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
+            kotlinx.coroutines.flow.channelFlow {
+                providers.forEach { provider -> launch { singleFix(context, manager, provider)?.let { send(it) } } }
+            }.firstOrNull()
+        }
+        return fresh ?: last
+    }
+
+    @SuppressLint("MissingPermission")
+    @Suppress("DEPRECATION")
+    private suspend fun singleFix(context: Context, manager: LocationManager, provider: String): Location? =
+        kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+            val resume: (Location?) -> Unit = { location -> if (cont.isActive) cont.resumeWith(Result.success(location)) }
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val cancel = android.os.CancellationSignal()
+                    cont.invokeOnCancellation { cancel.cancel() }
+                    manager.getCurrentLocation(provider, cancel, ContextCompat.getMainExecutor(context)) { resume(it) }
+                } else {
+                    val listener = object : android.location.LocationListener {
+                        override fun onLocationChanged(location: Location) = resume(location)
+                        override fun onProviderDisabled(provider: String) = resume(null)
+                        override fun onProviderEnabled(provider: String) {}
+                        override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
+                    }
+                    manager.requestSingleUpdate(provider, listener, android.os.Looper.getMainLooper())
+                    cont.invokeOnCancellation { manager.removeUpdates(listener) }
+                }
+            } catch (e: Exception) {
+                resume(null)
+            }
+        }
 }

@@ -95,6 +95,9 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         return Triple(hid, s.userId, snapshot.value?.lines.orEmpty())
     }
 
+    /** Shows a short message (snackbar). */
+    fun showMessage(text: String) { _messages.tryEmit(text) }
+
     private fun launchSafe(block: suspend () -> Unit) = viewModelScope.launch {
         runCatching { block() }.onFailure { _messages.tryEmit(it.message ?: "פעולה נכשלה") }
     }
@@ -134,6 +137,16 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun reopen(line: ListLine) {
         val (hid, _, _) = ctx() ?: return
         launchSafe { container.service.reopen(hid, line) }
+    }
+
+    /**
+     * Changes the kind of quantity (יח' / מארז / ק"ג …, or none). Converts within a dimension; otherwise
+     * takes the household's usual amount in that unit (15 מלפפונים → ק"ג uses what is usually bought).
+     */
+    fun setQuantityUnit(line: ListLine, unit: app.necessityq.domain.QuantityUnit?) {
+        val usual = snapshot.value?.stats?.get(line.itemId)?.typicalQuantity
+        val next = app.necessityq.domain.QuantitySteps.switchUnit(line.quantity, unit, usual)
+        if (next != line.quantity) changeQuantity(line, next)
     }
 
     fun changeQuantity(line: ListLine, quantity: Quantity?) {
@@ -235,7 +248,10 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         sort.value = prefs.sortFor(value)
         descending.value = prefs.descendingFor(value)
         checkStorePrompt()
-        if (value == ListMode.SHOP) refreshStalePricesForShopping()
+        if (value == ListMode.SHOP) {
+            refreshStalePricesForShopping()
+            locate()
+        }
     }
 
     /** Sort direction (per stage of use). */
@@ -375,13 +391,60 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         .catch { emit(emptyMap()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
-    /** The device position used to sort branches (null without permission / fix). */
-    val userPosition = MutableStateFlow<Pair<Double, Double>?>(null)
+    // ---------- location by coordinates: where the user is, which branch / household store that is ----------
 
-    fun refreshPosition() {
-        val location = LocationHelper.lastKnown(container.appContext) ?: return
+    /** A device position with its accuracy (metres, when the provider reports one). */
+    data class Fix(val latitude: Double, val longitude: Double, val accuracyMeters: Double?)
+
+    private val fix = MutableStateFlow<Fix?>(null)
+
+    /** The device position used to sort branches (null without permission / fix). */
+    val userPosition: StateFlow<Pair<Double, Double>?> = fix.map { f -> f?.let { it.latitude to it.longitude } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** A fresh fix is being requested. */
+    val locating = MutableStateFlow(false)
+
+    /** Kept for the screens: same as [locate]. */
+    fun refreshPosition() = locate(quiet = false)
+
+    /**
+     * Requests the current coordinates (not only the last known ones) and from them works out the
+     * price branch and the household store the user is at. [quiet] = no message when nothing answers.
+     */
+    fun locate(quiet: Boolean = true) {
+        val context = container.appContext
+        if (!LocationHelper.hasPermission(context) || locating.value) return
+        if (!LocationHelper.isEnabled(context)) {
+            if (!quiet) _messages.tryEmit("המיקום כבוי במכשיר. אפשר להפעיל אותו בהגדרות.")
+            LocationHelper.lastKnown(context)?.let(::applyLocation)
+            return
+        }
+        locating.value = true
+        viewModelScope.launch {
+            // the last known position answers right away; the fresh fix then replaces it
+            if (fix.value == null) LocationHelper.lastKnown(context)?.let(::applyLocation)
+            val location = runCatching { LocationHelper.current(context) }.getOrNull()
+            if (location != null) applyLocation(location)
+            else if (!quiet) _messages.tryEmit("לא התקבל מיקום. נסו שוב בעוד רגע, או קרוב יותר לחלון.")
+            locating.value = false
+        }
+    }
+
+    private fun applyLocation(location: android.location.Location) {
         lastLocation = location
-        userPosition.value = location.latitude to location.longitude
+        fix.value = Fix(location.latitude, location.longitude, if (location.hasAccuracy()) location.accuracy.toDouble() else null)
+    }
+
+    /** The price branch the user is standing in, by coordinates (null when not at a known branch). */
+    val hereBranch: StateFlow<app.necessityq.domain.NearbyBranch?> = combine(fix, priceBranches) { f, all ->
+        f?.let { app.necessityq.domain.BranchLocator.branchAt(all, it.latitude, it.longitude, it.accuracyMeters) }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** Starts following the branch the user is in, so its prices are loaded. */
+    fun followHereBranch() {
+        val here = hereBranch.value?.branch ?: return
+        if (here.id !in selectedPriceBranches.value) toggleBranch(here.id)
     }
 
     /** Loaded product lists per branch. */
@@ -438,9 +501,12 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         launchSafe { container.prices.setPreferredProduct(hid, itemId, code) }
     }
 
-    /** The branch whose prices the list shows: the first one the household follows. */
-    val primaryBranch: StateFlow<app.necessityq.domain.PriceBranch?> = combine(priceBranches, selectedPriceBranches) { all, ids ->
-        ids.firstNotNullOfOrNull { id -> all.firstOrNull { it.id == id } }
+    /**
+     * The branch whose prices the list shows: the followed branch the user is standing in (by
+     * coordinates), otherwise the first one the household follows.
+     */
+    val primaryBranch: StateFlow<app.necessityq.domain.PriceBranch?> = combine(priceBranches, selectedPriceBranches, hereBranch) { all, ids, here ->
+        here?.branch?.takeIf { it.id in ids } ?: ids.firstNotNullOfOrNull { id -> all.firstOrNull { it.id == id } }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     private val indexCache = mutableMapOf<String, app.necessityq.domain.ProductIndex>()
@@ -496,14 +562,30 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    /** A known store near the device right now (set by [refreshLocation]). */
-    val nearbyStore = MutableStateFlow<Store?>(null)
+    /** A known household store at the device position (by coordinates; follows [locate]). */
+    val nearbyStore: StateFlow<Store?> = combine(fix, stores) { f, list ->
+        f?.let { Stores.nearest(list, it.latitude, it.longitude, maxOf(250.0, minOf(it.accuracyMeters ?: 0.0, 400.0))) }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
     private var lastLocation: android.location.Location? = null
 
-    fun refreshLocation() {
-        val location = LocationHelper.lastKnown(container.appContext) ?: return
-        lastLocation = location
-        nearbyStore.value = Stores.nearest(stores.value, location.latitude, location.longitude)
+    fun refreshLocation() = locate()
+
+    /**
+     * Saves the price branch the user is in as a household store ("רמי לוי תלפיות") at the current
+     * coordinates (the branch's own when there is no fix) and returns its id.
+     */
+    fun addStoreFromBranch(branch: app.necessityq.domain.PriceBranch): String? {
+        val (hid, _, _) = ctx() ?: return null
+        val location = lastLocation
+        val store = Store(
+            id = java.util.UUID.randomUUID().toString(),
+            name = app.necessityq.domain.BranchLocator.storeName(branch),
+            type = StoreType.SUPERMARKET,
+            latitude = location?.latitude ?: branch.latitude,
+            longitude = location?.longitude ?: branch.longitude,
+        )
+        launchSafe { container.collab.saveStore(hid, store) }
+        return store.id
     }
 
     fun hasLocationPermission() = LocationHelper.hasPermission(container.appContext)
@@ -551,6 +633,99 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         val (hid, uid, _) = ctx() ?: return
         launchSafe { container.service.setMissing(hid, uid, line, missing) }
         if (missing) _undo.tryEmit(UndoEvent("${line.displayName} סומן כחסר") { setMissing(line, false) })
+    }
+
+    // ---------- barcode scanning ----------
+
+    /** The last scan, shown in the scan sheet (null = closed). */
+    val scanResult = MutableStateFlow<app.necessityq.domain.ScanResult?>(null)
+    /** A scanned code is being looked up (prices may have to be downloaded first). */
+    val scanBusy = MutableStateFlow(false)
+
+    /** Prices of every followed branch, downloading the ones not loaded yet. */
+    private suspend fun followedPrices(): Map<String, app.necessityq.domain.BranchPrices> {
+        val ids = selectedPriceBranches.value
+        ids.filter { !branchPrices.value.containsKey(it) }.forEach { id ->
+            runCatching { container.prices.prices(id) }.getOrNull()?.let { p -> branchPrices.update { it + (id to p) } }
+        }
+        return branchPrices.value.filterKeys { it in ids }
+    }
+
+    private suspend fun lookupScan(raw: String): app.necessityq.domain.ScanResult? {
+        val loaded = followedPrices()
+        val snap = snapshot.value
+        val branchId = primaryBranch.value?.id
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            app.necessityq.domain.Scan.lookup(
+                raw,
+                branchId,
+                loaded,
+                snap?.lines.orEmpty(),
+                snap?.stats?.values?.map { it.identity }.orEmpty(),
+                preferredProducts.value,
+            )
+        }
+    }
+
+    /** A code read by the camera: price at the branch you are in, and what it is on the list. */
+    fun onScanned(raw: String?) {
+        if (raw == null) return
+        if (app.necessityq.domain.Barcodes.normalize(raw) == null) {
+            _messages.tryEmit("זה לא נראה כמו ברקוד של מוצר: $raw")
+            return
+        }
+        if (fix.value == null || mode.value == ListMode.SHOP) locate()
+        scanBusy.value = true
+        viewModelScope.launch {
+            runCatching { lookupScan(raw) }
+                .onSuccess { scanResult.value = it }
+                .onFailure { _messages.tryEmit("החיפוש נכשל: ${it.message ?: ""}") }
+            scanBusy.value = false
+        }
+    }
+
+    fun closeScan() { scanResult.value = null }
+
+    /** The scanned product is on the list: mark that line bought. */
+    fun scanCheckOff(result: app.necessityq.domain.ScanResult) {
+        val line = result.line?.takeIf { it.status == LineStatus.NEEDED } ?: return
+        checkOff(line)
+        scanResult.value = result.copy(line = line.copy(status = LineStatus.BOUGHT))
+    }
+
+    /** Adds the scanned product to the list as the generic item [text]; optionally remembers the exact product. */
+    fun scanAdd(result: app.necessityq.domain.ScanResult, text: String, rememberProduct: Boolean) {
+        val (hid, uid, lines) = ctx() ?: return
+        val code = result.product?.code
+        closeScan()
+        launchSafe {
+            val parsed = container.service.addFromText(hid, uid, text, lines) ?: return@launchSafe
+            if (rememberProduct && code != null) container.prices.setPreferredProduct(hid, parsed.item.id, code)
+            _messages.tryEmit("${parsed.item.displayName} נוסף לרשימה")
+        }
+    }
+
+    /** Remembers the scanned product as the household's product for its generic item. */
+    fun scanRemember(result: app.necessityq.domain.ScanResult) {
+        val identity = result.identity ?: return
+        val code = result.product?.code ?: return
+        setPreferredProduct(identity.id, code)
+        scanResult.value = result.copy(alreadyPreferred = true)
+    }
+
+    /** Scanned from an item's page: that exact product becomes the item's chosen product. */
+    fun linkScannedProduct(itemId: String, raw: String?) {
+        if (raw == null) return
+        scanBusy.value = true
+        viewModelScope.launch {
+            val product = runCatching { lookupScan(raw) }.getOrNull()?.product
+            if (product == null) _messages.tryEmit("הברקוד לא נמצא בסניפים שאתם עוקבים אחריהם")
+            else {
+                setPreferredProduct(itemId, product.code)
+                _messages.tryEmit("נבחר: ${product.name}")
+            }
+            scanBusy.value = false
+        }
     }
 
     // ---------- item conversations, notifications ----------

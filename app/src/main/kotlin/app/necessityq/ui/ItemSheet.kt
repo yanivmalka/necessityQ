@@ -63,6 +63,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -197,6 +198,7 @@ fun ItemSheet(vm: AppViewModel, itemId: String, itemName: String, onDismiss: () 
                     QuantityStepper(line.quantity, onMinus = { vm.adjustQuantity(line, -1) }, onPlus = { vm.adjustQuantity(line, +1) })
                     PriceSlot(price = null, average = null)
                 }
+                UnitChooser(line.quantity?.unit) { vm.setQuantityUnit(line, it) }
                 androidx.compose.foundation.layout.FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -1066,6 +1068,14 @@ private fun BranchPriceSection(vm: AppViewModel, itemId: String, name: String, v
         }
         if (info != null) Icon(if (open) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = if (open) "כיווץ" else "דיוק לפי מוצר")
     }
+    // scanning the exact product: when choosing one, or when no product matched the name
+    if (open || (info == null && loaded.containsKey(branch.id))) {
+        val scanProduct = rememberBarcodeScan(vm) { vm.linkScannedProduct(itemId, it) }
+        androidx.compose.material3.TextButton(onClick = scanProduct) {
+            Icon(Icons.Default.QrCodeScanner, null)
+            Text("  סריקת המוצר שאתם קונים")
+        }
+    }
     if (!open || info == null) return
 
     Text("דיוק לפי מוצר (לא חובה) — המוצר שתבחרו יוצג ברשימה במקום הטווח.", style = MaterialTheme.typography.bodySmall)
@@ -1105,5 +1115,19 @@ private fun BranchPriceSection(vm: AppViewModel, itemId: String, name: String, v
     }
     if (info.preferred != null) {
         androidx.compose.material3.TextButton(onClick = { vm.setPreferredProduct(itemId, null) }) { Text("ביטול הבחירה — הצגת טווח בלבד") }
+    }
+}
+
+/** Kind of quantity: none / piece / package / kilo / gram / litre (millilitres only once in use). */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun UnitChooser(current: app.necessityq.domain.QuantityUnit?, onChoose: (app.necessityq.domain.QuantityUnit?) -> Unit) {
+    val label = { u: app.necessityq.domain.QuantityUnit -> if (u == app.necessityq.domain.QuantityUnit.PACKAGE) "מארז" else u.label }
+    val shown = app.necessityq.domain.QuantitySteps.choices.filter { it != app.necessityq.domain.QuantityUnit.MILLILITER || current == it }
+    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        androidx.compose.material3.FilterChip(selected = current == null, onClick = { onChoose(null) }, label = { Text("בלי כמות") })
+        shown.forEach { u ->
+            androidx.compose.material3.FilterChip(selected = current == u, onClick = { onChoose(u) }, label = { Text(label(u)) })
+        }
     }
 }

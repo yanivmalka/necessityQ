@@ -27,6 +27,11 @@
             </intent-filter>
         </activity>
 
+        <!-- installs Google's barcode-scanner module together with the app (no camera permission needed) -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="barcode_ui" />
+
         <!-- hands the downloaded update APK to the system installer -->
         <provider
             android:name="androidx.core.content.FileProvider"

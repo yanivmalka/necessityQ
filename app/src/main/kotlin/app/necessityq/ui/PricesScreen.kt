@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
@@ -96,12 +97,14 @@ fun PricesScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
 @Composable
 private fun BranchesTab(vm: AppViewModel, branches: List<PriceBranch>, selected: List<String>, status: Map<String, BranchPriceStatus>) {
     val position by vm.userPosition.collectAsStateWithLifecycle()
+    val here by vm.hereBranch.collectAsStateWithLifecycle()
+    val locating by vm.locating.collectAsStateWithLifecycle()
     var filter by rememberSaveable { mutableStateOf("") }
     var radiusKm by rememberSaveable { mutableStateOf(5.0) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         if (result.values.any { it }) vm.refreshPosition()
     }
-    LaunchedEffect(Unit) { if (vm.hasLocationPermission()) vm.refreshPosition() }
+    LaunchedEffect(Unit) { if (vm.hasLocationPermission()) vm.locate() }
 
     val list = remember(branches, position, radiusKm, filter) {
         val key = HebrewText.matchKey(filter)
@@ -124,7 +127,20 @@ private fun BranchesTab(vm: AppViewModel, branches: List<PriceBranch>, selected:
                 listOf(2.0, 5.0, 10.0, 25.0).forEach { r ->
                     FilterChip(selected = radiusKm == r, onClick = { radiusKm = r }, label = { Text("${r.toInt()} ק\"מ") })
                 }
-                IconButton(onClick = { vm.refreshPosition() }) { Icon(Icons.Default.MyLocation, contentDescription = "עדכון מיקום") }
+                IconButton(onClick = { vm.refreshPosition() }, enabled = !locating) { Icon(Icons.Default.MyLocation, contentDescription = "עדכון מיקום") }
+            }
+        }
+        if (locating) LinearProgressIndicator(Modifier.fillMaxWidth())
+        here?.let { nb ->
+            Card(Modifier.fillMaxWidth()) {
+                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("אתם כנראה ב${nb.branch.title}", fontWeight = FontWeight.Bold)
+                        Text("לפי המיקום (${PriceData.formatDistance(nb.distanceMeters ?: 0.0)} מהכתובת)", style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (nb.branch.id !in selected) OutlinedButton(onClick = vm::followHereBranch) { Text("מעקב") }
+                    else Text("במעקב ✓", color = MaterialTheme.colorScheme.primary)
+                }
             }
         }
         OutlinedTextField(filter, { filter = it }, label = { Text("חיפוש רשת או סניף") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -174,6 +190,7 @@ private fun ProductsTab(vm: AppViewModel, mine: List<PriceBranch>, status: Map<S
     val current: BranchPrices? = all[branchId]
     val mineLoaded = remember(all, mine) { all.filterKeys { id -> mine.any { it.id == id } } }
     val results = remember(current, query) { current?.let { PriceData.search(it.products, query) }.orEmpty() }
+    val scan = rememberBarcodeScan(vm) { code -> query = app.necessityq.domain.Barcodes.normalize(code) ?: code }
 
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -186,7 +203,10 @@ private fun ProductsTab(vm: AppViewModel, mine: List<PriceBranch>, status: Map<S
             }
         }
         if (branchId in loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-        OutlinedTextField(query, { query = it }, label = { Text("חיפוש מוצר או ברקוד") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(
+            query, { query = it }, label = { Text("חיפוש מוצר או ברקוד") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            trailingIcon = { IconButton(onClick = scan) { Icon(Icons.Default.QrCodeScanner, contentDescription = "סריקת ברקוד") } },
+        )
         if (current != null && query.isBlank()) Text("${current.products.size} מוצרים בסניף. הקלידו שם מוצר, למשל \"קוטג 5%\".", style = MaterialTheme.typography.bodySmall)
         if (current == null && branchId !in loading) Text("המחירים של הסניף עוד לא נטענו. נסו לרענן בעוד כמה דקות.", style = MaterialTheme.typography.bodySmall)
     }
