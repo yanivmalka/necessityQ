@@ -349,6 +349,35 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         launchSafe { container.meals.save(hid, next) }
     }
 
+    // ---------- Tzameret (national nutrition database) ----------
+
+    enum class NutritionLoad { IDLE, LOADING, READY, UNAVAILABLE }
+
+    private val _nutrition = MutableStateFlow<app.necessityq.domain.NutritionIndex?>(null)
+    val nutrition: StateFlow<app.necessityq.domain.NutritionIndex?> = _nutrition
+    private val _nutritionLoad = MutableStateFlow(NutritionLoad.IDLE)
+    val nutritionLoad: StateFlow<NutritionLoad> = _nutritionLoad
+
+    /** Loads the Tzameret snapshot (from the cache when it is current). Called when the menu needs it. */
+    fun loadNutrition() {
+        if (_nutritionLoad.value == NutritionLoad.LOADING || _nutritionLoad.value == NutritionLoad.READY) return
+        _nutritionLoad.value = NutritionLoad.LOADING
+        viewModelScope.launch {
+            val index = runCatching { container.nutrition.index() }.getOrNull()
+            _nutrition.value = index
+            _nutritionLoad.value = if (index != null && index.foods.isNotEmpty()) NutritionLoad.READY else NutritionLoad.UNAVAILABLE
+        }
+    }
+
+    /** Adds a dish built from a Tzameret food (its composition becomes the ingredient list). */
+    fun addDishFromNutrition(food: app.necessityq.domain.NutritionFood) {
+        val index = _nutrition.value ?: return
+        val dish = index.dishFrom(food, java.util.UUID.randomUUID().toString())
+        if (meals.value.dishes.any { it.nutritionCode == food.code }) { _messages.tryEmit("${dish.name} כבר ברשימת המאכלים"); return }
+        updateMeals { it.copy(dishes = it.dishes + dish) }
+        _messages.tryEmit("נוסף: ${dish.name}")
+    }
+
     /** Adds the ingredients of one week of the menu to the list, tagged with their dish. */
     fun addMenuToList(week: Int) {
         val (hid, uid, _) = ctx() ?: return

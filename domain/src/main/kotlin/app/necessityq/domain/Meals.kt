@@ -19,7 +19,8 @@ enum class Taste(val label: String, val score: Int) {
     NEVER("בכלל לא", -100),
 }
 
-data class Dish(val id: String, val name: String, val ingredients: List<String>)
+/** A dish; [nutritionCode] links it to its Tzameret food when it was taken from there. */
+data class Dish(val id: String, val name: String, val ingredients: List<String>, val nutritionCode: Int? = null)
 
 enum class MealSlot(val label: String) { BREAKFAST("בוקר"), LUNCH("צהריים"), DINNER("ערב"), SHABBAT("שבת") }
 

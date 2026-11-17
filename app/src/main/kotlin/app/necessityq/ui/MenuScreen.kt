@@ -36,6 +36,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -69,6 +70,10 @@ fun MenuScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
     var addingDish by remember { mutableStateOf(false) }
     var ratingDish by remember { mutableStateOf<Dish?>(null) }
     var pickingDay by remember { mutableStateOf<Int?>(null) }
+    var importing by remember { mutableStateOf(false) }
+    val nutrition by vm.nutrition.collectAsStateWithLifecycle()
+    val linked = data.dishes.any { it.nutritionCode != null }
+    LaunchedEffect(linked, importing) { if (linked || importing) vm.loadNutrition() }
 
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         TopAppBar(
@@ -148,11 +153,17 @@ fun MenuScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
                         Column(Modifier.weight(1f)) {
                             Text(dish.name, fontWeight = FontWeight.Bold)
                             Text(dish.ingredients.joinToString(", "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            dish.nutritionCode?.let { nutrition?.food(it) }?.summary()?.takeIf { it.isNotEmpty() }?.let {
+                                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
                         Text(tasteSummary(data, dish), style = MaterialTheme.typography.bodySmall)
                     }
                 }
-                TextButton(onClick = { addingDish = true }) { Text("+ מאכל חדש") }
+                Row {
+                    TextButton(onClick = { addingDish = true }) { Text("+ מאכל חדש") }
+                    TextButton(onClick = { importing = true }) { Text("+ ממאגר צמרת") }
+                }
             }
 
             // ---- reverse: from what was bought ----
@@ -196,6 +207,55 @@ fun MenuScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
     }
     ratingDish?.let { dish -> TasteDialog(vm, data, dish, onDismiss = { ratingDish = null }) }
     pickingDay?.let { day -> PickDishDialog(vm, data, day, onDismiss = { pickingDay = null }) }
+    if (importing) TzameretDialog(vm, onDismiss = { importing = false })
+}
+
+/**
+ * Search Tzameret (Ministry of Health's nutrition database) for a dish; its composition becomes
+ * the dish's ingredients. Only composite foods are listed unless "כל המזונות" is chosen.
+ */
+@Composable
+private fun TzameretDialog(vm: AppViewModel, onDismiss: () -> Unit) {
+    val index by vm.nutrition.collectAsStateWithLifecycle()
+    val load by vm.nutritionLoad.collectAsStateWithLifecycle()
+    var query by remember { mutableStateOf("") }
+    var allFoods by remember { mutableStateOf(false) }
+    val results = remember(index, query, allFoods) {
+        if (query.trim().length < 2) emptyList() else index?.search(query, limit = 25, compositeOnly = !allFoods).orEmpty()
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("מאכל ממאגר צמרת") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                when (load) {
+                    AppViewModel.NutritionLoad.READY -> {
+                        OutlinedTextField(query, { query = it }, label = { Text("שם המאכל, למשל שקשוקה") }, singleLine = true)
+                        FilterChip(selected = allFoods, onClick = { allFoods = !allFoods }, label = { Text("כל המזונות, לא רק מנות") })
+                        if (query.trim().length >= 2 && results.isEmpty()) Text("לא נמצא. נסו מילה אחרת.")
+                        results.forEach { food ->
+                            Column(
+                                Modifier.fillMaxWidth().clickable { vm.addDishFromNutrition(food); onDismiss() }.padding(vertical = 6.dp),
+                            ) {
+                                Text(food.name, fontWeight = FontWeight.Bold)
+                                val parts = food.parts.filter { it.percent >= 1.0 }.take(6).joinToString(", ") { it.name.substringBefore(',') }
+                                if (parts.isNotEmpty()) Text(parts, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                food.summary().takeIf { it.isNotEmpty() }?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
+                            }
+                        }
+                        Text(
+                            "מקור: מאגר צמרת, משרד הבריאות (data.gov.il)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    AppViewModel.NutritionLoad.UNAVAILABLE -> Text("המאגר עדיין לא זמין. הוא נטען בשרת פעם בחודש, או על ידי מנהל.")
+                    else -> Text("טוען את המאגר…")
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("סגירה") } },
+    )
 }
 
 private fun tasteSummary(data: MealData, dish: Dish): String {
