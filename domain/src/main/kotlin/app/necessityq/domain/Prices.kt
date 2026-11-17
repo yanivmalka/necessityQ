@@ -51,7 +51,14 @@ data class BranchProduct(
     val high: Double,
     /** [day, price] changes, oldest first */
     val history: List<Pair<String, Double>> = emptyList(),
-)
+) {
+    /**
+     * Priced per kilo. Many chains don't set the "weighted" flag on produce; a chain-internal (or short) code
+     * whose unit is a kilo counts too. Packaged goods of 1 kg carry a real barcode, so they are not caught.
+     */
+    val soldByWeight: Boolean
+        get() = weighted || (PieceWeights.isKiloUnit(unit) && (internalCode || code.length <= 7))
+}
 
 data class BranchPrices(
     val branchId: String,
@@ -261,7 +268,7 @@ object ListCost {
             when {
                 own != null -> (own * PriceEstimate.units(line.quantity)).let { low += it; high += it }
                 info?.preferred != null -> {
-                    val n = packages(line.quantity, info.preferred.weighted, grams) ?: continue
+                    val n = packages(line.quantity, info.preferred.soldByWeight, grams) ?: continue
                     (info.preferred.price * n).let { low += it; high += it }
                 }
                 info != null -> {
@@ -270,7 +277,7 @@ object ListCost {
                         low += byWeight.low
                         high += byWeight.high
                     } else {
-                        val n = packages(line.quantity, info.candidates.firstOrNull()?.weighted == true, grams) ?: continue
+                        val n = packages(line.quantity, info.candidates.firstOrNull()?.soldByWeight == true, grams) ?: continue
                         low += info.low * n
                         high += info.high * n
                     }

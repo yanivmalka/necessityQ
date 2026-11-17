@@ -71,9 +71,19 @@ class ShoppingService(
         recipe: String? = null,
     ) {
         val now = clock.nowMillis()
+        val part = recipe?.let { RecipePart(it, quantity, fromMenu = source == LineSource.MENU) }
         when (val decision = ListRules.decideAdd(current, item.id, quantity)) {
-            is ListRules.AddDecision.Merge ->
+            is ListRules.AddDecision.Merge -> {
                 repository.updateLineQuantity(householdId, decision.lineId, decision.quantity, now)
+                // the existing line now also serves this dish: say so, and how much the dish needs
+                if (part != null) {
+                    val line = current.firstOrNull { it.id == decision.lineId }
+                    repository.updateLineRecipes(
+                        householdId, decision.lineId, line?.recipe ?: recipe,
+                        RecipeParts.merge(line?.recipeParts.orEmpty(), part), now,
+                    )
+                }
+            }
             is ListRules.AddDecision.New -> repository.addLine(
                 householdId,
                 ListLine(
@@ -90,10 +100,15 @@ class ShoppingService(
                     addedAtMillis = now,
                     updatedAtMillis = now,
                     recipe = recipe,
+                    recipeParts = listOfNotNull(part),
                 ),
             )
         }
     }
+
+    /** Sets how much of a line one dish needs (after its servings changed). */
+    suspend fun setRecipePart(householdId: String, line: ListLine, part: RecipePart) =
+        repository.updateLineRecipes(householdId, line.id, line.recipe ?: part.dish, RecipeParts.replace(line.recipeParts, part), clock.nowMillis())
 
     suspend fun acceptSuggestion(householdId: String, userId: String, suggestion: Suggestion, current: List<ListLine>) {
         val source = if (suggestion.kind == SuggestionKind.RUNNING_LOW) LineSource.SUGGESTED else LineSource.QUICK_ADD

@@ -32,7 +32,11 @@ internal data class LineDto(
     val addedAt: Long, val updatedAt: Long, val boughtAt: Long? = null,
     val position: Long = 0, val missing: Boolean = false, val recipe: String? = null,
     val removedAt: Long? = null, val removedReason: String? = null, val removedFrom: String? = null,
+    val recipeParts: List<RecipePartDto> = emptyList(),
 )
+
+@Serializable
+internal data class RecipePartDto(val dish: String, val quantity: QuantityDto? = null, val menu: Boolean = false)
 
 @Serializable
 internal data class PurchaseDto(
@@ -113,6 +117,7 @@ private fun ListLine.toDto() = LineDto(
     id, itemId, name, variant, category.name, quantity?.toDto(), note, status.name, source.name,
     addedBy, addedAtMillis, updatedAtMillis, boughtAtMillis,
     position, missing, recipe, removedAtMillis, removedReason?.name, removedFrom?.name,
+    recipeParts.map { RecipePartDto(it.dish, it.quantity?.toDto(), it.fromMenu) },
 )
 
 private fun Purchase.toDto() = PurchaseDto(
@@ -130,6 +135,7 @@ private fun StateDto.toDomain(): LocalState = LocalState(
             position = d.position, missing = d.missing, recipe = d.recipe, removedAtMillis = d.removedAt,
             removedReason = d.removedReason?.let { runCatching { app.necessityq.domain.RemoveReason.valueOf(it) }.getOrNull() },
             removedFrom = d.removedFrom?.let { runCatching { LineStatus.valueOf(it) }.getOrNull() },
+            recipeParts = d.recipeParts.map { app.necessityq.domain.RecipePart(it.dish, it.quantity?.toDomain(), it.menu) },
         )
     },
     purchases = purchases.associate { d ->

@@ -142,8 +142,8 @@ private fun ScanContent(vm: AppViewModel, r: ScanResult) {
         Text(p.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         val details = listOfNotNull(
             p.brand.takeIf { it.isNotBlank() },
-            p.packageSize?.let { q -> "${if (q == Math.floor(q)) q.toLong().toString() else q.toString()} ${p.unit}".trim() }?.takeIf { !p.weighted },
-            if (p.weighted) "במשקל" else null,
+            p.packageSize?.let { q -> "${if (q == Math.floor(q)) q.toLong().toString() else q.toString()} ${p.unit}".trim() }?.takeIf { !p.soldByWeight },
+            if (p.soldByWeight) "במשקל" else null,
         )
         if (details.isNotEmpty()) Text(details.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
 

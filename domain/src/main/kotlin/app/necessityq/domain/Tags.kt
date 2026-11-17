@@ -16,7 +16,14 @@ object ItemTags {
      */
     fun of(line: ListLine, stats: ItemStats?, favorite: Boolean): List<ItemTag> = buildList {
         if (line.missing) add(ItemTag(TagKind.MISSING, "חסר"))
-        line.recipe?.let { add(ItemTag(TagKind.RECIPE, if (line.isFromMenu) "תפריט: $it" else "מתכון: $it")) }
+        if (line.recipeParts.isNotEmpty()) {
+            line.recipeParts.forEach { p ->
+                val label = (if (p.fromMenu) "תפריט: " else "מתכון: ") + p.dish + (p.quantity?.let { " · ${it.format()}" } ?: "")
+                add(ItemTag(TagKind.RECIPE, label))
+            }
+        } else {
+            line.recipe?.let { add(ItemTag(TagKind.RECIPE, if (line.isFromMenu) "תפריט: $it" else "מתכון: $it")) }
+        }
         when (stats?.classification) {
             Classification.ROUTINE -> add(ItemTag(TagKind.ROUTINE, "קבוע"))
             Classification.OCCASIONAL -> add(ItemTag(TagKind.OCCASIONAL, "לפעמים"))

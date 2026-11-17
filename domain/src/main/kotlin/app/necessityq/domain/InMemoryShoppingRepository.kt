@@ -45,6 +45,12 @@ open class InMemoryShoppingRepository(
             s.copy(lines = s.lines + (lineId to line.copy(quantity = quantity, updatedAtMillis = atMillis)))
         }
 
+    override suspend fun updateLineRecipes(householdId: String, lineId: String, recipe: String?, parts: List<RecipePart>, atMillis: Long) =
+        mutate { s ->
+            val line = s.lines[lineId] ?: return@mutate s
+            s.copy(lines = s.lines + (lineId to line.copy(recipe = recipe, recipeParts = parts, updatedAtMillis = atMillis)))
+        }
+
     override suspend fun updateLineNote(householdId: String, lineId: String, note: String?, atMillis: Long) =
         mutate { s ->
             val line = s.lines[lineId] ?: return@mutate s

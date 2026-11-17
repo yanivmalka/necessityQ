@@ -226,8 +226,8 @@ private fun ProductCard(p: BranchProduct, rangeDays: Int, across: app.necessityq
                     Text(p.name, fontWeight = FontWeight.Bold)
                     val details = listOfNotNull(
                         p.brand.takeIf { it.isNotBlank() },
-                        p.packageSize?.let { q -> "${trim(q)} ${p.unit}".trim() }?.takeIf { !p.weighted },
-                        if (p.weighted) "במשקל" else null,
+                        p.packageSize?.let { q -> "${trim(q)} ${p.unit}".trim() }?.takeIf { !p.soldByWeight },
+                        if (p.soldByWeight) "במשקל" else null,
                     )
                     if (details.isNotEmpty()) Text(details.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
                 }

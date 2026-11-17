@@ -1149,7 +1149,7 @@ private fun ProductTile(
                                 }
                             }
                             if (display.showPrices) {
-                                PriceSlot(price = price?.let { it * PriceEstimate.units(line.quantity) }, average = null, info = priceInfo, weighted = weightedCost)
+                                PriceSlot(price = price?.let { it * PriceEstimate.units(line.quantity) }, average = null, info = priceInfo, weighted = weightedCost, quantity = line.quantity)
                             }
                         }
                         if (subline.isNotBlank() || showStepper || (controlsMode && controlsOpen)) {
@@ -1444,15 +1444,25 @@ fun PriceSlot(
     info: app.necessityq.domain.ItemPriceInfo? = null,
     /** produce sold by weight: the cost of the quantity on the list (estimated weight when counted) */
     weighted: app.necessityq.domain.LineCost? = null,
+    /** the amount on the list, shown instead of the number of matching products */
+    quantity: app.necessityq.domain.Quantity? = null,
 ) {
     // the household's own price wins; otherwise the branch data: chosen product, or the typical range
     val (main, sub) = when {
         price != null -> "₪%.2f".format(price) to "ממוצע " + (average?.let { "₪%.2f".format(it) } ?: "—")
         weighted != null -> app.necessityq.domain.PriceData.formatRange(weighted.low, weighted.high).replace("–₪", "–") to
-            (weighted.estimatedWeight?.let { "לפי " + app.necessityq.domain.PieceWeights.label(it) } ?: "לפי משקל")
+            listOfNotNull(quantity?.format(), weighted.estimatedWeight?.let { app.necessityq.domain.PieceWeights.label(it) })
+                .joinToString(" ").ifEmpty { "לפי משקל" }
         info?.preferred != null -> app.necessityq.domain.PriceData.formatPrice(info.preferred!!.price) to "המוצר שבחרת"
-        info != null -> app.necessityq.domain.PriceData.formatRange(info.low, info.high).replace("–₪", "–") to
-            (if (info.candidates.size == 1) "מוצר אחד" else "${info.candidates.size} מוצרים")
+        // produce priced per kilo with no amount on the list: the price is per kilo
+        info != null && info.candidates.isNotEmpty() && info.candidates.all { it.soldByWeight } ->
+            app.necessityq.domain.PriceData.formatRange(info.low, info.high).replace("–₪", "–") to "לק\"ג"
+        info != null -> {
+            // packaged goods: the price of the amount on the list ("2 יח'"), not a count of matching products
+            val n = app.necessityq.domain.ListCost.packages(quantity, false) ?: 1.0
+            app.necessityq.domain.PriceData.formatRange(info.low * n, info.high * n).replace("–₪", "–") to
+                (quantity?.format() ?: if (info.candidates.size == 1) "מוצר אחד" else "${info.candidates.size} מוצרים")
+        }
         else -> "₪ —" to "ממוצע " + (average?.let { "₪%.2f".format(it) } ?: "—")
     }
     Column(
