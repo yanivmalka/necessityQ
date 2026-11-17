@@ -197,7 +197,7 @@ private fun Root(vm: AppViewModel) {
                 }
             }
             openChat?.let { (itemId, name) ->
-                ItemSheet(vm, itemId = itemId, itemName = name, onDismiss = { openChat = null })
+                ItemSheet(vm, itemId = itemId, itemName = name, onDismiss = { openChat = null }, onOpenItem = { id, n -> openChat = id to n })
             }
             ScanSheet(vm)
         }

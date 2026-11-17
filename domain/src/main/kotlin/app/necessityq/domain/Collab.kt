@@ -157,6 +157,11 @@ interface CollabRepository {
     fun receipts(householdId: String): Flow<Map<String, Receipt>>
     suspend fun markSeen(householdId: String, userId: String, atMillis: Long)
     suspend fun markRead(householdId: String, userId: String, itemId: String, atMillis: Long)
+
+    /** Who is typing in which item conversation right now (live only; nothing without a backend). */
+    fun typing(householdId: String): kotlinx.coroutines.flow.Flow<List<TypingState>> = kotlinx.coroutines.flow.flowOf(emptyList())
+    /** Announces that [userId] is typing ([state]), or stopped (null). */
+    suspend fun setTyping(householdId: String, userId: String, state: TypingState?) {}
 }
 
 /** Non-persistent implementation for the single-device mode and tests. */

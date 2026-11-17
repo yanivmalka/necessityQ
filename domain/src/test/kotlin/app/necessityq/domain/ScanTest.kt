@@ -136,3 +136,24 @@ class QuantityUnitSwitchTest {
         assertEquals(2.0, ListCost.packages(Quantity(2.0, QuantityUnit.PACKAGE), weighted = true)!!, 0.001)
     }
 }
+
+class TypingTest {
+    private fun t(user: String, at: Long, item: String = "milk") = TypingState(user, user, item, item, at)
+
+    @Test
+    fun activeDropsMeAndStaleMarks() {
+        val now = 100_000L
+        val all = listOf(t("me", now), t("keren", now - 2_000), t("old", now - 20_000))
+        assertEquals(listOf("keren"), Typing.active(all, "me", now).map { it.userId })
+    }
+
+    @Test
+    fun labelAndHeartbeat() {
+        assertEquals("קרן באמצע הקלדה…", Typing.label(listOf("קרן")))
+        assertEquals("קרן ויניב באמצע הקלדה…", Typing.label(listOf("קרן", "יניב")))
+        assertTrue(Typing.shouldAnnounce(null, 0, "milk", 1_000))
+        assertFalse(Typing.shouldAnnounce("milk", 1_000, "milk", 2_000))
+        assertTrue(Typing.shouldAnnounce("milk", 1_000, "milk", 4_500))
+        assertTrue(Typing.shouldAnnounce("milk", 1_000, "bread", 1_500))
+    }
+}

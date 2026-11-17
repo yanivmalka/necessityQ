@@ -73,6 +73,12 @@ service cloud.firestore {
         allow delete: if isMember(hid);
       }
 
+      // live "typing…" marks: each member writes only their own
+      match /typing/{typerId} {
+        allow read: if isMember(hid);
+        allow write: if isMember(hid) && uid() == typerId;
+      }
+
       // read receipts: each member writes only their own
       match /reads/{readerId} {
         allow read: if isMember(hid);

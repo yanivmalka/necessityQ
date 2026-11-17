@@ -49,6 +49,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -808,10 +809,70 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     private fun authorName(uid: String) =
         memberNames.value[uid] ?: (session.value as? Session.SignedIn)?.account?.displayName ?: "אני"
 
+    // ---------- "typing…" in item conversations ----------
+
+    /** Ticks every second so typing marks expire on screen even when nothing else changes. */
+    private val clockTick = kotlinx.coroutines.flow.flow {
+        while (true) {
+            emit(System.currentTimeMillis())
+            kotlinx.coroutines.delay(1_000)
+        }
+    }
+
+    /** Other members typing right now, in any item conversation (only while connected: marks are live). */
+    val typingNow: StateFlow<List<app.necessityq.domain.TypingState>> = householdId
+        .flatMapLatest { hid -> if (hid == null) emptyFlow() else container.collab.typing(hid) }
+        .catch { emit(emptyList()) }
+        .let { marks -> combine(marks, clockTick) { all, now -> app.necessityq.domain.Typing.active(all, me, now) } }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private var typingItem: String? = null
+    private var typingAnnouncedAt = 0L
+    private var typingIdle: kotlinx.coroutines.Job? = null
+
+    /** The text box of an item conversation changed: announce typing (throttled), stop when emptied or idle. */
+    fun onDraftChanged(itemId: String, itemName: String, text: String) {
+        if (text.isBlank()) { stopTyping(); return }
+        val (hid, uid, _) = ctx() ?: return
+        val now = System.currentTimeMillis()
+        if (app.necessityq.domain.Typing.shouldAnnounce(typingItem, typingAnnouncedAt, itemId, now)) {
+            typingItem = itemId
+            typingAnnouncedAt = now
+            val state = app.necessityq.domain.TypingState(uid, authorName(uid), itemId, itemName, now)
+            viewModelScope.launch { runCatching { container.collab.setTyping(hid, uid, state) } }
+        }
+        typingIdle?.cancel()
+        typingIdle = viewModelScope.launch {
+            kotlinx.coroutines.delay(app.necessityq.domain.Typing.IDLE_MS)
+            stopTyping()
+        }
+    }
+
+    /** Sent, emptied, idle or the conversation was closed. */
+    fun stopTyping() {
+        typingIdle?.cancel()
+        typingIdle = null
+        if (typingItem == null) return
+        typingItem = null
+        typingAnnouncedAt = 0L
+        val (hid, uid, _) = ctx() ?: return
+        viewModelScope.launch { runCatching { container.collab.setTyping(hid, uid, null) } }
+    }
+
+    /** The view model is going away: clear our mark so others do not see a stale "typing…" (it also expires by itself). */
+    @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
+    private fun clearTypingOnExit() {
+        if (typingItem == null) return
+        val (hid, uid, _) = ctx() ?: return
+        kotlinx.coroutines.GlobalScope.launch { runCatching { container.collab.setTyping(hid, uid, null) } }
+    }
+
     fun sendMessage(itemId: String, itemName: String, text: String, replyToId: String? = null) {
         val (hid, uid, _) = ctx() ?: return
         val clean = text.trim()
         if (clean.isEmpty()) return
+        stopTyping()
         launchSafe {
             container.collab.sendMessage(
                 hid,
@@ -915,6 +976,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     val player = app.necessityq.platform.VoicePlayer(container.appContext)
 
     override fun onCleared() {
+        clearTypingOnExit()
         recorder.stopQuietly()
         player.stop()
     }

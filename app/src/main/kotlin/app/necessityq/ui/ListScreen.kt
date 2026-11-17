@@ -221,6 +221,7 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
     var showBin by remember { mutableStateOf(false) }
     val scan = rememberBarcodeScan(vm) { vm.onScanned(it) }
     var showStoreDialog by remember { mutableStateOf(false) }
+    var openOther by remember { mutableStateOf<Pair<String, String>?>(null) }
     var addOpen by remember { mutableStateOf(false) }
     val shopping = mode == ListMode.SHOP
 
@@ -600,7 +601,14 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
     if (showReset) ResetDialog(snapshot?.lines.orEmpty(), onReset = { vm.resetList(it); showReset = false }, onDismiss = { showReset = false })
 
     openItem?.let { line ->
-        ItemSheet(vm, itemId = line.itemId, itemName = line.displayName, onDismiss = { openItem = null })
+        ItemSheet(
+            vm, itemId = line.itemId, itemName = line.displayName, onDismiss = { openItem = null },
+            onOpenItem = { id, n -> openItem = null; openOther = id to n },
+        )
+    }
+    // another product's conversation, reached from its "typing…" banner
+    openOther?.let { (id, n) ->
+        ItemSheet(vm, itemId = id, itemName = n, onDismiss = { openOther = null }, onOpenItem = { id2, n2 -> openOther = id2 to n2 })
     }
     if (showBin) RecycleBinSheet(snapshot?.removed.orEmpty(), vm, onDismiss = { showBin = false })
     if (showStoreDialog) {
