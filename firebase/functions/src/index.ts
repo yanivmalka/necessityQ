@@ -11,6 +11,7 @@ import { guardConfig, parseNotification, shouldCut } from "./budget";
 import * as logger from "firebase-functions/logger";
 import { BranchStatus, PriceConfig, PriceStore, refreshBranchPrices, refreshBranches, tick, withDefaults } from "./ingest";
 import { Branch, Snapshot } from "./model";
+import { downloadTzameret, snapshotStats } from "./nutrition";
 
 // Israeli region: several retailer portals refuse requests from abroad.
 setGlobalOptions({ region: "me-west1", maxInstances: 2 });
@@ -148,4 +149,31 @@ export const budgetGuard = onMessagePublished({ topic: "billing-budget", memory:
   await client.request({ url, method: "PUT", data: { billingAccountName: "" } });
   await db.doc("config/billing").set({ lastCutAt: new Date().toISOString(), lastCutCost: n.costAmount, lastCutBudget: n.budgetAmount }, { merge: true });
   logger.error(`billing disabled: cost ${n.costAmount} ${n.currencyCode ?? ""} reached budget ${n.budgetAmount}`);
+});
+
+/** Tzameret (national nutrition database): one gzipped snapshot in Storage, refreshed monthly. */
+async function refreshNutritionSnapshot() {
+  const snapshot = await downloadTzameret(undefined, (m) => logger.info(m));
+  const body = gzipSync(new TextEncoder().encode(JSON.stringify(snapshot)), { level: 9 });
+  await getStorage()
+    .bucket()
+    .file("nutrition/tzameret.json.gz")
+    .save(Buffer.from(body), { contentType: "application/gzip", metadata: { cacheControl: "private, max-age=86400" } });
+  const stats = { updatedAt: snapshot.updatedAt, bytes: body.byteLength, ...snapshotStats(snapshot) };
+  await db.doc("nutrition/meta").set(stats);
+  return stats;
+}
+
+export const nutritionMonthly = onSchedule(
+  { schedule: "17 4 3 * *", timeZone: "Asia/Jerusalem", timeoutSeconds: 540, memory: "512MiB" },
+  async () => {
+    logger.info("tzameret refreshed", await refreshNutritionSnapshot());
+  },
+);
+
+/** Admin: download Tzameret now (first time, or after the Ministry publishes an update). */
+export const refreshNutrition = onCall({ timeoutSeconds: 540, memory: "512MiB" }, async (req) => {
+  const config = await loadConfig();
+  if (!req.auth || !config.admins.includes(req.auth.uid)) throw new HttpsError("permission-denied", "admins only");
+  return refreshNutritionSnapshot();
 });

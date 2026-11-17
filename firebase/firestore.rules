@@ -93,6 +93,7 @@ service cloud.firestore {
     // Public price-transparency data, written only by the ingestion functions (admin SDK).
     match /prices/{doc} { allow read: if signedIn(); allow write: if false; }
     match /priceBranches/{branchId} { allow read: if signedIn(); allow write: if false; }
+    match /nutrition/{doc} { allow read: if signedIn(); allow write: if false; }
     // config/prices is edited by the admin in the Firebase console; geocodeCache is server-only.
     match /config/{doc} { allow read, write: if false; }
     match /geocodeCache/{key} { allow read, write: if false; }

@@ -13,7 +13,7 @@ import kotlinx.serialization.json.Json
 /** JSON form of [MealData]; unknown/legacy values are skipped rather than failing. */
 object MealJson {
     @Serializable private data class M(val id: String, val name: String)
-    @Serializable private data class D(val id: String, val name: String, val ingredients: List<String> = emptyList())
+    @Serializable private data class D(val id: String, val name: String, val ingredients: List<String> = emptyList(), val nutritionCode: Int? = null)
     @Serializable private data class P(val day: Int, val slot: String, val dishId: String, val audience: List<String> = emptyList())
     @Serializable private data class Root(
         val members: List<M> = emptyList(),
@@ -29,7 +29,7 @@ object MealJson {
         Root.serializer(),
         Root(
             members = data.members.map { M(it.id, it.name) },
-            dishes = data.dishes.map { D(it.id, it.name, it.ingredients) },
+            dishes = data.dishes.map { D(it.id, it.name, it.ingredients, it.nutritionCode) },
             tastes = data.tastes.mapValues { (_, m) -> m.mapValues { it.value.name } },
             cycleWeeks = data.plan.cycleWeeks,
             meals = data.plan.meals.map { P(it.day, it.slot.name, it.dishId, it.audience.toList()) },
@@ -41,7 +41,7 @@ object MealJson {
         val r = runCatching { json.decodeFromString(Root.serializer(), text) }.getOrNull() ?: return MealData()
         return MealData(
             members = r.members.map { FamilyMember(it.id, it.name) },
-            dishes = r.dishes.map { Dish(it.id, it.name, it.ingredients) },
+            dishes = r.dishes.map { Dish(it.id, it.name, it.ingredients, it.nutritionCode) },
             tastes = r.tastes.mapValues { (_, m) ->
                 m.mapNotNull { (k, v) -> runCatching { Taste.valueOf(v) }.getOrNull()?.let { k to it } }.toMap()
             },

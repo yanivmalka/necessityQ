@@ -32,6 +32,7 @@ class AppContainer(context: Context) {
     val collab: app.necessityq.domain.CollabRepository
     val meals: app.necessityq.domain.MealRepository
     val prices: app.necessityq.domain.PriceRepository
+    val nutrition: app.necessityq.domain.NutritionRepository
 
     init {
         val firebase = if (BuildConfig.FIREBASE_CONFIGURED) FirebaseApp.initializeApp(context) else null
@@ -50,6 +51,11 @@ class AppContainer(context: Context) {
                 com.google.firebase.functions.FirebaseFunctions.getInstance(firebase, "me-west1"),
                 context.cacheDir,
             )
+            nutrition = app.necessityq.data.firebase.FirebaseNutritionRepository(
+                db,
+                com.google.firebase.storage.FirebaseStorage.getInstance(firebase),
+                context.cacheDir,
+            )
         } else {
             val store = LocalStore(File(context.filesDir, "necessityq-state.json"))
             household = store.household
@@ -57,6 +63,7 @@ class AppContainer(context: Context) {
             collab = app.necessityq.domain.InMemoryCollabRepository()
             meals = app.necessityq.domain.InMemoryMealRepository()
             prices = app.necessityq.domain.NoPriceRepository()
+            nutrition = app.necessityq.domain.NoNutritionRepository()
         }
     }
 
