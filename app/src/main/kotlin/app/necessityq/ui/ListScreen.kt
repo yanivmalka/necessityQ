@@ -262,12 +262,17 @@ fun ListScreen(
         }
     }
 
+    // suggestion sections: collapsed by default, hidden while typing so the list itself stays visible
+    val showSuggestions = !shopping && searchText.isBlank()
+    var lowExpanded by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var frequentExpanded by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+
     val listState = rememberLazyListState()
     // LazyColumn items before the product rows (store prompt, suggestions, hint) — to find a row's index
     val leadingItems = snapshot?.let { snap ->
         (if (shopping && storePrompt) 1 else 0) +
-            (if (!shopping && snap.runningLow.isNotEmpty()) 1 + snap.runningLow.size else 0) +
-            (if (!shopping && snap.frequent.isNotEmpty()) 1 else 0) + 1
+            (if (showSuggestions && snap.runningLow.isNotEmpty()) 1 else 0) +
+            (if (showSuggestions && snap.frequent.isNotEmpty()) 1 else 0) + 1
     } ?: 0
     val currentLeading by androidx.compose.runtime.rememberUpdatedState(leadingItems)
     val currentSections by androidx.compose.runtime.rememberUpdatedState(sections)
@@ -426,19 +431,18 @@ fun ListScreen(
             )
         }
         if (completions.isNotEmpty() || onlineCompletions.isNotEmpty()) {
-            FlowRow(
-                Modifier.padding(horizontal = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.Center,
-            ) {
-                // what the household buys first, then generic items from the branch's products
-                if (completions.isNotEmpty() && onlineCompletions.isNotEmpty()) CompletionLabel("שלי")
-                completions.forEach { item ->
-                    SuggestionChip(onClick = { vm.pickCompletion(item) }, label = { Text(item.displayName) })
-                }
-                if (onlineCompletions.isNotEmpty()) CompletionLabel("מהסניף")
-                onlineCompletions.forEach { item ->
-                    SuggestionChip(
+            // what the household buys first, then generic items from the branch's products — two scrolling rows
+            val entries = buildList<Pair<String?, app.necessityq.domain.ItemIdentity?>> {
+                if (completions.isNotEmpty() && onlineCompletions.isNotEmpty()) add("שלי" to null)
+                completions.forEach { add(null to it) }
+                if (onlineCompletions.isNotEmpty()) add("מהסניף" to null)
+                onlineCompletions.forEach { add("" to it) }
+            }
+            TwoRowStrip(entries, fullHeight = { it.second == null }) { (label, item) ->
+                when {
+                    item == null -> CompletionLabel(label.orEmpty())
+                    label == null -> SuggestionChip(onClick = { vm.pickCompletion(item) }, label = { Text(item.displayName) })
+                    else -> SuggestionChip(
                         onClick = { vm.pickCompletion(item) },
                         label = { Text(item.displayName) },
                         icon = { Icon(Icons.Default.Storefront, null, Modifier.size(16.dp)) },
@@ -512,24 +516,38 @@ fun ListScreen(
                 item(key = "store_prompt") { StorePromptCard(vm) }
             }
 
-            if (!shopping && snap.runningLow.isNotEmpty()) {
-                item(key = "low_title") { SimpleTitle("כנראה נגמר בקרוב") }
-                items(snap.runningLow, key = { "low_" + it.itemId }) { s ->
-                    RunningLowCard(
-                        s,
-                        info = recommendationInfo(s, snap.stats[s.itemId], favorites, display, today),
-                        onAdd = { vm.accept(s) },
-                        onDismiss = { vm.dismiss(s) },
-                    )
+            if (showSuggestions && snap.runningLow.isNotEmpty()) {
+                item(key = "low") {
+                    Column {
+                        SectionToggle("כנראה נגמר בקרוב", snap.runningLow.size, lowExpanded) { lowExpanded = !lowExpanded }
+                        if (lowExpanded) {
+                            TwoRowStrip(snap.runningLow) { s ->
+                                InputChip(
+                                    selected = false,
+                                    onClick = { vm.accept(s) },
+                                    label = { Text(s.identity.displayName + (s.quantity?.let { " · " + it.format() } ?: "")) },
+                                    leadingIcon = { Icon(Icons.Default.Add, contentDescription = "הוסף לרשימה", Modifier.size(18.dp)) },
+                                    trailingIcon = {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "לא עכשיו",
+                                            Modifier.size(18.dp).clip(CircleShape).clickable { vm.dismiss(s) },
+                                        )
+                                    },
+                                    shape = NqShapes.Pill,
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
-            if (!shopping && snap.frequent.isNotEmpty()) {
+            if (showSuggestions && snap.frequent.isNotEmpty()) {
                 item(key = "frequent") {
                     Column {
-                        SimpleTitle("קונים בדרך כלל")
-                        FlowRow(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            snap.frequent.forEach { s ->
+                        SectionToggle("קונים בדרך כלל", snap.frequent.size, frequentExpanded) { frequentExpanded = !frequentExpanded }
+                        if (frequentExpanded) {
+                            TwoRowStrip(snap.frequent) { s ->
                                 val star = display.showFavorite && s.itemId in favorites
                                 AssistChip(
                                     onClick = { vm.accept(s) },
@@ -883,25 +901,7 @@ private fun tileInfo(line: ListLine, stats: ItemStats?, names: Map<String, Strin
         if (display.showAddedBy) names[line.addedBy]?.let { (if (line.isAuto) "נוצר אוטומטית עבור " else "הוסיף/ה: ") + it } else null,
     ).joinToString(" · ")
 
-private fun recommendationInfo(s: Suggestion, stats: ItemStats?, favorites: Set<String>, display: DisplayOptions, today: LocalDate): String =
-    listOfNotNull(
-        if (display.showReason) s.reason else null,
-        if (display.showLastBought && !display.showReason) daysAgo(stats, today) else null,
-        if (display.showFrequency && !display.showReason) cadence(stats) else null,
-        if (display.showFavorite && s.itemId in favorites) "★ במועדפים" else null,
-    ).joinToString(" · ")
-
 // ---------- building blocks ----------
-
-@Composable
-private fun SimpleTitle(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.fillMaxWidth().padding(start = 18.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
-    )
-}
 
 /** Category header; tap to collapse or expand the group. */
 @Composable
@@ -924,24 +924,6 @@ private fun GroupHeader(row: ListRow.Header, onToggle: () -> Unit) {
             contentDescription = if (row.collapsed) "הרחבת הקבוצה" else "כיווץ הקבוצה",
             tint = MaterialTheme.colorScheme.outline,
         )
-    }
-}
-
-@Composable
-private fun RunningLowCard(s: Suggestion, info: String, onAdd: () -> Unit, onDismiss: () -> Unit) {
-    Card(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
-        shape = NqShapes.Tile,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
-    ) {
-        Row(Modifier.padding(start = 14.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(s.identity.displayName + (s.quantity?.let { " · " + it.format() } ?: ""), style = ProductNameStyle)
-                if (info.isNotBlank()) Text(info, style = MaterialTheme.typography.bodySmall)
-            }
-            IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "לא עכשיו") }
-            IconButton(onClick = onAdd) { Icon(Icons.Default.Add, contentDescription = "הוסף לרשימה") }
-        }
     }
 }
 
@@ -1545,4 +1527,49 @@ private fun CompletionLabel(text: String) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 8.dp),
     )
+}
+
+/** Collapsible title of a suggestion section, with its count. */
+@Composable
+private fun SectionToggle(title: String, count: Int, expanded: Boolean, onToggle: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(start = 18.dp, end = 12.dp, top = 10.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(6.dp))
+        Text("$count", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outlineVariant)
+        Spacer(Modifier.weight(1f))
+        Icon(
+            if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+            contentDescription = if (expanded) "כיווץ" else "הרחבה",
+            tint = MaterialTheme.colorScheme.outline,
+        )
+    }
+}
+
+/** Chips in two rows that scroll sideways, so suggestions never push the list off the screen. */
+@Composable
+private fun <T> TwoRowStrip(
+    entries: List<T>,
+    fullHeight: (T) -> Boolean = { false },
+    chip: @Composable (T) -> Unit,
+) {
+    androidx.compose.foundation.lazy.staggeredgrid.LazyHorizontalStaggeredGrid(
+        rows = androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells.Fixed(2),
+        modifier = Modifier.fillMaxWidth().height(100.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp),
+        horizontalItemSpacing = 6.dp,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        items(
+            entries.size,
+            span = { i ->
+                if (fullHeight(entries[i])) androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan.FullLine
+                else androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan.SingleLane
+            },
+        ) { i ->
+            Box(contentAlignment = Alignment.Center) { chip(entries[i]) }
+        }
+    }
 }
