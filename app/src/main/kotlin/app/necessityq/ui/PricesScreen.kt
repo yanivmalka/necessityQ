@@ -63,6 +63,7 @@ private enum class PricesTab(val label: String) { BRANCHES("סניפים קרו�
 @Composable
 fun PricesScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
     val branches by vm.priceBranches.collectAsStateWithLifecycle()
+    val branchesError by vm.priceBranchesError.collectAsStateWithLifecycle()
     val selected by vm.selectedPriceBranches.collectAsStateWithLifecycle()
     val status by vm.priceStatus.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(if (selected.isEmpty()) PricesTab.BRANCHES else PricesTab.PRODUCTS) }
@@ -79,7 +80,8 @@ fun PricesScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
         if (branches.isEmpty()) {
             Text(
                 "עדיין אין נתוני סניפים. השרת קורא את קבצי השקיפות של הרשתות פעם ביום; " +
-                    "אם המסך נשאר ריק, ייתכן שפונקציות המחירים עוד לא הופעלו בפרויקט.",
+                    "אם המסך נשאר ריק, ייתכן שפונקציות המחירים עוד לא הופעלו בפרויקט." +
+                    (branchesError?.let { "\n\nשגיאת קריאה (מנסה שוב): $it" } ?: ""),
                 Modifier.padding(16.dp),
             )
             return@Column

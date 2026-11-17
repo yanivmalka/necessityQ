@@ -45,6 +45,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.update
@@ -350,8 +352,17 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     // ---------- price data (branches near the user, products and price ranges) ----------
 
+    private val _priceBranchesError = MutableStateFlow<String?>(null)
+    /** Why the branch list could not be read (null when fine) — shown instead of a silently empty screen. */
+    val priceBranchesError: StateFlow<String?> = _priceBranchesError
+
     val priceBranches: StateFlow<List<app.necessityq.domain.PriceBranch>> = container.prices.branches()
-        .catch { emit(emptyList()) }
+        .onEach { _priceBranchesError.value = null }
+        .retryWhen { cause, attempt ->
+            _priceBranchesError.value = cause.message ?: cause.javaClass.simpleName
+            kotlinx.coroutines.delay(minOf(30_000L, 3_000L * (attempt + 1)))
+            true
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val selectedPriceBranches: StateFlow<List<String>> = householdId
