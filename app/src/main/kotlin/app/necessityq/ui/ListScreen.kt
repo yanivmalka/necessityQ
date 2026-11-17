@@ -400,7 +400,7 @@ fun ListScreen(
                     {
                         Text(
                             if (searchMatches == 0) "לא נמצא ברשימה — ➤ או Enter יוסיפו \"$searchText\""
-                            else "נמצא ברשימה ($searchMatches) · ➤ יוסיף כמות אם כתבתם, ✕ לניקוי",
+                            else "נמצא ברשימה ($searchMatches) · ➤ יוסיף כמות אם כתבתם, ✕ מוחק את הטקסט",
                         )
                     }
                 },
@@ -410,9 +410,10 @@ fun ListScreen(
                 keyboardActions = KeyboardActions(onDone = { vm.submitQuery() }),
                 trailingIcon = {
                     Row {
-                        when {
-                            query.isBlank() -> IconButton(onClick = scan) { Icon(Icons.Default.QrCodeScanner, contentDescription = "הוספה בסריקת ברקוד") }
-                            searchMatches > 0 -> IconButton(onClick = { vm.query.value = "" }) { Icon(Icons.Default.Close, contentDescription = "ניקוי החיפוש") }
+                        if (query.isBlank()) {
+                            IconButton(onClick = scan) { Icon(Icons.Default.QrCodeScanner, contentDescription = "הוספה בסריקת ברקוד") }
+                        } else {
+                            IconButton(onClick = { vm.query.value = "" }) { Icon(Icons.Default.Close, contentDescription = "מחיקת הטקסט") }
                         }
                         IconButton(onClick = vm::submitQuery, enabled = query.isNotBlank()) {
                             Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "הוספה לרשימה")
@@ -1240,7 +1241,7 @@ private fun FilterPanel(filter: ListFilter, lines: List<ListLine>, onChange: (Li
             singleLine = true,
             shape = NqShapes.Field,
             trailingIcon = {
-                if (filter.isActive) IconButton(onClick = { onChange(ListFilter()) }) { Icon(Icons.Default.Close, contentDescription = "ניקוי הסינון") }
+                if (filter.text.isNotEmpty()) IconButton(onClick = { onChange(filter.copy(text = "")) }) { Icon(Icons.Default.Close, contentDescription = "מחיקת הטקסט") }
             },
         )
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

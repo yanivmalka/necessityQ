@@ -14,6 +14,8 @@ enum class LineSource(val label: String) {
     SUGGESTED("נוסף מהמלצה"),
     QUICK_ADD("נוסף מ'קונים בדרך כלל'"),
     AUTO("נוצר אוטומטית מקניות עבר"),
+    RECIPE("נוסף ממתכון"),
+    MENU("נוסף מתפריט"),
 }
 
 /** One entry on the household's shared shopping list. */
@@ -36,7 +38,7 @@ data class ListLine(
     /** Flagged as missing/urgent; chosen household members are notified. */
     val missing: Boolean = false,
     val missingBy: String? = null,
-    /** Set when the line came from a planned menu / recipe (future meal planning). */
+    /** The dish name when the line came from a menu or a recipe. */
     val recipe: String? = null,
     /** Recycle bin: set while [status] is REMOVED. */
     val removedAtMillis: Long? = null,
@@ -49,6 +51,12 @@ data class ListLine(
 
     /** Generated from past purchases rather than added by a person. */
     val isAuto: Boolean get() = source == LineSource.AUTO
+
+    /** Added from a recipe screen. */
+    val isFromRecipe: Boolean get() = source == LineSource.RECIPE
+
+    /** Added from the menu (older versions tagged menu lines as suggestions with a recipe name). */
+    val isFromMenu: Boolean get() = source == LineSource.MENU || (source == LineSource.SUGGESTED && recipe != null)
 
     /** Sort key honouring manual moves while preserving the order of adding for untouched lines. */
     val orderKey: Long get() = if (position != 0L) position else addedAtMillis

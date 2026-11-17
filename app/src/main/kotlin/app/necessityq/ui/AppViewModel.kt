@@ -345,7 +345,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     fun updateMeals(change: (MealData) -> MealData) {
         val (hid, _, _) = ctx() ?: return
-        val next = change(meals.value)
+        val next = MealPlanner.prune(change(meals.value), java.time.LocalDate.now())
         launchSafe { container.meals.save(hid, next) }
     }
 
@@ -369,30 +369,70 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    /** Adds a dish built from a Tzameret food (its composition becomes the ingredient list). */
-    fun addDishFromNutrition(food: app.necessityq.domain.NutritionFood) {
-        val index = _nutrition.value ?: return
+    /**
+     * Adds a dish built from a Tzameret food (its composition becomes the ingredient list) and returns its id;
+     * when that food is already one of the household's recipes, the existing recipe's id.
+     */
+    fun addDishFromNutrition(food: app.necessityq.domain.NutritionFood): String? {
+        meals.value.dishes.firstOrNull { it.nutritionCode == food.code }?.let { return it.id }
+        val index = _nutrition.value ?: return null
         val dish = index.dishFrom(food, java.util.UUID.randomUUID().toString())
-        if (meals.value.dishes.any { it.nutritionCode == food.code }) { _messages.tryEmit("${dish.name} כבר ברשימת המאכלים"); return }
-        updateMeals { it.copy(dishes = it.dishes + dish) }
-        _messages.tryEmit("נוסף: ${dish.name}")
+        updateMeals { it.withDish(dish) }
+        _messages.tryEmit("נשמר במתכונים: ${dish.name}")
+        return dish.id
     }
 
-    /** Adds the ingredients of one week of the menu to the list, tagged with their dish. */
-    fun addMenuToList(week: Int) {
+    /** Adds the ingredients of the meals in the next [days] days (from today) to the list, scaled to each meal's servings. */
+    fun addMenuToList(fromEpochDay: Long, days: Int) {
         val (hid, uid, _) = ctx() ?: return
-        val items = MealPlanner.ingredientsForWeek(meals.value, week)
-        if (items.isEmpty()) { _messages.tryEmit("אין מאכלים בשבוע הזה"); return }
+        val items = MealPlanner.ingredientsFor(meals.value, fromEpochDay, days)
+        if (items.isEmpty()) { _messages.tryEmit("אין ארוחות מתוכננות בימים האלה"); return }
         launchSafe {
             var lines = snapshot.value?.lines.orEmpty()
             items.forEach { (ingredient, dish) ->
-                val parsed = QuickEntryParser.parse(ingredient) ?: return@forEach
-                container.service.add(hid, uid, parsed.item, parsed.quantity, LineSource.SUGGESTED, lines, recipe = dish)
+                container.service.add(hid, uid, ingredient.item, ingredient.quantity, LineSource.MENU, lines, recipe = dish)
                 lines = container.service.snapshot(hid).first().lines
             }
             _messages.tryEmit("נוספו ${items.size} מרכיבים מהתפריט לרשימה")
         }
     }
+
+    /**
+     * Puts a recipe's ingredients on the list for [servings]. When the recipe is already on the list,
+     * the quantities there are changed by the difference instead of adding everything again.
+     */
+    fun addRecipeToList(dishId: String, servings: Int) {
+        val (hid, uid, _) = ctx() ?: return
+        val dish = meals.value.dish(dishId) ?: return
+        val lines = snapshot.value?.lines.orEmpty()
+        val onList = app.necessityq.domain.RecipeListSync.onList(lines, dish).isNotEmpty()
+        val from = dish.listServings?.takeIf { onList }
+        launchSafe {
+            var current = lines
+            if (from == null) {
+                app.necessityq.domain.Recipes.scaled(dish, servings).forEach { ing ->
+                    container.service.add(hid, uid, ing.item, ing.quantity, LineSource.RECIPE, current, recipe = dish.name)
+                    current = container.service.snapshot(hid).first().lines
+                }
+                _messages.tryEmit("${dish.name}: המרכיבים ל-$servings מנות נוספו לרשימה")
+            } else {
+                app.necessityq.domain.RecipeListSync.plan(current, dish, from, servings).forEach { change ->
+                    when (change) {
+                        is app.necessityq.domain.RecipeListSync.Change.Update -> {
+                            val line = current.firstOrNull { it.id == change.lineId } ?: return@forEach
+                            container.service.changeQuantity(hid, line, change.quantity)
+                        }
+                        is app.necessityq.domain.RecipeListSync.Change.Add ->
+                            container.service.add(hid, uid, change.ingredient.item, change.ingredient.quantity, LineSource.RECIPE, current, recipe = dish.name)
+                    }
+                    current = container.service.snapshot(hid).first().lines
+                }
+                _messages.tryEmit("${dish.name}: הכמויות ברשימה עודכנו ל-$servings מנות")
+            }
+            updateMeals { d -> d.dish(dishId)?.let { d.withDish(it.copy(listServings = servings, cookServings = servings)) } ?: d }
+        }
+    }
+
     fun setDisplay(value: DisplayOptions) { prefs.display = value; display.value = value }
     fun selectStore(id: String?) { prefs.currentStoreId = id; currentStoreId.value = id }
 
