@@ -127,7 +127,7 @@ object ListReset {
 
 // ---------- filter ----------
 
-enum class SourceFilter(val label: String) { ALL("הכל"), MANUAL("ידני"), AUTO("אוטומטי") }
+enum class SourceFilter(val label: String) { ALL("הכל"), MANUAL("ידני"), AUTO("אוטומטי"), RECIPE("ממתכון"), MENU("מתפריט") }
 
 data class ListFilter(
     val text: String = "",
@@ -158,8 +158,10 @@ data class ListFilter(
         if (text.isNotBlank() && !HebrewText.matchKey(line.displayName).contains(HebrewText.matchKey(text))) return false
         when (source) {
             SourceFilter.ALL -> Unit
-            SourceFilter.MANUAL -> if (line.isAuto) return false
+            SourceFilter.MANUAL -> if (line.isAuto || line.isFromRecipe || line.isFromMenu) return false
             SourceFilter.AUTO -> if (!line.isAuto) return false
+            SourceFilter.RECIPE -> if (!line.isFromRecipe) return false
+            SourceFilter.MENU -> if (!line.isFromMenu) return false
         }
         if (categories.isNotEmpty() && line.category !in categories) return false
         if (missingOnly && !line.missing) return false

@@ -1,5 +1,6 @@
 package app.necessityq.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -8,29 +9,45 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -38,13 +55,17 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.necessityq.domain.Dish
@@ -52,117 +73,214 @@ import app.necessityq.domain.FamilyMember
 import app.necessityq.domain.MealData
 import app.necessityq.domain.MealPlanner
 import app.necessityq.domain.MealSlot
-import app.necessityq.domain.PlannedMeal
-import app.necessityq.domain.Taste
-import java.util.UUID
+import app.necessityq.domain.ResolvedMeal
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+
+/** Pages inside the menu section (a small back stack; the system back button walks it). */
+private sealed interface MenuPage {
+    data object Home : MenuPage
+    data object Search : MenuPage
+    data class Recipe(val dishId: String) : MenuPage
+    data class EditRecipe(val dishId: String?) : MenuPage
+    data class Member(val memberId: String?) : MenuPage
+}
+
+private val shortDate = DateTimeFormatter.ofPattern("d.M")
 
 /**
- * Meal planning — first, conceptual version: family members with tastes, dishes with ingredients,
- * a weekly / bi-weekly dinner cycle with an audience per meal, "menu → list" and "bought → ideas".
+ * Meal planning: the family (profiles and ratings), a calendar one or two weeks ahead on top of a weekly or
+ * bi-weekly cycle, "cooked" tracking, recipes (search, detail, servings), and menu → shopping list.
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun MenuScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
+    val stack = remember { mutableStateListOf<MenuPage>() }
+    fun push(page: MenuPage) { stack.add(page) }
+    fun pop() { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) }
+    BackHandler(enabled = stack.isNotEmpty()) { pop() }
+
+    when (val page = stack.lastOrNull() ?: MenuPage.Home) {
+        MenuPage.Home -> MenuHome(vm, modifier, onOpen = { push(it) })
+        MenuPage.Search -> RecipeSearchScreen(vm, onBack = { pop() }, onOpen = { push(MenuPage.Recipe(it)) }, modifier = modifier)
+        is MenuPage.Recipe -> RecipeScreen(vm, page.dishId, onBack = { pop() }, onEdit = { push(MenuPage.EditRecipe(page.dishId)) }, modifier = modifier)
+        is MenuPage.EditRecipe -> RecipeEditScreen(
+            vm, page.dishId,
+            onBack = { pop() },
+            onSaved = { id -> pop(); if (page.dishId == null) push(MenuPage.Recipe(id)) },
+            modifier = modifier,
+        )
+        is MenuPage.Member -> MemberScreen(vm, page.memberId, onBack = { pop() }, modifier = modifier)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun MenuHome(vm: AppViewModel, modifier: Modifier, onOpen: (MenuPage) -> Unit) {
     val data by vm.meals.collectAsStateWithLifecycle()
     val purchases by vm.purchases.collectAsStateWithLifecycle()
-    var week by remember { mutableIntStateOf(0) }
-    var addingMember by remember { mutableStateOf(false) }
-    var addingDish by remember { mutableStateOf(false) }
-    var ratingDish by remember { mutableStateOf<Dish?>(null) }
-    var pickingDay by remember { mutableStateOf<Int?>(null) }
-    var importing by remember { mutableStateOf(false) }
-    val nutrition by vm.nutrition.collectAsStateWithLifecycle()
-    val linked = data.dishes.any { it.nutritionCode != null }
-    LaunchedEffect(linked, importing) { if (linked || importing) vm.loadNutrition() }
+    val today = remember { LocalDate.now() }
+    val todayDay = today.toEpochDay()
+    val horizon = 7 * data.plan.cycleWeeks
+    var selected by rememberSaveable { mutableLongStateOf(todayDay) }
+    var picking by remember { mutableStateOf<Pair<Long, MealSlot>?>(null) }
+    var claimMe by remember { mutableStateOf(false) }
+    var showAllRecipes by remember { mutableStateOf(false) }
+    LaunchedEffect(horizon) { if (selected < todayDay || selected >= todayDay + horizon) selected = todayDay }
+    val dishes = data.dishes.associateBy { it.id }
 
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         TopAppBar(
             navigationIcon = { DrawerButton() },
             title = { Text("תפריט", fontWeight = FontWeight.ExtraBold) },
+            actions = { IconButton(onClick = { onOpen(MenuPage.Search) }) { Icon(Icons.Default.Search, contentDescription = "חיפוש מתכון") } },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
         )
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                "גרסה ראשונית: בונים תפריט מהמאכלים שבני הבית אוהבים, והמרכיבים נכנסים לרשימה.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
             // ---- family ----
-            MenuCard("בני המשפחה") {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    data.members.forEach { m -> AssistChip(onClick = {}, label = { Text(m.name) }) }
-                    AssistChip(onClick = { addingMember = true }, label = { Text("הוספה") }, leadingIcon = { Icon(Icons.Default.Add, null) })
+            MenuCard("המשפחה") {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    items(data.members, key = { it.id }) { m ->
+                        MemberBubble(m, isMe = m.linkedUserId != null && m.linkedUserId == vm.me, age = m.ageLabel(today)) { onOpen(MenuPage.Member(m.id)) }
+                    }
+                    item {
+                        Column(Modifier.clickable { onOpen(MenuPage.Member(null)) }, horizontalAlignment = Alignment.CenterHorizontally) {
+                            Box(Modifier.size(56.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Add, contentDescription = null)
+                            }
+                            Text("הוספה", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
+                val mine = data.memberFor(vm.me)
+                when {
+                    mine != null -> AssistChip(
+                        onClick = { onOpen(MenuPage.Member(mine.id)) },
+                        label = { Text("הדירוגים שלי (${mine.name})") },
+                        leadingIcon = { Icon(Icons.Default.Star, null, Modifier.size(18.dp)) },
+                    )
+                    vm.isShared && data.members.any { it.linkedUserId == null } ->
+                        TextButton(onClick = { claimMe = true }) { Text("אני ברשימה? קישור לחשבון שלי") }
                 }
             }
 
-            // ---- weekly cycle ----
-            MenuCard("תפריט ערב") {
+            // ---- planning ahead ----
+            MenuCard("תכנון קדימה") {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                     listOf(1, 2).forEachIndexed { i, weeks ->
                         SegmentedButton(
                             selected = data.plan.cycleWeeks == weeks,
                             onClick = {
-                                vm.updateMeals { it.copy(plan = it.plan.copy(cycleWeeks = weeks, meals = it.plan.meals.filter { m -> m.day < weeks * 7 })) }
-                                if (week >= weeks) week = 0
+                                vm.updateMeals {
+                                    val plan = it.plan.copy(cycleWeeks = weeks, meals = it.plan.meals.filter { m -> m.day < weeks * 7 })
+                                    it.copy(plan = if (weeks == 2 && it.plan.anchorEpochDay == null) MealPlanner.anchorThisWeek(plan, today) else plan)
+                                }
                             },
                             shape = SegmentedButtonDefaults.itemShape(i, 2),
                             icon = {},
-                        ) { Text(if (weeks == 1) "מחזור שבועי" else "מחזור דו-שבועי") }
+                        ) { Text(if (weeks == 1) "שבוע קדימה" else "שבועיים קדימה") }
                     }
                 }
                 if (data.plan.cycleWeeks == 2) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        FilterChip(selected = week == 0, onClick = { week = 0 }, label = { Text("שבוע א'") })
-                        FilterChip(selected = week == 1, onClick = { week = 1 }, label = { Text("שבוע ב'") })
-                    }
-                }
-                val dishes = data.dishes.associateBy { it.id }
-                MealPlanner.dayNames.forEachIndexed { i, dayName ->
-                    val day = week * 7 + i
-                    val meal = data.plan.meals.firstOrNull { it.day == day && it.slot == MealSlot.DINNER }
-                    Row(
-                        Modifier.fillMaxWidth().clickable { pickingDay = day }.padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(dayName, fontWeight = FontWeight.Bold, modifier = Modifier.weight(0.3f))
-                        Column(Modifier.weight(0.7f)) {
-                            Text(meal?.let { dishes[it.dishId]?.name } ?: "— בחירה —", style = ProductNameStyle.copy(fontSize = MaterialTheme.typography.bodyLarge.fontSize))
-                            if (meal != null && meal.audience.isNotEmpty()) {
-                                Text(
-                                    "ל: " + data.members.filter { it.id in meal.audience }.joinToString { it.name },
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
+                    val thisWeekA = MealPlanner.cycleDay(data.plan, MealPlanner.sundayOf(today).toEpochDay()) < 7
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "מחזור דו-שבועי · השבוע הוא שבוע ${if (thisWeekA) "א'" else "ב'"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = {
+                            vm.updateMeals {
+                                val sunday = MealPlanner.sundayOf(today).toEpochDay()
+                                it.copy(plan = it.plan.copy(anchorEpochDay = if (thisWeekA) sunday - 7 else sunday))
                             }
-                        }
+                        }) { Text("החלפה") }
                     }
                 }
-                Button(onClick = { vm.addMenuToList(week) }, modifier = Modifier.fillMaxWidth()) { Text("הוספת המרכיבים לרשימת הקניות") }
+
+                // date strip
+                val listState = rememberLazyListState()
+                LazyRow(state = listState, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items((0 until horizon).map { today.plusDays(it.toLong()) }, key = { it.toEpochDay() }) { date ->
+                        val meals = MealPlanner.mealsOn(data, date.toEpochDay())
+                        DayChip(date, isToday = date == today, selected = date.toEpochDay() == selected, meals = meals) { selected = date.toEpochDay() }
+                    }
+                }
+
+                val date = LocalDate.ofEpochDay(selected)
+                Text(
+                    (if (date == today) "היום · " else "") + "יום ${MealPlanner.dayNames[MealPlanner.weekdayIndex(date)]}, ${date.format(shortDate)}",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                val meals = MealPlanner.mealsOn(data, selected)
+                val slots = MealPlanner.daySlots + meals.map { it.slot }.filter { it !in MealPlanner.daySlots }.distinct()
+                slots.forEach { slot ->
+                    val meal = meals.firstOrNull { it.slot == slot }
+                    SlotRow(
+                        slot = slot,
+                        meal = meal,
+                        dish = meal?.let { dishes[it.dishId] },
+                        members = data.members,
+                        onPick = { picking = selected to slot },
+                        onOpenRecipe = { id -> onOpen(MenuPage.Recipe(id)) },
+                        onToggleCooked = { cooked -> vm.updateMeals { MealPlanner.setCooked(it, selected, slot, cooked) } },
+                    )
+                    HorizontalDivider()
+                }
+                val planned = (todayDay until todayDay + horizon).sumOf { d -> MealPlanner.mealsOn(data, d).count { !it.cooked } }
+                Button(onClick = { vm.addMenuToList(todayDay, horizon) }, modifier = Modifier.fillMaxWidth(), enabled = planned > 0) {
+                    Icon(Icons.Default.ShoppingCart, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
+                    Text(if (planned > 0) "מרכיבים לרשימה · $planned ארוחות ב-$horizon הימים הקרובים" else "אין עדיין ארוחות מתוכננות")
+                }
             }
 
-            // ---- dishes ----
-            MenuCard("מאכלים") {
-                if (data.dishes.isEmpty()) {
-                    OutlinedButton(onClick = { vm.updateMeals { it.copy(dishes = MealPlanner.sampleDishes) } }) { Text("טעינת מאכלים לדוגמה") }
-                }
-                data.dishes.forEach { dish ->
-                    Row(Modifier.fillMaxWidth().clickable { ratingDish = dish }.padding(vertical = 6.dp)) {
-                        Column(Modifier.weight(1f)) {
-                            Text(dish.name, fontWeight = FontWeight.Bold)
-                            Text(dish.ingredients.joinToString(", "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            dish.nutritionCode?.let { nutrition?.food(it) }?.summary()?.takeIf { it.isNotEmpty() }?.let {
-                                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
+            // ---- tracking ----
+            val cooked = MealPlanner.recentlyCooked(data, today, 14)
+            if (cooked.isNotEmpty()) {
+                MenuCard("מה בושל לאחרונה") {
+                    cooked.take(8).forEach { m ->
+                        val d = LocalDate.ofEpochDay(m.epochDay)
+                        Row(Modifier.fillMaxWidth().clickable { onOpen(MenuPage.Recipe(m.dishId)) }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.CheckCircle, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(dishes[m.dishId]?.name.orEmpty(), fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            Text("${MealPlanner.shortDayNames[MealPlanner.weekdayIndex(d)]} ${d.format(shortDate)} · ${m.slot.label}", style = MaterialTheme.typography.bodySmall)
                         }
-                        Text(tasteSummary(data, dish), style = MaterialTheme.typography.bodySmall)
                     }
                 }
+            }
+
+            // ---- recipes ----
+            MenuCard("המתכונים שלי") {
+                Surface(
+                    onClick = { onOpen(MenuPage.Search) },
+                    shape = RoundedCornerShape(28.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Search, null)
+                        Spacer(Modifier.width(10.dp))
+                        Text("חיפוש מתכון — שלי או ממאגר צמרת", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                if (data.dishes.isEmpty()) {
+                    OutlinedButton(onClick = { vm.updateMeals { it.copy(dishes = MealPlanner.sampleDishes) } }) { Text("טעינת מתכונים לדוגמה") }
+                }
+                val sorted = data.dishes.sortedBy { it.name }
+                (if (showAllRecipes) sorted else sorted.take(6)).forEach { dish ->
+                    RecipeRow(dish, data) { onOpen(MenuPage.Recipe(dish.id)) }
+                }
                 Row {
-                    TextButton(onClick = { addingDish = true }) { Text("+ מאכל חדש") }
-                    TextButton(onClick = { importing = true }) { Text("+ ממאגר צמרת") }
+                    if (sorted.size > 6) {
+                        TextButton(onClick = { showAllRecipes = !showAllRecipes }) { Text(if (showAllRecipes) "פחות" else "כל המתכונים (${sorted.size})") }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { onOpen(MenuPage.EditRecipe(null)) }) { Text("+ מתכון חדש") }
                 }
             }
 
@@ -171,97 +289,140 @@ fun MenuScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
             val ideas = MealPlanner.fromBought(data, recent).take(5)
             if (ideas.isNotEmpty()) {
                 MenuCard("מה אפשר לבשל ממה שנקנה") {
-                    ideas.forEach { (dish, share) -> Text("${dish.name} — יש ${(share * 100).toInt()}% מהמרכיבים") }
-                }
-            }
-            androidx.compose.foundation.layout.Spacer(Modifier.padding(bottom = 24.dp))
-        }
-    }
-
-    if (addingMember) {
-        NameDialog("בן/בת משפחה", "שם", onDismiss = { addingMember = false }) { name ->
-            vm.updateMeals { it.copy(members = it.members + FamilyMember(UUID.randomUUID().toString(), name)) }
-        }
-    }
-    if (addingDish) {
-        var name by remember { mutableStateOf("") }
-        var ingredients by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { addingDish = false },
-            title = { Text("מאכל חדש") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(name, { name = it }, label = { Text("שם המאכל") }, singleLine = true)
-                    OutlinedTextField(ingredients, { ingredients = it }, label = { Text("מרכיבים, מופרדים בפסיק") })
-                }
-            },
-            confirmButton = {
-                TextButton(enabled = name.isNotBlank(), onClick = {
-                    val dish = Dish(UUID.randomUUID().toString(), name.trim(), ingredients.split(',', '،').map { it.trim() }.filter { it.isNotEmpty() })
-                    vm.updateMeals { it.copy(dishes = it.dishes + dish) }
-                    addingDish = false
-                }) { Text("שמירה") }
-            },
-            dismissButton = { TextButton(onClick = { addingDish = false }) { Text("ביטול") } },
-        )
-    }
-    ratingDish?.let { dish -> TasteDialog(vm, data, dish, onDismiss = { ratingDish = null }) }
-    pickingDay?.let { day -> PickDishDialog(vm, data, day, onDismiss = { pickingDay = null }) }
-    if (importing) TzameretDialog(vm, onDismiss = { importing = false })
-}
-
-/**
- * Search Tzameret (Ministry of Health's nutrition database) for a dish; its composition becomes
- * the dish's ingredients. Only composite foods are listed unless "כל המזונות" is chosen.
- */
-@Composable
-private fun TzameretDialog(vm: AppViewModel, onDismiss: () -> Unit) {
-    val index by vm.nutrition.collectAsStateWithLifecycle()
-    val load by vm.nutritionLoad.collectAsStateWithLifecycle()
-    var query by remember { mutableStateOf("") }
-    var allFoods by remember { mutableStateOf(false) }
-    val results = remember(index, query, allFoods) {
-        if (query.trim().length < 2) emptyList() else index?.search(query, limit = 25, compositeOnly = !allFoods).orEmpty()
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("מאכל ממאגר צמרת") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                when (load) {
-                    AppViewModel.NutritionLoad.READY -> {
-                        OutlinedTextField(query, { query = it }, label = { Text("שם המאכל, למשל שקשוקה") }, singleLine = true)
-                        FilterChip(selected = allFoods, onClick = { allFoods = !allFoods }, label = { Text("כל המזונות, לא רק מנות") })
-                        if (query.trim().length >= 2 && results.isEmpty()) Text("לא נמצא. נסו מילה אחרת.")
-                        results.forEach { food ->
-                            Column(
-                                Modifier.fillMaxWidth().clickable { vm.addDishFromNutrition(food); onDismiss() }.padding(vertical = 6.dp),
-                            ) {
-                                Text(food.name, fontWeight = FontWeight.Bold)
-                                val parts = food.parts.filter { it.percent >= 1.0 }.take(6).joinToString(", ") { it.name.substringBefore(',') }
-                                if (parts.isNotEmpty()) Text(parts, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                food.summary().takeIf { it.isNotEmpty() }?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
-                            }
-                        }
+                    ideas.forEach { (dish, share) ->
                         Text(
-                            "מקור: מאגר צמרת, משרד הבריאות (data.gov.il)",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            "${dish.name} — יש ${(share * 100).toInt()}% מהמרכיבים",
+                            modifier = Modifier.fillMaxWidth().clickable { onOpen(MenuPage.Recipe(dish.id)) }.padding(vertical = 4.dp),
                         )
                     }
-                    AppViewModel.NutritionLoad.UNAVAILABLE -> Text("המאגר עדיין לא זמין. הוא נטען בשרת פעם בחודש, או על ידי מנהל.")
-                    else -> Text("טוען את המאגר…")
                 }
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("סגירה") } },
-    )
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+
+    picking?.let { (day, slot) ->
+        PickDishDialog(vm, data, day, slot, onDismiss = { picking = null }, onSearch = { picking = null; onOpen(MenuPage.Search) })
+    }
+    if (claimMe) {
+        AlertDialog(
+            onDismissRequest = { claimMe = false },
+            title = { Text("מי את/ה?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("בחירה מקשרת את החשבון שלך לבן/בת המשפחה, כדי שתוכל/י לדרג מאכלים בעצמך.", style = MaterialTheme.typography.bodySmall)
+                    data.members.filter { it.linkedUserId == null }.forEach { m ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable {
+                                vm.updateMeals { it.withMember(m.copy(linkedUserId = vm.me)) }
+                                claimMe = false
+                            }.padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            MemberAvatar(m, size = 36.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Text(m.name, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { claimMe = false }) { Text("ביטול") } },
+        )
+    }
 }
 
-private fun tasteSummary(data: MealData, dish: Dish): String {
-    val loves = data.members.count { data.tastes[it.id]?.get(dish.id) in setOf(Taste.LOVE, Taste.LIKE) }
-    val nos = data.members.count { data.tastes[it.id]?.get(dish.id) in setOf(Taste.DISLIKE, Taste.NEVER) }
-    return listOfNotNull(if (loves > 0) "♥ $loves" else null, if (nos > 0) "✕ $nos" else null).joinToString("  ")
+@Composable
+private fun MemberBubble(member: FamilyMember, isMe: Boolean, age: String?, onClick: () -> Unit) {
+    Column(Modifier.width(64.dp).clickable(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
+        MemberAvatar(member, size = 56.dp, selected = isMe)
+        Text(member.name, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(listOfNotNull(age, if (isMe) "אני" else null).joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+    }
+}
+
+@Composable
+private fun DayChip(date: LocalDate, isToday: Boolean, selected: Boolean, meals: List<ResolvedMeal>, onClick: () -> Unit) {
+    val bg = when {
+        selected -> MaterialTheme.colorScheme.primary
+        isToday -> MaterialTheme.colorScheme.primaryContainer
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val fg = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+    Column(
+        Modifier.width(52.dp).background(bg, RoundedCornerShape(16.dp)).clickable(onClick = onClick).padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(MealPlanner.shortDayNames[MealPlanner.weekdayIndex(date)], style = MaterialTheme.typography.labelMedium, color = fg)
+        Text("${date.dayOfMonth}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, color = fg)
+        Row(horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.height(8.dp)) {
+            meals.take(3).forEach { m ->
+                Box(Modifier.size(6.dp).background(if (m.cooked) fg.copy(alpha = 0.4f) else fg, CircleShape))
+            }
+        }
+    }
+}
+
+@Composable
+private fun SlotRow(
+    slot: MealSlot,
+    meal: ResolvedMeal?,
+    dish: Dish?,
+    members: List<FamilyMember>,
+    onPick: () -> Unit,
+    onOpenRecipe: (String) -> Unit,
+    onToggleCooked: (Boolean) -> Unit,
+) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onPick).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(slot.label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(64.dp))
+        Column(Modifier.weight(1f)) {
+            if (dish == null || meal == null) {
+                Text("+ בחירת מאכל", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            } else {
+                Text(
+                    dish.name,
+                    style = ProductNameStyle.copy(fontSize = MaterialTheme.typography.titleMedium.fontSize),
+                    textDecoration = if (meal.cooked) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
+                )
+                val who = if (meal.audience.isEmpty()) "כולם" else members.filter { it.id in meal.audience }.joinToString { it.name }
+                Text(
+                    listOfNotNull("${meal.servings ?: dish.plannedServings} מנות", who, if (meal.dated) "רק בתאריך הזה" else null).joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (dish != null && meal != null) {
+            IconButton(onClick = { onOpenRecipe(dish.id) }) { Icon(Icons.Default.Restaurant, contentDescription = "פתיחת המתכון") }
+            IconButton(onClick = { onToggleCooked(!meal.cooked) }) {
+                Icon(
+                    if (meal.cooked) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                    contentDescription = if (meal.cooked) "בושל — ביטול" else "סימון שבושל",
+                    tint = if (meal.cooked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecipeRow(dish: Dish, data: MealData, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        DishTile(dish.name, dish.id, size = 40)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(dish.name, fontWeight = FontWeight.Bold)
+            Text(
+                "${dish.plannedServings} מנות · ${dish.ingredients.size} מרכיבים",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        val stars = data.members.mapNotNull { data.rating(it.id, dish.id) }.filter { it > 0 }
+        if (stars.isNotEmpty()) {
+            Icon(Icons.Default.Star, null, tint = androidx.compose.ui.graphics.Color(0xFFF5A623), modifier = Modifier.size(16.dp))
+            Text(String.format(java.util.Locale.US, "%.1f", stars.average()), style = MaterialTheme.typography.labelMedium)
+        }
+    }
 }
 
 @Composable
@@ -271,117 +432,106 @@ private fun MenuCard(title: String, content: @Composable () -> Unit) {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp),
     ) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             content()
         }
     }
 }
 
-@Composable
-private fun NameDialog(title: String, label: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
-    var name by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = { OutlinedTextField(name, { name = it }, label = { Text(label) }, singleLine = true) },
-        confirmButton = { TextButton(enabled = name.isNotBlank(), onClick = { onSave(name.trim()); onDismiss() }) { Text("שמירה") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("ביטול") } },
-    )
-}
-
-/** Each family member rates a dish: אוהב מאוד … בכלל לא. */
+/**
+ * Choose a dish for one slot on one date: who eats (ranked by their stars, dislikes and flavour), how many servings,
+ * and whether it repeats in the cycle or is for this date only.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TasteDialog(vm: AppViewModel, data: MealData, dish: Dish, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(dish.name) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (data.members.isEmpty()) Text("הוסיפו קודם בני משפחה.")
-                data.members.forEach { m ->
-                    Text(m.name, fontWeight = FontWeight.Bold)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Taste.entries.forEach { t ->
-                            val selected = data.tastes[m.id]?.get(dish.id) == t
-                            FilterChip(
-                                selected = selected,
-                                onClick = {
-                                    vm.updateMeals { d ->
-                                        val mine = d.tastes[m.id].orEmpty()
-                                        val next = if (selected) mine - dish.id else mine + (dish.id to t)
-                                        d.copy(tastes = d.tastes + (m.id to next))
-                                    }
-                                },
-                                label = { Text(t.label) },
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("סגירה") } },
-        dismissButton = {
-            TextButton(onClick = {
-                vm.updateMeals { d -> d.copy(dishes = d.dishes - dish, plan = d.plan.copy(meals = d.plan.meals.filter { it.dishId != dish.id })) }
-                onDismiss()
-            }) { Text("מחיקת המאכל") }
-        },
-    )
-}
-
-/** Choose who eats this meal, then a dish — ranked by their tastes (anyone's "בכלל לא" removes it). */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun PickDishDialog(vm: AppViewModel, data: MealData, day: Int, onDismiss: () -> Unit) {
-    val current = data.plan.meals.firstOrNull { it.day == day && it.slot == MealSlot.DINNER }
+private fun PickDishDialog(vm: AppViewModel, data: MealData, epochDay: Long, slot: MealSlot, onDismiss: () -> Unit, onSearch: () -> Unit) {
+    val current = MealPlanner.mealsOn(data, epochDay).firstOrNull { it.slot == slot }
     var audience by remember { mutableStateOf(current?.audience ?: emptySet()) }
-    val ranked = MealPlanner.rank(data, audience)
+    var servings by remember { mutableStateOf(current?.servings) }
+    var onlyThisDate by remember { mutableStateOf(current?.dated ?: false) }
     var showAll by remember { mutableStateOf(false) }
+    val ranked = MealPlanner.rank(data, audience)
+    val date = LocalDate.ofEpochDay(epochDay)
+    val defaultServings = when {
+        audience.isNotEmpty() -> audience.size
+        data.members.isNotEmpty() -> data.members.size
+        else -> Dish.DEFAULT_SERVINGS
+    }
+
+    fun choose(dishId: String) {
+        vm.updateMeals { MealPlanner.setMeal(it, epochDay, slot, dishId, audience, servings, onlyThisDate) }
+        onDismiss()
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("ערב · יום ${MealPlanner.dayNames[day % 7]}") },
+        title = { Text("${slot.label} · יום ${MealPlanner.dayNames[MealPlanner.weekdayIndex(date)]} ${date.format(shortDate)}") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (data.members.isNotEmpty()) {
-                    Text("מי אוכל (ריק = כולם)", style = MaterialTheme.typography.bodySmall)
+                    Text("מי אוכל (בלי בחירה = כולם)", style = MaterialTheme.typography.bodySmall)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         data.members.forEach { m ->
                             FilterChip(
                                 selected = m.id in audience,
                                 onClick = { audience = if (m.id in audience) audience - m.id else audience + m.id },
                                 label = { Text(m.name) },
+                                leadingIcon = { MemberAvatar(m, size = 22.dp) },
                             )
                         }
                     }
                 }
-                Text("מאכלים מומלצים", style = MaterialTheme.typography.bodySmall)
-                if (ranked.isEmpty()) Text("אין מאכלים מתאימים. הוסיפו מאכלים במסך התפריט.")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("מנות", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    val s = servings
+                    if (s == null) {
+                        TextButton(onClick = { servings = defaultServings }) { Text("לפי המתכון · שינוי") }
+                    } else {
+                        ServingsStepper(s, onChange = { servings = it })
+                        IconButton(onClick = { servings = null }) { Icon(Icons.Default.Close, contentDescription = "לפי המתכון") }
+                    }
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    FilterChip(
+                        selected = !onlyThisDate,
+                        onClick = { onlyThisDate = false },
+                        label = { Text(if (data.plan.cycleWeeks == 2) "קבוע, כל שבועיים" else "קבוע, כל שבוע") },
+                    )
+                    FilterChip(selected = onlyThisDate, onClick = { onlyThisDate = true }, label = { Text("רק ב-${date.format(shortDate)}") })
+                }
+                Text("מאכלים מומלצים", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                if (ranked.isEmpty()) Text("אין מאכלים מתאימים. אפשר לחפש מתכון או להוסיף אחד.")
                 (if (showAll) ranked else ranked.take(6)).forEach { (dish, score) ->
                     Row(
-                        Modifier.fillMaxWidth().clickable {
-                            vm.updateMeals { d ->
-                                val others = d.plan.meals.filterNot { it.day == day && it.slot == MealSlot.DINNER }
-                                d.copy(plan = d.plan.copy(meals = others + PlannedMeal(day, MealSlot.DINNER, dish.id, audience)))
-                            }
-                            onDismiss()
-                        }.padding(vertical = 6.dp),
+                        Modifier.fillMaxWidth().clickable { choose(dish.id) }.padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(dish.name, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                        if (score > 0) Text("♥ $score")
+                        DishTile(dish.name, dish.id, size = 32)
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            dish.name,
+                            fontWeight = if (dish.id == current?.dishId) FontWeight.ExtraBold else FontWeight.Bold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (score > 0) Text("+$score", style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.End)
+                        if (dish.id == current?.dishId) Icon(Icons.Default.CheckCircle, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                     }
                 }
                 if (!showAll && ranked.size > 6) TextButton(onClick = { showAll = true }) { Text("עוד…") }
+                TextButton(onClick = onSearch) { Icon(Icons.Default.Search, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("חיפוש מתכון נוסף") }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("סגירה") } },
+        confirmButton = {
+            if (current != null) TextButton(onClick = { choose(current.dishId) }) { Text("שמירה") }
+            else TextButton(onClick = onDismiss) { Text("סגירה") }
+        },
         dismissButton = {
             if (current != null) {
                 TextButton(onClick = {
-                    vm.updateMeals { d -> d.copy(plan = d.plan.copy(meals = d.plan.meals - current)) }
+                    vm.updateMeals { MealPlanner.setMeal(it, epochDay, slot, null, emptySet(), null, onlyThisDate) }
                     onDismiss()
-                }) { Text("ניקוי") }
+                }) { Text(if (onlyThisDate) "בלי ארוחה בתאריך הזה" else "הסרה מהמחזור") }
             }
         },
     )

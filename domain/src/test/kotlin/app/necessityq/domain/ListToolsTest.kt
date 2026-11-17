@@ -116,6 +116,11 @@ class ListToolsTest {
         )
         assertEquals(listOf("a"), ListFilter(source = SourceFilter.AUTO).apply(lines).map { it.id })
         assertEquals(listOf("b", "c"), ListFilter(source = SourceFilter.MANUAL).apply(lines).map { it.id })
+        val fromMeals = lines + line("d", "ביצים", Category.DAIRY, source = LineSource.RECIPE) +
+            line("e", "פסטה", Category.PANTRY, source = LineSource.MENU)
+        assertEquals(listOf("d"), ListFilter(source = SourceFilter.RECIPE).apply(fromMeals).filter { it.status == LineStatus.NEEDED }.map { it.id })
+        assertEquals(listOf("e"), ListFilter(source = SourceFilter.MENU).apply(fromMeals).filter { it.status == LineStatus.NEEDED }.map { it.id })
+        assertEquals(listOf("b", "c"), ListFilter(source = SourceFilter.MANUAL).apply(fromMeals).map { it.id })
         assertEquals(listOf("b"), ListFilter(text = "עגב").apply(lines).map { it.id })
 
         val estimate = PriceEstimate.of(lines, mapOf("a" to 6.5, "b" to 8.0))

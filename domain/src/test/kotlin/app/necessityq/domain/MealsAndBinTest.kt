@@ -35,18 +35,72 @@ class MealsAndBinTest {
         assertTrue(ranks.getValue("bread") < ranks.getValue("milk"))
     }
 
-    @Test fun `menu ranking respects never and audience`() {
+    @Test fun `menu ranking respects never, dislikes and audience`() {
         val d1 = Dish("a", "שקשוקה", listOf("ביצים"))
         val d2 = Dish("b", "פסטה", listOf("פסטה"))
+        val d3 = Dish("c", "פסטה פטריות", listOf("פסטה", "פטריות"))
         val data = MealData(
-            members = listOf(FamilyMember("x", "אבא"), FamilyMember("y", "ילד")),
-            dishes = listOf(d1, d2),
-            tastes = mapOf("x" to mapOf("a" to Taste.LOVE), "y" to mapOf("a" to Taste.NEVER, "b" to Taste.LIKE)),
+            members = listOf(FamilyMember("x", "אבא"), FamilyMember("y", "ילד", dislikes = listOf("פטרייה"))),
+            dishes = listOf(d1, d2, d3),
+            ratings = mapOf("x" to mapOf("a" to 5), "y" to mapOf("a" to Rating.NEVER, "b" to 4)),
         )
         assertEquals(listOf("b"), MealPlanner.rank(data, emptySet()).map { it.first.id })
         assertEquals("a", MealPlanner.rank(data, setOf("x")).first().first.id)
-        val plan = data.copy(plan = MealPlan(1, listOf(PlannedMeal(0, MealSlot.DINNER, "a"), PlannedMeal(1, MealSlot.DINNER, "b"))))
-        assertEquals(listOf("ביצים", "פסטה"), MealPlanner.ingredientsForWeek(plan, 0).map { it.first })
-        assertEquals("a", MealPlanner.fromBought(data, setOf(ItemIdentity.fromText("ביצים").id)).single().first.id)
+        assertEquals("a", MealPlanner.fromBought(data, setOf(ItemIdentity.fromText("ביצים").id)).first().first.id)
+    }
+
+    @Test fun `cycle on real dates with one-off changes and cooked marks`() {
+        val data = MealData(
+            dishes = listOf(Dish("a", "שקשוקה", listOf("4 ביצים"), servings = 2), Dish("b", "פסטה", listOf("500 גרם פסטה"))),
+            plan = MealPlan(2, listOf(PlannedMeal(0, MealSlot.DINNER, "a"), PlannedMeal(8, MealSlot.DINNER, "b"))),
+        )
+        val sunday = java.time.LocalDate.of(2026, 11, 15)
+        val anchored = data.copy(plan = MealPlanner.anchorThisWeek(data.plan, sunday.plusDays(3)))
+        assertEquals(sunday.toEpochDay(), anchored.plan.anchorEpochDay)
+        assertEquals("a", MealPlanner.mealsOn(anchored, sunday.toEpochDay()).single().dishId)
+        assertEquals("b", MealPlanner.mealsOn(anchored, sunday.plusDays(8).toEpochDay()).single().dishId)
+        assertEquals("a", MealPlanner.mealsOn(anchored, sunday.plusDays(14).toEpochDay()).single().dishId)
+
+        // only this date: skip the cycle meal
+        val skipped = MealPlanner.setMeal(anchored, sunday.toEpochDay(), MealSlot.DINNER, null, emptySet(), null, onlyThisDate = true)
+        assertTrue(MealPlanner.mealsOn(skipped, sunday.toEpochDay()).isEmpty())
+        assertEquals("a", MealPlanner.mealsOn(skipped, sunday.plusDays(14).toEpochDay()).single().dishId)
+
+        // 4 servings of a 2-serving recipe doubles the eggs; cooked meals are not shopped for
+        val forFour = MealPlanner.setMeal(anchored, sunday.toEpochDay(), MealSlot.DINNER, "a", emptySet(), 4, onlyThisDate = true)
+        val need = MealPlanner.ingredientsFor(forFour, sunday.toEpochDay(), 7)
+        assertEquals(8.0, need.single().first.quantity!!.amount, 1e-9)
+        val cooked = MealPlanner.setCooked(forFour, sunday.toEpochDay(), MealSlot.DINNER, true)
+        assertTrue(MealPlanner.ingredientsFor(cooked, sunday.toEpochDay(), 7).isEmpty())
+        assertEquals(1, MealPlanner.recentlyCooked(cooked, sunday.plusDays(2)).size)
+    }
+
+    @Test fun `recipe scaling and list sync`() {
+        val dish = Dish("a", "שקשוקה", listOf("4 ביצים", "500 גרם עגבניות", "בצל"), servings = 4)
+        val six = Recipes.scaled(dish, 6).associate { it.item.id to it.quantity }
+        fun id(text: String) = ItemIdentity.fromText(text).id
+        assertEquals(6.0, six.getValue(id("ביצים"))!!.amount, 1e-9)
+        assertEquals(750.0, six.getValue(id("עגבניות"))!!.baseAmount, 1e-9)
+        assertEquals(null, six.getValue(id("בצל")))
+        assertEquals(2.0, Recipes.scale(Quantity.pieces(3), 0.5)!!.amount, 1e-9)
+
+        // eggs were merged with 2 eggs already needed: 4 → 6 servings adds 2 more, keeps the other 2
+        val eggs = ItemIdentity.fromText("ביצים")
+        val lines = listOf(
+            ListLine("l1", eggs.id, eggs.name, eggs.variant, eggs.category, Quantity.pieces(6), null, LineStatus.NEEDED, LineSource.MANUAL, "u", 0, 0),
+        )
+        val changes = RecipeListSync.plan(lines, dish, 4, 6)
+        val update = changes.filterIsInstance<RecipeListSync.Change.Update>().single()
+        assertEquals("l1", update.lineId)
+        assertEquals(8.0, update.quantity!!.amount, 1e-9)
+        // tomatoes and onion are not on the list → added again
+        assertEquals(2, changes.filterIsInstance<RecipeListSync.Change.Add>().size)
+    }
+
+    @Test fun `member age label`() {
+        val today = java.time.LocalDate.of(2026, 11, 17)
+        assertEquals("8 שנים", FamilyMember("k", "נועם", birthYear = 2018, birthMonth = 3).ageLabel(today))
+        assertEquals("5 חודשים", FamilyMember("b", "תינוק", birthYear = 2026, birthMonth = 6).ageLabel(today))
+        assertEquals(null, FamilyMember("p", "אבא").ageLabel(today))
     }
 }
