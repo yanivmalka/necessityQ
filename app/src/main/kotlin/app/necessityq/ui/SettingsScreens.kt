@@ -101,6 +101,8 @@ fun DisplaySettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier) = Pag
     OptionRow("סטטיסטיקה (נקנה לאחרונה, תדירות)", current.showStats) { vm.setDisplay(current.copy(showStats = it)) }
     OptionRow("מחיר משוער בתחתית הרשימה", current.showTotal) { vm.setDisplay(current.copy(showTotal = it)) }
     OptionRow("מוצרי קירור והקפאה בסוף הרשימה", current.chilledLast) { vm.setDisplay(current.copy(chilledLast = it)) }
+    OptionRow("מוצרים שסומנו או נמחקו (מחוקים בקו) בתחתית הרשימה", current.showBought) { vm.setDisplay(current.copy(showBought = it)) }
+    OptionRow("משקל מוערך לירקות ופירות שנספרים ביחידות", current.showWeightEstimate) { vm.setDisplay(current.copy(showWeightEstimate = it)) }
 
     Text("נגיעה בפריט", style = MaterialTheme.typography.titleMedium)
     app.necessityq.platform.TapMode.entries.forEach { mode ->

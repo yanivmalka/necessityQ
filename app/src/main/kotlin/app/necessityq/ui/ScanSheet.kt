@@ -162,6 +162,7 @@ private fun ScanContent(vm: AppViewModel, r: ScanResult) {
         } else if (r.branchId != null) {
             Text("לא נמצא ב${title(r.branchId)}", style = MaterialTheme.typography.bodyMedium)
         }
+        r.verdict?.let { VerdictCard(it) }
         if (r.elsewhere.isNotEmpty()) {
             HorizontalDivider()
             Text("בסניפים האחרים שלך", style = MaterialTheme.typography.titleSmall)
@@ -206,8 +207,11 @@ private fun ScanContent(vm: AppViewModel, r: ScanResult) {
                     Text("לזכור שזה המוצר שאנחנו קונים (מחיר מדויק במקום טווח)", style = MaterialTheme.typography.bodySmall)
                 }
             }
-            Button(onClick = { vm.scanAdd(r, text, rememberProduct) }, enabled = text.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
-                Text("הוספה לרשימה")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { vm.scanAdd(r, text, rememberProduct) }, enabled = text.isNotBlank(), modifier = Modifier.weight(1f)) {
+                    Text("הוספה לרשימה")
+                }
+                OutlinedButton(onClick = { vm.remindLater(r) }, modifier = Modifier.weight(1f)) { Text("תזכיר לי אחר כך") }
             }
         }
     }
@@ -216,6 +220,22 @@ private fun ScanContent(vm: AppViewModel, r: ScanResult) {
             Text("זה המוצר שבחרתם ל${r.identity!!.displayName}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
         } else {
             TextButton(onClick = { vm.scanRemember(r) }) { Text("לזכור את המוצר הזה ל${r.identity!!.displayName}") }
+        }
+    }
+}
+
+/** Is the price reasonable here: compared with the household's branches, its own recent range and similar products. */
+@Composable
+private fun VerdictCard(v: app.necessityq.domain.PriceVerdict) {
+    val (container, ink) = when (v.level) {
+        app.necessityq.domain.PriceLevel.CHEAP -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
+        app.necessityq.domain.PriceLevel.FAIR -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
+        app.necessityq.domain.PriceLevel.EXPENSIVE -> MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
+    }
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = container, contentColor = ink)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(v.level.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            v.reasons.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
         }
     }
 }

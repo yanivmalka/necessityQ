@@ -69,6 +69,9 @@ import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.ReportProblem
 import androidx.compose.material.icons.filled.RestoreFromTrash
 import androidx.compose.material.icons.filled.Storefront
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
@@ -153,6 +156,7 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import kotlin.math.abs
+import kotlinx.coroutines.flow.first
 import kotlin.math.roundToInt
 
 /** One row of the needed-items list: a group header or a product tile. */
@@ -187,10 +191,17 @@ private fun buildRows(sections: List<ListSection>, collapsed: Set<String>): List
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Modifier, onOpenMessages: () -> Unit = {}) {
+fun ListScreen(
+    vm: AppViewModel,
+    householdName: String,
+    modifier: Modifier = Modifier,
+    onOpenMessages: () -> Unit = {},
+    onOpenDisplaySettings: () -> Unit = {},
+) {
     val snapshot by vm.snapshot.collectAsStateWithLifecycle()
     val query by vm.query.collectAsStateWithLifecycle()
     val completions by vm.completions.collectAsStateWithLifecycle()
+    val onlineCompletions by vm.onlineCompletions.collectAsStateWithLifecycle()
     val mode by vm.mode.collectAsStateWithLifecycle()
     val sort by vm.sort.collectAsStateWithLifecycle()
     val display by vm.display.collectAsStateWithLifecycle()
@@ -243,6 +254,36 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
     }
 
     val listState = rememberLazyListState()
+    // LazyColumn items before the product rows (store prompt, suggestions, hint) — to find a row's index
+    val leadingItems = snapshot?.let { snap ->
+        (if (shopping && storePrompt) 1 else 0) +
+            (if (!shopping && snap.runningLow.isNotEmpty()) 1 + snap.runningLow.size else 0) +
+            (if (!shopping && snap.frequent.isNotEmpty()) 1 else 0) + 1
+    } ?: 0
+    val currentLeading by androidx.compose.runtime.rememberUpdatedState(leadingItems)
+    val currentSections by androidx.compose.runtime.rememberUpdatedState(sections)
+    // a product was just added: open its group if collapsed and scroll the list to it
+    LaunchedEffect(Unit) {
+        vm.added.collect { itemId ->
+            val line = kotlinx.coroutines.withTimeoutOrNull(4_000) {
+                androidx.compose.runtime.snapshotFlow { snapshot?.lines?.firstOrNull { it.itemId == itemId && it.status == LineStatus.NEEDED } }
+                    .first { it != null }
+            } ?: return@collect
+            currentSections.firstOrNull { sec -> sec.lines.any { it.id == line.id } }?.let { sec ->
+                if (sec.title != null && sec.key in collapsed) vm.toggleCollapsed(sec.key)
+            }
+            val rowIndex = kotlinx.coroutines.withTimeoutOrNull(2_000) {
+                androidx.compose.runtime.snapshotFlow { rows.indexOfFirst { it.key == line.id } }.first { it >= 0 }
+            } ?: return@collect
+            kotlinx.coroutines.delay(50) // let the list lay out the new row
+            val target = listState.layoutInfo.totalItemsCount.let { total ->
+                // rows are followed by the bought section; find the row by key among the laid-out items first
+                listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == line.id }?.index
+                    ?: (currentLeading + rowIndex).coerceAtMost(maxOf(0, total - 1))
+            }
+            listState.animateScrollToItem(maxOf(0, target - 1))
+        }
+    }
     val reorderState = rememberReorderableLazyListState(listState) { from, to ->
         val fromIndex = rows.indexOfFirst { it.key == from.key }
         val toIndex = rows.indexOfFirst { it.key == to.key }
@@ -320,6 +361,16 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
                             onClick = { showReset = true; showMore = false },
                         )
                         DropdownMenuItem(
+                            text = { Text("הגדרות תצוגה") },
+                            leadingIcon = { Icon(Icons.Default.Tune, null) },
+                            onClick = { showMore = false; onOpenDisplaySettings() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(if (display.showBought) "הסתרת מוצרים שסומנו/נמחקו" else "הצגת מוצרים שסומנו/נמחקו") },
+                            leadingIcon = { Icon(if (display.showBought) Icons.Default.VisibilityOff else Icons.Default.Visibility, null) },
+                            onClick = { showMore = false; vm.setDisplay(display.copy(showBought = !display.showBought)) },
+                        )
+                        DropdownMenuItem(
                             text = { Text("סריקת ברקוד: מחיר והוספה") },
                             leadingIcon = { Icon(Icons.Default.QrCodeScanner, null) },
                             onClick = { showMore = false; scan() },
@@ -337,6 +388,7 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
                 onValueChange = { vm.query.value = it },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                 placeholder = { Text("הוספה מהירה: 2 קוטג' 5%") },
+                leadingIcon = { IconButton(onClick = scan) { Icon(Icons.Default.QrCodeScanner, contentDescription = "הוספה בסריקת ברקוד") } },
                 singleLine = true,
                 shape = NqShapes.Field,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
@@ -348,10 +400,24 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
                 },
             )
         }
-        if (completions.isNotEmpty()) {
-            FlowRow(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (completions.isNotEmpty() || onlineCompletions.isNotEmpty()) {
+            FlowRow(
+                Modifier.padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.Center,
+            ) {
+                // what the household buys first, then generic items from the branch's products
+                if (completions.isNotEmpty() && onlineCompletions.isNotEmpty()) CompletionLabel("שלי")
                 completions.forEach { item ->
                     SuggestionChip(onClick = { vm.pickCompletion(item) }, label = { Text(item.displayName) })
+                }
+                if (onlineCompletions.isNotEmpty()) CompletionLabel("מהסניף")
+                onlineCompletions.forEach { item ->
+                    SuggestionChip(
+                        onClick = { vm.pickCompletion(item) },
+                        label = { Text(item.displayName) },
+                        icon = { Icon(Icons.Default.Storefront, null, Modifier.size(16.dp)) },
+                    )
                 }
             }
         }
@@ -566,7 +632,7 @@ fun ListScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Mod
                 }
             }
 
-            if (snap.bought.isNotEmpty()) {
+            if (display.showBought && snap.bought.isNotEmpty()) {
                 item(key = "bought_header") {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("נקנו (${snap.bought.size})", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
@@ -1002,6 +1068,9 @@ private fun ProductTile(
     // stepper: always (info mode, if enabled) or only after a tap (controls mode)
     val showStepper = if (controlsMode) controlsOpen else display.showStepper
     val showQuantityText = display.showQuantity && !showStepper && line.quantity != null
+    // produce counted in pieces: estimated weight, and the price for that weight
+    val weight = if (display.showWeightEstimate) app.necessityq.domain.PieceWeights.estimate(line.name, line.quantity) else null
+    val weightedCost = priceInfo?.let { app.necessityq.domain.LineCosts.weighted(line, it) }
 
     Column(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) {
         SwipeableTile(left = left, right = right) {
@@ -1047,7 +1116,7 @@ private fun ProductTile(
                                     if (showQuantityText) {
                                         Spacer(Modifier.width(8.dp))
                                         Text(
-                                            line.quantity!!.format(),
+                                            line.quantity!!.format() + (weight?.let { "  " + app.necessityq.domain.PieceWeights.label(it) } ?: ""),
                                             fontWeight = FontWeight.ExtraBold,
                                             color = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.clip(NqShapes.Pill)
@@ -1067,7 +1136,9 @@ private fun ProductTile(
                                     }
                                 }
                             }
-                            if (display.showPrices) PriceSlot(price = price?.let { it * PriceEstimate.units(line.quantity) }, average = null, info = priceInfo)
+                            if (display.showPrices) {
+                                PriceSlot(price = price?.let { it * PriceEstimate.units(line.quantity) }, average = null, info = priceInfo, weighted = weightedCost)
+                            }
                         }
                         if (subline.isNotBlank() || showStepper || (controlsMode && controlsOpen)) {
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
@@ -1079,6 +1150,14 @@ private fun ProductTile(
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                 )
+                                if (showStepper && weight != null) {
+                                    Text(
+                                        app.necessityq.domain.PieceWeights.label(weight),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(end = 6.dp),
+                                    )
+                                }
                                 if (showStepper) QuantityStepper(line.quantity, onMinus, onPlus)
                                 if (controlsMode && controlsOpen) {
                                     IconButton(onClick = onInfo) { Icon(Icons.Outlined.Info, contentDescription = "דף מידע") }
@@ -1303,10 +1382,18 @@ private fun ChatIndicator(state: ChatState) {
 
 /** Current price and household/market average; filled once a live price source is connected. */
 @Composable
-fun PriceSlot(price: Double?, average: Double?, info: app.necessityq.domain.ItemPriceInfo? = null) {
+fun PriceSlot(
+    price: Double?,
+    average: Double?,
+    info: app.necessityq.domain.ItemPriceInfo? = null,
+    /** produce sold by weight: the cost of the quantity on the list (estimated weight when counted) */
+    weighted: app.necessityq.domain.LineCost? = null,
+) {
     // the household's own price wins; otherwise the branch data: chosen product, or the typical range
     val (main, sub) = when {
         price != null -> "₪%.2f".format(price) to "ממוצע " + (average?.let { "₪%.2f".format(it) } ?: "—")
+        weighted != null -> app.necessityq.domain.PriceData.formatRange(weighted.low, weighted.high).replace("–₪", "–") to
+            (weighted.estimatedWeight?.let { "לפי " + app.necessityq.domain.PieceWeights.label(it) } ?: "לפי משקל")
         info?.preferred != null -> app.necessityq.domain.PriceData.formatPrice(info.preferred!!.price) to "המוצר שבחרת"
         info != null -> app.necessityq.domain.PriceData.formatRange(info.low, info.high).replace("–₪", "–") to
             (if (info.candidates.size == 1) "מוצר אחד" else "${info.candidates.size} מוצרים")
@@ -1381,5 +1468,15 @@ fun TagBadge(tag: ItemTag) {
         fontWeight = FontWeight.Bold,
         style = MaterialTheme.typography.bodySmall,
         maxLines = 1,
+    )
+}
+
+@Composable
+private fun CompletionLabel(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 8.dp),
     )
 }

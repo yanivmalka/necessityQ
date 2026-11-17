@@ -36,6 +36,8 @@ data class ScanResult(
     val identity: ItemIdentity?,
     /** the item already has this exact product as its chosen product */
     val alreadyPreferred: Boolean,
+    /** is the price here reasonable, unusually high or low (null when there is nothing to compare with) */
+    val verdict: PriceVerdict? = null,
 ) {
     val product: BranchProduct? get() = here ?: elsewhere.firstOrNull()?.product
     val found: Boolean get() = product != null
@@ -111,7 +113,12 @@ object Scan {
             ?: known.firstOrNull { it.id in byPreferred }
             ?: product?.let { p -> known.filter { belongsTo(p, it.name, it.variant) }.maxByOrNull { specificity(it.name, it.variant) } }
             ?: product?.let(::genericIdentity)
+        val similar = if (here != null && branchId != null && identity != null) {
+            prices[branchId]?.let { bp -> ItemPrices.candidates(ProductIndex(branchId, bp.updatedAtMillis, bp.products), identity.name, identity.variant) }
+        } else null
+        val verdict = here?.let { PriceVerdicts.of(it, elsewhere.map { h -> h.product.price }, similar.orEmpty()) }
         return ScanResult(
+            verdict = verdict,
             code = code,
             branchId = branchId,
             here = here,
@@ -149,5 +156,67 @@ object BranchLocator {
         return if (name.isBlank()) branch.chainName
         else if (HebrewText.matchKey(name).contains(HebrewText.matchKey(branch.chainName))) name
         else "${branch.chainName} $name"
+    }
+}
+
+enum class PriceLevel(val label: String) {
+    CHEAP("זול מהרגיל"),
+    FAIR("מחיר סביר"),
+    EXPENSIVE("יקר מהרגיל"),
+}
+
+data class PriceVerdict(val level: PriceLevel, val reasons: List<String>)
+
+object PriceVerdicts {
+    private const val NOTABLE = 0.08
+
+    private fun pct(x: Double) = "${kotlin.math.round(kotlin.math.abs(x) * 100).toInt()}%"
+
+    private fun median(values: List<Double>): Double {
+        val sorted = values.sorted()
+        val mid = sorted.size / 2
+        return if (sorted.size % 2 == 1) sorted[mid] else (sorted[mid - 1] + sorted[mid]) / 2
+    }
+
+    /**
+     * Judges the price of [here] against: the same barcode at the household's other branches (strongest
+     * evidence), the product's own recent range at this branch, and similar products of the same generic
+     * item at this branch by unit price (only when sizes can be compared). Null with nothing to compare.
+     */
+    fun of(here: BranchProduct, otherBranches: List<Double>, similar: List<BranchProduct>): PriceVerdict? {
+        val reasons = mutableListOf<String>()
+        var score = 0
+        if (otherBranches.isNotEmpty()) {
+            val m = median(otherBranches)
+            val diff = (here.price - m) / m
+            when {
+                diff >= NOTABLE -> { score += 2; reasons += "יקר ב-${pct(diff)} מהסניפים שאתם קונים בהם (${PriceData.formatPrice(m)})" }
+                diff <= -NOTABLE -> { score -= 2; reasons += "זול ב-${pct(diff)} מהסניפים שאתם קונים בהם (${PriceData.formatPrice(m)})" }
+                else -> reasons += "דומה לסניפים שאתם קונים בהם (${PriceData.formatRange(otherBranches.min(), otherBranches.max())})"
+            }
+        }
+        if (here.high - here.low >= 0.01) {
+            when {
+                here.price >= here.high - 0.005 -> { score += 1; reasons += "המחיר הגבוה ביותר בסניף בתקופה האחרונה (היה גם ${PriceData.formatPrice(here.low)})" }
+                here.price <= here.low + 0.005 -> { score -= 1; reasons += "המחיר הנמוך ביותר בסניף בתקופה האחרונה (היה עד ${PriceData.formatPrice(here.high)})" }
+            }
+        }
+        val unit = here.unitPrice
+        val peers = similar.filter { it.code != here.code && it.unitPrice != null && it.weighted == here.weighted }.mapNotNull { it.unitPrice }
+        if (unit != null && peers.size >= 3) {
+            val (lo, hi) = ItemPrices.typicalRange(peers)!!
+            when {
+                unit > hi * (1 + NOTABLE) -> { score += 1; reasons += "יקר ממוצרים דומים בסניף לפי מחיר ליחידת מידה" }
+                unit < lo * (1 - NOTABLE) -> { score -= 1; reasons += "זול ממוצרים דומים בסניף לפי מחיר ליחידת מידה" }
+                else -> reasons += "בטווח של מוצרים דומים בסניף לפי מחיר ליחידת מידה"
+            }
+        }
+        if (reasons.isEmpty()) return null
+        val level = when {
+            score >= 1 -> PriceLevel.EXPENSIVE
+            score <= -1 -> PriceLevel.CHEAP
+            else -> PriceLevel.FAIR
+        }
+        return PriceVerdict(level, reasons)
     }
 }

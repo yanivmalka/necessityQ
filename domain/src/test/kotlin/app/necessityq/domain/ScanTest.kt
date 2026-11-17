@@ -157,3 +157,47 @@ class TypingTest {
         assertTrue(Typing.shouldAnnounce("milk", 1_000, "bread", 1_500))
     }
 }
+
+class PieceWeightTest {
+    private fun weighedCucumber(price: Double) =
+        BranchProduct("c$price", "מלפפון", "", null, "ק\"ג", true, true, price, null, "2026-11-01", price, price)
+
+    @Test
+    fun estimatesWeightOfCountedProduce() {
+        assertEquals(Quantity(1.7, QuantityUnit.KILOGRAM), PieceWeights.estimate("מלפפונים", Quantity.pieces(15)))
+        assertEquals(Quantity(750.0, QuantityUnit.GRAM), PieceWeights.estimate("לימון", Quantity.pieces(7)))
+        assertNull(PieceWeights.estimate("קוטג'", Quantity.pieces(2)))
+        assertNull(PieceWeights.estimate("מלפפונים", Quantity(1.0, QuantityUnit.KILOGRAM)))
+    }
+
+    @Test
+    fun pricesCountedProduceByEstimatedWeight() {
+        val line = ListLine("l", "מלפפונים", "מלפפונים", null, Category.PRODUCE, Quantity.pieces(10), null, LineStatus.NEEDED, LineSource.MANUAL, "u", 0, 0)
+        val info = ItemPriceInfo("b", 5.0, 7.0, listOf(weighedCucumber(5.0), weighedCucumber(7.0)), null)
+        val cost = LineCosts.weighted(line, info)!!
+        // 10 × 110 g = 1.1 kg
+        assertEquals(5.5, cost.low, 0.001)
+        assertEquals(7.7, cost.high, 0.001)
+        assertEquals(1, ListCost.of(listOf(line), emptyMap(), mapOf(line.itemId to info)).pricedLines)
+    }
+}
+
+class PriceVerdictTest {
+    private fun p(price: Double, low: Double = price, high: Double = price, unit: Double? = null, code: String = "x") =
+        BranchProduct(code, "קוטג' 5%", "", null, "", false, false, price, unit, "2026-11-01", low, high)
+
+    @Test
+    fun otherBranchesDecide() {
+        assertEquals(PriceLevel.EXPENSIVE, PriceVerdicts.of(p(7.5), listOf(6.2, 6.4), emptyList())!!.level)
+        assertEquals(PriceLevel.CHEAP, PriceVerdicts.of(p(5.0), listOf(6.2, 6.4), emptyList())!!.level)
+        assertEquals(PriceLevel.FAIR, PriceVerdicts.of(p(6.3), listOf(6.2, 6.4), emptyList())!!.level)
+    }
+
+    @Test
+    fun ownRangeAndSimilarProductsWhenAlone() {
+        assertEquals(PriceLevel.EXPENSIVE, PriceVerdicts.of(p(7.0, low = 5.9, high = 7.0), emptyList(), emptyList())!!.level)
+        val peers = listOf(p(6.0, unit = 24.0, code = "a"), p(6.2, unit = 25.0, code = "b"), p(6.1, unit = 24.5, code = "c"))
+        assertEquals(PriceLevel.CHEAP, PriceVerdicts.of(p(4.5, unit = 18.0), emptyList(), peers)!!.level)
+        assertNull(PriceVerdicts.of(p(6.0), emptyList(), emptyList()))
+    }
+}

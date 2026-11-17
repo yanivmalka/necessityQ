@@ -42,6 +42,10 @@ data class DisplayOptions(
     /** Dairy, meat/fish and frozen grouped at the end of the list. */
     val chilledLast: Boolean = false,
     val tapMode: TapMode = TapMode.INFO,
+    /** Items already checked off (struck through) at the bottom of the list. */
+    val showBought: Boolean = true,
+    /** Estimated weight of produce counted in pieces ("15 יח' ≈1.7 ק\"ג"). */
+    val showWeightEstimate: Boolean = true,
 )
 
 /** Small device-local preferences: theme, sort, display toggles, current store, read markers. */
@@ -89,6 +93,8 @@ class AppPrefs(context: Context) {
             showTotal = p.getBoolean("d_total", true),
             chilledLast = p.getBoolean("d_chilled", false),
             tapMode = runCatching { TapMode.valueOf(p.getString("d_tap", null) ?: "") }.getOrDefault(TapMode.INFO),
+            showBought = p.getBoolean("d_bought", true),
+            showWeightEstimate = p.getBoolean("d_weight", true),
         )
         set(v) = p.edit()
             .putBoolean("d_reason", v.showReason).putBoolean("d_last", v.showLastBought)
@@ -96,11 +102,23 @@ class AppPrefs(context: Context) {
             .putBoolean("d_by", v.showAddedBy).putBoolean("d_price", v.showPrices)
             .putBoolean("d_qty", v.showQuantity).putBoolean("d_stepper", v.showStepper)
             .putBoolean("d_stats", v.showStats).putBoolean("d_total", v.showTotal)
-            .putBoolean("d_chilled", v.chilledLast).putString("d_tap", v.tapMode.name).apply()
+            .putBoolean("d_chilled", v.chilledLast).putString("d_tap", v.tapMode.name)
+            .putBoolean("d_bought", v.showBought).putBoolean("d_weight", v.showWeightEstimate).apply()
 
     /** Sort direction per stage of use: false = ascending. */
     fun descendingFor(mode: app.necessityq.domain.ListMode): Boolean = p.getBoolean("desc_" + mode.name, false)
     fun setDescendingFor(mode: app.necessityq.domain.ListMode, v: Boolean) = p.edit().putBoolean("desc_" + mode.name, v).apply()
+
+    /** Scanned products to be reminded of later ("code\tname\tprice\tbranch\tat" per entry, newest last). */
+    val remindLater: List<String>
+        get() = p.getString("remind_later", null)?.split('\n')?.filter { it.isNotBlank() }.orEmpty()
+
+    fun addRemindLater(code: String, name: String, price: Double?, branchId: String?) {
+        val entry = listOf(code, name.replace('\t', ' ').replace('\n', ' '), price?.toString().orEmpty(), branchId.orEmpty(), System.currentTimeMillis().toString())
+            .joinToString("\t")
+        val next = (remindLater.filterNot { it.startsWith(code + "\t") } + entry).takeLast(100)
+        p.edit().putString("remind_later", next.joinToString("\n")).apply()
+    }
 
     /** Play a sound when a new message arrives. */
     var chatSound: Boolean

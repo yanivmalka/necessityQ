@@ -103,25 +103,30 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         runCatching { block() }.onFailure { _messages.tryEmit(it.message ?: "פעולה נכשלה") }
     }
 
+    private val _added = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    /** Item ids just added to the list: the list scrolls to them. */
+    val added: SharedFlow<String> = _added
+
     fun submitQuery() {
         val text = query.value
         val (hid, uid, lines) = ctx() ?: return
         if (text.isBlank()) return
         query.value = ""
-        launchSafe { container.service.addFromText(hid, uid, text, lines) }
+        launchSafe { container.service.addFromText(hid, uid, text, lines)?.let { _added.tryEmit(it.item.id) } }
     }
+
 
     /** Picks an autocomplete entry, keeping any quantity typed in the box ("2 קוט…" → 2 × קוטג'). */
     fun pickCompletion(item: ItemIdentity) {
         val (hid, uid, lines) = ctx() ?: return
         val quantity = QuickEntryParser.parse(query.value)?.quantity
         query.value = ""
-        launchSafe { container.service.add(hid, uid, item, quantity, LineSource.MANUAL, lines) }
+        launchSafe { container.service.add(hid, uid, item, quantity, LineSource.MANUAL, lines); _added.tryEmit(item.id) }
     }
 
     fun accept(suggestion: Suggestion) {
         val (hid, uid, lines) = ctx() ?: return
-        launchSafe { container.service.acceptSuggestion(hid, uid, suggestion, lines) }
+        launchSafe { container.service.acceptSuggestion(hid, uid, suggestion, lines); _added.tryEmit(suggestion.itemId) }
     }
 
     fun dismiss(suggestion: Suggestion) {
@@ -510,6 +515,25 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         here?.branch?.takeIf { it.id in ids } ?: ids.firstNotNullOfOrNull { id -> all.firstOrNull { it.id == id } }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    /**
+     * Quick-add suggestions from the products of the branch (online data), as generic items
+     * ("קוטג' 5%"), beyond what the household already buys. Empty without price data.
+     */
+    val onlineCompletions: StateFlow<List<ItemIdentity>> = combine(query, completions, branchPrices, primaryBranch) { q, mine, loaded, branch ->
+        val name = QuickEntryParser.parse(q)?.item?.displayName ?: q
+        val products = branch?.let { loaded[it.id] }?.products
+        if (name.trim().length < 2 || products == null) return@combine emptyList<ItemIdentity>()
+        val known = mine.map { it.id }.toSet()
+        app.necessityq.domain.PriceData.search(products, name, limit = 60)
+            .map { app.necessityq.domain.Scan.genericIdentity(it) }
+            .filter { it.id !in known && it.name.isNotBlank() }
+            .distinctBy { it.id }
+            .take(8)
+    }
+        .flowOn(kotlinx.coroutines.Dispatchers.Default)
+        .catch { emit(emptyList()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     private val indexCache = mutableMapOf<String, app.necessityq.domain.ProductIndex>()
 
     private fun indexFor(p: app.necessityq.domain.BranchPrices): app.necessityq.domain.ProductIndex {
@@ -687,6 +711,18 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     fun closeScan() { scanResult.value = null }
 
+    /**
+     * "Remind me later" for a scanned product: kept on this device for now — how and when the
+     * reminder appears will be defined later.
+     */
+    fun remindLater(result: app.necessityq.domain.ScanResult) {
+        val p = result.product
+        val name = p?.name ?: result.identity?.displayName ?: result.code
+        prefs.addRemindLater(result.code, name, result.here?.price ?: p?.price, result.branchId)
+        _messages.tryEmit("נשמר לתזכורת: $name")
+        closeScan()
+    }
+
     /** The scanned product is on the list: mark that line bought. */
     fun scanCheckOff(result: app.necessityq.domain.ScanResult) {
         val line = result.line?.takeIf { it.status == LineStatus.NEEDED } ?: return
@@ -702,6 +738,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         launchSafe {
             val parsed = container.service.addFromText(hid, uid, text, lines) ?: return@launchSafe
             if (rememberProduct && code != null) container.prices.setPreferredProduct(hid, parsed.item.id, code)
+            _added.tryEmit(parsed.item.id)
             _messages.tryEmit("${parsed.item.displayName} נוסף לרשימה")
         }
     }
