@@ -181,7 +181,7 @@ private fun Root(vm: AppViewModel) {
                     Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
                         val modifier = Modifier.padding(padding)
                         when (dest) {
-                            Dest.PLAN, Dest.SHOP -> ListScreen(vm, household.name, modifier, onOpenMessages = { go(Dest.MESSAGES) })
+                            Dest.PLAN, Dest.SHOP -> ListScreen(vm, household.name, modifier, onOpenMessages = { go(Dest.MESSAGES) }, onOpenDisplaySettings = { go(Dest.SETTINGS) })
                             Dest.MENU -> MenuScreen(vm, modifier)
                             Dest.MESSAGES -> MessagesScreen(vm, modifier, onOpen = { itemId, name -> openChat = itemId to name })
                             Dest.HISTORY -> HistoryScreen(vm, modifier)
@@ -197,8 +197,9 @@ private fun Root(vm: AppViewModel) {
                 }
             }
             openChat?.let { (itemId, name) ->
-                ItemSheet(vm, itemId = itemId, itemName = name, onDismiss = { openChat = null })
+                ItemSheet(vm, itemId = itemId, itemName = name, onDismiss = { openChat = null }, onOpenItem = { id, n -> openChat = id to n })
             }
+            ScanSheet(vm)
         }
     }
 }

@@ -43,6 +43,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -63,6 +65,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -115,7 +118,15 @@ private fun fmt(millis: Long) = Instant.ofEpochMilli(millis).atZone(ZoneId.syste
  */
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-fun ItemSheet(vm: AppViewModel, itemId: String, itemName: String, onDismiss: () -> Unit) {
+fun ItemSheet(
+    vm: AppViewModel,
+    itemId: String,
+    itemName: String,
+    onDismiss: () -> Unit,
+    /** Opens another item's conversation (someone is typing there); null = not offered. */
+    onOpenItem: ((itemId: String, itemName: String) -> Unit)? = null,
+) {
+    val typing by vm.typingNow.collectAsStateWithLifecycle()
     val snapshot by vm.snapshot.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
     val allMessages by vm.itemMessages.collectAsStateWithLifecycle()
@@ -197,6 +208,7 @@ fun ItemSheet(vm: AppViewModel, itemId: String, itemName: String, onDismiss: () 
                     QuantityStepper(line.quantity, onMinus = { vm.adjustQuantity(line, -1) }, onPlus = { vm.adjustQuantity(line, +1) })
                     PriceSlot(price = null, average = null)
                 }
+                UnitChooser(line.quantity?.unit) { vm.setQuantityUnit(line, it) }
                 androidx.compose.foundation.layout.FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -209,6 +221,16 @@ fun ItemSheet(vm: AppViewModel, itemId: String, itemName: String, onDismiss: () 
                     OutlinedButton(onClick = { vm.delete(line); onDismiss() }) {
                         Icon(Icons.Default.Delete, null, Modifier.padding(end = 4.dp))
                         Text("הסרה")
+                    }
+                    // the exact product (for price only — the name stays as written); remembered for next time
+                    val scanProduct = rememberBarcodeScan(vm) { vm.linkScannedProduct(itemId, it) }
+                    OutlinedButton(onClick = scanProduct) {
+                        Icon(Icons.Default.QrCodeScanner, null, Modifier.padding(end = 4.dp))
+                        Text("סריקת המוצר")
+                    }
+                    OutlinedButton(onClick = { editing = true }) {
+                        Icon(Icons.Default.Edit, null, Modifier.padding(end = 4.dp))
+                        Text("עריכה")
                     }
                 }
                 if (line.missing) {
@@ -311,6 +333,28 @@ fun ItemSheet(vm: AppViewModel, itemId: String, itemName: String, onDismiss: () 
             vm.receipts.collectAsStateWithLifecycle()
             var replyTo by remember(itemId) { mutableStateOf<ItemMessage?>(null) }
             var editingMessage by remember(itemId) { mutableStateOf<ItemMessage?>(null) }
+            // typing about another product: shown here too, one tap away
+            val elsewhere = typing.filter { it.itemId != itemId }.groupBy { it.itemId }
+            elsewhere.values.forEach { group ->
+                val first = group.first()
+                androidx.compose.material3.Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    modifier = Modifier.fillMaxWidth().then(
+                        if (onOpenItem != null) Modifier.clickable { onOpenItem(first.itemId, first.itemName) } else Modifier,
+                    ),
+                ) {
+                    Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        TypingDots()
+                        Text(
+                            "  " + app.necessityq.domain.Typing.label(group.map { it.name }).removeSuffix("…") + " על ${first.itemName}",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (onOpenItem != null) Text("מעבר ›", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
             ChatThread(
                 thread, vm = vm,
                 onReply = { replyTo = it; editingMessage = null },
@@ -318,6 +362,12 @@ fun ItemSheet(vm: AppViewModel, itemId: String, itemName: String, onDismiss: () 
                 onDelete = { confirmDeleteMessage = it },
                 onDetails = { messageDetails = it },
             )
+            typing.filter { it.itemId == itemId }.takeIf { it.isNotEmpty() }?.let { here ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TypingDots()
+                    Text("  " + app.necessityq.domain.Typing.label(here.map { it.name }), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
             ChatComposer(
                 vm, itemId, line?.displayName ?: itemName,
                 replyTo = replyTo, onReplyDone = { replyTo = null },
@@ -380,7 +430,8 @@ fun ItemSheet(vm: AppViewModel, itemId: String, itemName: String, onDismiss: () 
         EditLineDialog(
             line = line,
             onDismiss = { editing = false },
-            onSave = { quantity, note ->
+            onSave = { name, quantity, note ->
+                if (name != line.displayName) vm.renameLine(line, name)
                 if (quantity != line.quantity) vm.changeQuantity(line, quantity)
                 if (note != line.note) vm.changeNote(line, note)
                 editing = false
@@ -727,6 +778,8 @@ private fun ChatComposer(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var draft by remember(itemId) { mutableStateOf("") }
+    // leaving the conversation (or switching product) ends our "typing…"
+    androidx.compose.runtime.DisposableEffect(itemId) { onDispose { vm.stopTyping() } }
     var recording by remember { mutableStateOf(false) }
     var elapsed by remember { mutableStateOf(0L) }
 
@@ -839,7 +892,7 @@ private fun ChatComposer(
             IconButton(onClick = { camera.launch(null) }) { Icon(Icons.Default.PhotoCamera, contentDescription = "צילום תמונה") }
         }
         OutlinedTextField(
-            draft, { draft = it },
+            draft, { draft = it; vm.onDraftChanged(itemId, itemName, it) },
             modifier = Modifier.weight(1f),
             placeholder = { Text(if (editing != null) "עריכה…" else if (replyTo != null) "תגובה…" else "למשל: לקנות את הגדול?") },
             maxLines = 4,
@@ -881,6 +934,9 @@ private fun retentionText(days: Int?): String = when {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MessagesScreen(vm: AppViewModel, modifier: Modifier = Modifier, onOpen: (itemId: String, itemName: String) -> Unit) {
+    val typing by vm.typingNow.collectAsStateWithLifecycle()
+    fun typingHere(id: String): String? =
+        typing.filter { it.itemId == id }.takeIf { it.isNotEmpty() }?.let { t -> app.necessityq.domain.Typing.label(t.map { it.name }) }
     val all by vm.itemMessages.collectAsStateWithLifecycle()
     val archived by vm.archivedMessages.collectAsStateWithLifecycle()
     val retention by vm.chatRetention.collectAsStateWithLifecycle()
@@ -921,6 +977,12 @@ fun MessagesScreen(vm: AppViewModel, modifier: Modifier = Modifier, onOpen: (ite
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(last.itemName, style = ProductNameStyle)
+                        typingHere(last.itemId)?.let { label ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                TypingDots()
+                                Text("  $label", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
                         Text(
                             "${if (last.authorId == vm.me) "אני" else last.authorName}: ${last.preview}",
                             maxLines = 2,
@@ -1105,5 +1167,50 @@ private fun BranchPriceSection(vm: AppViewModel, itemId: String, name: String, v
     }
     if (info.preferred != null) {
         androidx.compose.material3.TextButton(onClick = { vm.setPreferredProduct(itemId, null) }) { Text("ביטול הבחירה — הצגת טווח בלבד") }
+    }
+}
+
+/** Kind of quantity: none / piece / package / kilo / gram / litre (millilitres only once in use). */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun UnitChooser(current: app.necessityq.domain.QuantityUnit?, onChoose: (app.necessityq.domain.QuantityUnit?) -> Unit) {
+    val label = { u: app.necessityq.domain.QuantityUnit -> if (u == app.necessityq.domain.QuantityUnit.PACKAGE) "מארז" else u.label }
+    val shown = app.necessityq.domain.QuantitySteps.choices.filter { it != app.necessityq.domain.QuantityUnit.MILLILITER || current == it }
+    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        androidx.compose.material3.FilterChip(selected = current == null, onClick = { onChoose(null) }, label = { Text("בלי כמות") })
+        shown.forEach { u ->
+            androidx.compose.material3.FilterChip(selected = current == u, onClick = { onChoose(u) }, label = { Text(label(u)) })
+        }
+    }
+}
+
+/** Three dots rising and fading in turn — the "typing…" animation. */
+@Composable
+fun TypingDots(color: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.primary) {
+    val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "typing")
+    Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+        repeat(3) { i ->
+            val phase by transition.animateFloat(
+                initialValue = 0f,
+                targetValue = 1f,
+                animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                    animation = androidx.compose.animation.core.keyframes {
+                        durationMillis = 1_200
+                        0f at 0
+                        1f at 300
+                        0f at 600
+                    },
+                    initialStartOffset = androidx.compose.animation.core.StartOffset(i * 200),
+                ),
+                label = "dot$i",
+            )
+            androidx.compose.foundation.layout.Box(
+                Modifier
+                    .padding(bottom = (phase * 4).dp)
+                    .size(6.dp)
+                    .alpha(0.35f + 0.65f * phase)
+                    .background(color, androidx.compose.foundation.shape.CircleShape),
+            )
+        }
     }
 }

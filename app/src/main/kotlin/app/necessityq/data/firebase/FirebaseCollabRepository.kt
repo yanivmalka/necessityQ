@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.map
  *   households/{hid}/settings/chat      { retentionDays }
  *   households/{hid}/media/{id}         { mime, data (bytes), by, at }  — picture / recording of a message
  *   households/{hid}/settings/notify    { missingRecipients[] }
+ *   households/{hid}/typing/{uid}       { itemId, itemName, name, at } — live "typing…" mark; deleted when typing stops
  *
  * Writes are fire-and-forget like the list edits: Firestore applies them to its local cache at once
  * and syncs when online.
@@ -53,6 +54,25 @@ class FirebaseCollabRepository(private val db: FirebaseFirestore) : CollabReposi
     override fun messages(householdId: String): Flow<List<ItemMessage>> =
         household(householdId).collection("messages").orderBy("at", Query.Direction.ASCENDING).limitToLast(500).observe(includeMetadata = true)
             .map { snap -> snap.documents.mapNotNull(FirestoreMapping::messageFrom) }
+
+    override fun typing(householdId: String): Flow<List<app.necessityq.domain.TypingState>> =
+        household(householdId).collection("typing").observe().map { snap ->
+            snap.documents.mapNotNull { d ->
+                app.necessityq.domain.TypingState(
+                    userId = d.id,
+                    name = d.getString("name").orEmpty(),
+                    itemId = d.getString("itemId") ?: return@mapNotNull null,
+                    itemName = d.getString("itemName").orEmpty(),
+                    atMillis = d.getLong("at") ?: return@mapNotNull null,
+                )
+            }
+        }
+
+    override suspend fun setTyping(householdId: String, userId: String, state: app.necessityq.domain.TypingState?) {
+        val doc = household(householdId).collection("typing").document(userId)
+        if (state == null) doc.delete()
+        else doc.set(mapOf("itemId" to state.itemId, "itemName" to state.itemName, "name" to state.name, "at" to state.atMillis))
+    }
 
     override suspend fun sendMessage(householdId: String, message: ItemMessage) {
         household(householdId).collection("messages").document(message.id).set(FirestoreMapping.messageToMap(message))

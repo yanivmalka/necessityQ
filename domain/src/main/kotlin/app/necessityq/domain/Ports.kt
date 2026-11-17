@@ -55,6 +55,8 @@ interface ShoppingRepository {
     suspend fun addLine(householdId: String, line: ListLine)
     suspend fun updateLineQuantity(householdId: String, lineId: String, quantity: Quantity?, atMillis: Long)
     suspend fun updateLineNote(householdId: String, lineId: String, note: String?, atMillis: Long)
+    /** The user renamed the product: its identity (item id, name, variant, category) changes. */
+    suspend fun renameLine(householdId: String, lineId: String, item: ItemIdentity, atMillis: Long)
     suspend fun deleteLine(householdId: String, lineId: String)
 
     /** Atomically marks the line bought and records the purchase (purchase id is derived from the line id). */

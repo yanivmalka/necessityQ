@@ -106,9 +106,11 @@ fun OnboardingScreen(vm: AppViewModel, account: Account, modifier: Modifier = Mo
 fun EditLineDialog(
     line: ListLine,
     onDismiss: () -> Unit,
-    onSave: (Quantity?, String?) -> Unit,
+    /** name as the user wrote it, quantity, note */
+    onSave: (String, Quantity?, String?) -> Unit,
     onDelete: () -> Unit,
 ) {
+    var name by remember(line.id) { mutableStateOf(line.displayName) }
     var amount by remember(line.id) { mutableStateOf(line.quantity?.amount?.let(Quantity::formatNumber) ?: "") }
     var unit by remember(line.id) { mutableStateOf(line.quantity?.unit ?: QuantityUnit.PIECE) }
     var note by remember(line.id) { mutableStateOf(line.note ?: "") }
@@ -119,6 +121,13 @@ fun EditLineDialog(
         title = { Text(line.displayName) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    name, { name = it },
+                    label = { Text("שם המוצר") },
+                    supportingText = { Text("המוצר שנבחר לו (בסריקה או מהרשימה) והמחיר נשמרים") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         amount, { amount = it.filter { c -> c.isDigit() || c == '.' } },
@@ -145,7 +154,7 @@ fun EditLineDialog(
         confirmButton = {
             TextButton(onClick = {
                 val q = amount.toDoubleOrNull()?.takeIf { it > 0 }?.let { Quantity(it, unit) }
-                onSave(q, note.trim().ifBlank { null })
+                onSave(name.trim().ifBlank { line.displayName }, q, note.trim().ifBlank { null })
             }) { Text("שמירה") }
         },
         dismissButton = {

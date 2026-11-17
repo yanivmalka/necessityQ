@@ -65,6 +65,12 @@ class FirebaseShoppingRepository(
         linesRef(householdId).document(lineId).update(mapOf("note" to note, "updatedAt" to atMillis))
     }
 
+    override suspend fun renameLine(householdId: String, lineId: String, item: app.necessityq.domain.ItemIdentity, atMillis: Long) {
+        linesRef(householdId).document(lineId).update(
+            mapOf("itemId" to item.id, "name" to item.name, "variant" to item.variant, "category" to item.category.name, "updatedAt" to atMillis),
+        )
+    }
+
     override suspend fun deleteLine(householdId: String, lineId: String) {
         linesRef(householdId).document(lineId).delete()
     }

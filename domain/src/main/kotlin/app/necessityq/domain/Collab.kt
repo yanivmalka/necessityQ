@@ -9,6 +9,7 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sqrt
+import kotlin.math.roundToLong
 
 // ---------- stores ----------
 
@@ -156,6 +157,11 @@ interface CollabRepository {
     fun receipts(householdId: String): Flow<Map<String, Receipt>>
     suspend fun markSeen(householdId: String, userId: String, atMillis: Long)
     suspend fun markRead(householdId: String, userId: String, itemId: String, atMillis: Long)
+
+    /** Who is typing in which item conversation right now (live only; nothing without a backend). */
+    fun typing(householdId: String): kotlinx.coroutines.flow.Flow<List<TypingState>> = kotlinx.coroutines.flow.flowOf(emptyList())
+    /** Announces that [userId] is typing ([state]), or stopped (null). */
+    suspend fun setTyping(householdId: String, userId: String, state: TypingState?) {}
 }
 
 /** Non-persistent implementation for the single-device mode and tests. */
@@ -346,6 +352,32 @@ object ListOrdering {
 }
 
 object QuantitySteps {
+    /** The unit choices offered on an item, in the order shown ("ללא" = no quantity is fine too). */
+    val choices: List<QuantityUnit> = listOf(QuantityUnit.PIECE, QuantityUnit.PACKAGE, QuantityUnit.KILOGRAM, QuantityUnit.GRAM, QuantityUnit.LITER, QuantityUnit.MILLILITER)
+
+    /** A natural first amount for a unit: one piece / package / kilo / litre, half a kilo in grams. */
+    fun defaultFor(unit: QuantityUnit): Quantity = when (unit) {
+        QuantityUnit.GRAM, QuantityUnit.MILLILITER -> Quantity(500.0, unit)
+        else -> Quantity(1.0, unit)
+    }
+
+    /**
+     * Changes the kind of quantity of a line. Within a dimension the amount is converted
+     * (1.5 ק"ג → 1500 גרם; 3 יח' → 3 חב'). Across dimensions nothing can be converted (how much do 15
+     * cucumbers weigh?), so the household's usual amount in that unit is used, else a natural default.
+     * [unit] null = no quantity ("עגבניות" alone is a valid line).
+     */
+    fun switchUnit(current: Quantity?, unit: QuantityUnit?, usual: Quantity? = null): Quantity? {
+        if (unit == null) return null
+        if (current != null && current.unit == unit) return current
+        if (current != null && current.dimension == unit.dimension) {
+            val amount = (current.baseAmount / unit.toBase * 1000).roundToLong() / 1000.0
+            return if (amount > 0) Quantity(amount, unit) else defaultFor(unit)
+        }
+        if (usual != null && usual.dimension == unit.dimension) return switchUnit(usual, unit)
+        return defaultFor(unit)
+    }
+
     /** One tap on +/-: whole units for counts, 100 g/ml for small measures, 0.5 for kg/litre. Never goes below the first step. */
     fun step(current: Quantity?, delta: Int): Quantity? {
         if (current == null) return if (delta > 0) Quantity.pieces(1) else null

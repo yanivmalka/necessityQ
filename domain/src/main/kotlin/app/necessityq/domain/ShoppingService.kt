@@ -108,6 +108,21 @@ class ShoppingService(
     suspend fun changeQuantity(householdId: String, line: ListLine, quantity: Quantity?) =
         repository.updateLineQuantity(householdId, line.id, quantity, clock.nowMillis())
 
+    /**
+     * Renames a line from free text ("חלב 3%"). Returns the new identity, or null when the text is empty
+     * or names the same item. A quantity typed with the name is ignored (it has its own control).
+     */
+    suspend fun rename(householdId: String, line: ListLine, text: String): ItemIdentity? {
+        val parsed = QuickEntryParser.parse(text) ?: return null
+        val item = parsed.item
+        if (item.id == line.itemId && item.displayName == line.displayName) return null
+        // keep the category the household moved it to when the item stays the same kind
+        val category = if (item.category == Category.OTHER) line.category else item.category
+        val renamed = item.copy(category = category)
+        repository.renameLine(householdId, line.id, renamed, clock.nowMillis())
+        return renamed
+    }
+
     suspend fun changeNote(householdId: String, line: ListLine, note: String?) =
         repository.updateLineNote(householdId, line.id, note?.trim()?.ifBlank { null }, clock.nowMillis())
 
