@@ -35,9 +35,10 @@ service cloud.firestore {
       allow update:
         // owner: rename, remove participants, rotate code, hand over ownership
         if isOwner(hid)
-        // any member may remove only themselves
+        // any member may remove only themselves; ownerId must stay untouched (an owner who leaves
+        // hands ownership over through the isOwner clause above)
         || (isMember(hid)
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'ownerId'])
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members'])
             && request.resource.data.members.toSet() == resource.data.members.toSet().difference([uid()].toSet()))
         // anyone signed in may add only themselves (join by code)
         || (signedIn()

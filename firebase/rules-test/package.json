@@ -1,0 +1,16 @@
+{
+  "name": "necessityq-rules-test",
+  "private": true,
+  "type": "module",
+  "description": "Firestore security rules tests (run against the Firestore emulator)",
+  "scripts": {
+    "test": "vitest run",
+    "test:emulator": "firebase emulators:exec --only firestore --project demo-necessityq \"vitest run\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
+    "firebase": "^11.6.0",
+    "firebase-tools": "^13.35.1",
+    "vitest": "^3.2.4"
+  }
+}
