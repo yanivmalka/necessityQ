@@ -2,6 +2,23 @@ package app.necessityq.ui
 
 import android.Manifest
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Surface
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Info
@@ -104,6 +121,16 @@ private fun Root(vm: AppViewModel) {
         if (Build.VERSION.SDK_INT >= 33) notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
+    // "install automatically when the download finishes": collected only while the app is on screen,
+    // since Android does not let a backgrounded app open the installer
+    val pendingInstall by vm.pendingInstall.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    LaunchedEffect(pendingInstall) {
+        val file = pendingInstall ?: return@LaunchedEffect
+        vm.consumePendingInstall()
+        if (file.exists()) startInstall(vm, context, file)
+    }
+
     when (val s = session) {
         Session.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         is Session.Error -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(s.message) }
@@ -146,15 +173,30 @@ private fun Root(vm: AppViewModel) {
                     bottomBar = {
                         // shopping is a focused mode: the list takes the whole screen and has its own way back
                         if (!shoppingOnList) {
-                            BottomBar(
-                                current = dest.tab,
-                                homeBadge = when {
-                                    unread > 0 -> "$unread"
-                                    update is UpdateState.Available -> "חדש"
-                                    else -> null
-                                },
-                                onSelect = { go(it) },
-                            )
+                            Column {
+                                // the download runs in the background; a strip above the tabs follows it on every screen
+                                AnimatedVisibility(
+                                    visible = update is UpdateState.Downloading && dest != Dest.UPDATES,
+                                    enter = expandVertically() + fadeIn(),
+                                    exit = shrinkVertically() + fadeOut(),
+                                ) {
+                                    // keep the last progress on screen while the strip slides away
+                                    var lastDownload by remember { mutableStateOf<UpdateState.Downloading?>(null) }
+                                    (update as? UpdateState.Downloading)?.let { lastDownload = it }
+                                    lastDownload?.let { d ->
+                                        DownloadStrip(d, onOpen = { go(Dest.UPDATES, from = Dest.HOME) }, onStop = vm::stopDownload)
+                                    }
+                                }
+                                BottomBar(
+                                    current = dest.tab,
+                                    homeBadge = when {
+                                        unread > 0 -> "$unread"
+                                        update is UpdateState.Available || update is UpdateState.Ready -> "חדש"
+                                        else -> null
+                                    },
+                                    onSelect = { go(it) },
+                                )
+                            }
                         }
                     },
                 ) { padding ->
@@ -185,7 +227,11 @@ private fun Root(vm: AppViewModel) {
                                 listOf(
                                     HubEntry(
                                         Dest.UPDATES.title, Icons.Default.SystemUpdate,
-                                        badge = if (update is UpdateState.Available) "חדש" else null,
+                                        badge = when (update) {
+                                            is UpdateState.Available, is UpdateState.Ready -> "חדש"
+                                            is UpdateState.Downloading -> "${((update as UpdateState.Downloading).progress * 100).toInt()}%"
+                                            else -> null
+                                        },
                                     ) { go(Dest.UPDATES, from = Dest.HOME) },
                                     HubEntry(Dest.ABOUT.title, Icons.Default.Info) { go(Dest.ABOUT, from = Dest.HOME) },
                                 ),
@@ -206,6 +252,33 @@ private fun Root(vm: AppViewModel) {
                 ItemSheet(vm, itemId = itemId, itemName = name, onDismiss = { openChat = null }, onOpenItem = { id, n -> openChat = id to n })
             }
             ScanSheet(vm)
+        }
+    }
+}
+
+/** The background download, shown above the tabs on every screen: animated icon, progress, stop. */
+@Composable
+private fun DownloadStrip(state: UpdateState.Downloading, onOpen: () -> Unit, onStop: () -> Unit) {
+    val shown by animateFloatAsState(state.progress, label = "stripProgress")
+    Surface(color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
+        Column {
+            Row(
+                Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                DownloadingIcon(size = 18.dp)
+                Text(
+                    "מוריד עדכון ${state.release.versionName} ברקע… ${(state.progress * 100).toInt()}%",
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = onStop) {
+                    Icon(Icons.Default.Stop, contentDescription = "עצירת ההורדה", tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+            }
+            LinearProgressIndicator(progress = { shown }, modifier = Modifier.fillMaxWidth().height(3.dp))
         }
     }
 }

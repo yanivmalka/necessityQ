@@ -125,6 +125,16 @@ class AppPrefs(context: Context) {
         get() = p.getBoolean("chat_sound", true)
         set(v) = p.edit().putBoolean("chat_sound", v).apply()
 
+    /** Look for a new version every time the app opens. */
+    var autoCheckUpdates: Boolean
+        get() = p.getBoolean("upd_auto_check", true)
+        set(v) = p.edit().putBoolean("upd_auto_check", v).apply()
+
+    /** Open the installer as soon as an update finishes downloading. */
+    var autoInstallUpdates: Boolean
+        get() = p.getBoolean("upd_auto_install", false)
+        set(v) = p.edit().putBoolean("upd_auto_install", v).apply()
+
     /** When the user last opened the conversation of [itemId] (millis). */
     fun readAt(itemId: String): Long = p.getLong("read_$itemId", 0L)
     fun markRead(itemId: String, atMillis: Long) = p.edit().putLong("read_$itemId", atMillis).apply()
@@ -172,7 +182,46 @@ class Notifier(private val context: Context) {
         runCatching { NotificationManagerCompat.from(context).notify(id, notification) }
     }
 
+    /** Ongoing notification of the update download; [percent] null = size unknown yet. */
+    @SuppressLint("MissingPermission")
+    fun updateProgress(versionName: String, percent: Int?) {
+        if (!allowed()) return
+        val notification = NotificationCompat.Builder(context, QUIET)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setContentTitle("מוריד עדכון $versionName")
+            .setContentText(percent?.let { "$it%" } ?: "מתחיל…")
+            .setProgress(100, percent ?: 0, percent == null)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .build()
+        runCatching { NotificationManagerCompat.from(context).notify(UPDATE_ID, notification) }
+    }
+
+    /** Replaces the progress notification with "ready"; a tap opens the installer. */
+    @SuppressLint("MissingPermission")
+    fun updateReady(versionName: String, install: android.content.Intent) {
+        if (!allowed()) return
+        val tap = android.app.PendingIntent.getActivity(
+            context, UPDATE_ID, install,
+            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val notification = NotificationCompat.Builder(context, QUIET)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setContentTitle("העדכון $versionName הורד")
+            .setContentText("נגיעה להתקנה")
+            .setContentIntent(tap)
+            .setAutoCancel(true)
+            .build()
+        runCatching { NotificationManagerCompat.from(context).notify(UPDATE_ID, notification) }
+    }
+
+    fun cancelUpdate() {
+        runCatching { NotificationManagerCompat.from(context).cancel(UPDATE_ID) }
+    }
+
     private companion object {
+        const val UPDATE_ID = 0x0D0A7E
         const val LOUD = "household"
         const val QUIET = "household_quiet"
     }
