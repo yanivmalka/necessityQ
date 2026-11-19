@@ -65,11 +65,13 @@ class ShoppingService(
         householdId: String,
         userId: String,
         item: ItemIdentity,
-        quantity: Quantity?,
+        requestedQuantity: Quantity?,
         source: LineSource,
         current: List<ListLine>,
         recipe: String? = null,
     ) {
+        // an absurd amount for a home (750 יח') is read as a slip: add one
+        val quantity = Quantity.homeSized(requestedQuantity)
         val now = clock.nowMillis()
         val part = recipe?.let { RecipePart(it, quantity, fromMenu = source == LineSource.MENU) }
         when (val decision = ListRules.decideAdd(current, item.id, quantity)) {
