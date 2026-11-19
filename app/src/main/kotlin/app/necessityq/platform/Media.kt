@@ -3,10 +3,13 @@ package app.necessityq.platform
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.ExifInterface
 import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Build
+import androidx.core.content.FileProvider
 import java.io.ByteArrayOutputStream
 import java.io.File
 import kotlin.math.max
@@ -17,7 +20,7 @@ import kotlin.math.roundToInt
  * in a single database document (well under 1 MB).
  */
 object ImageCodec {
-    private const val MAX_SIDE = 1280
+    private const val MAX_SIDE = 1600
     const val MAX_BYTES = 700_000
 
     fun compress(bitmap: Bitmap): ByteArray {
@@ -35,15 +38,51 @@ object ImageCodec {
         }
     }
 
-    /** Reads a picked image, sampling large photos down while decoding to save memory. */
+    /**
+     * Reads a picked or photographed image, sampling large photos down while decoding to save memory,
+     * and turning it upright (camera photos are usually stored sideways with a rotation tag).
+     */
     fun fromUri(context: Context, uri: Uri): Bitmap? = runCatching {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
         var sample = 1
         while (max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= MAX_SIDE) sample *= 2
         val options = BitmapFactory.Options().apply { inSampleSize = sample }
-        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+        val bitmap = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+            ?: return null
+        val orientation = runCatching {
+            context.contentResolver.openInputStream(uri)?.use {
+                ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+            }
+        }.getOrNull() ?: ExifInterface.ORIENTATION_NORMAL
+        upright(bitmap, orientation)
     }.getOrNull()
+
+    private fun upright(bitmap: Bitmap, orientation: Int): Bitmap {
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> { matrix.postRotate(90f); matrix.postScale(-1f, 1f) }
+            ExifInterface.ORIENTATION_TRANSVERSE -> { matrix.postRotate(270f); matrix.postScale(-1f, 1f) }
+            else -> return bitmap
+        }
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    }
+
+    /**
+     * A fresh file the camera app writes the full-size photo into (the preview contract only returns a
+     * thumbnail of about 200 px, which looked blurry once shown at full width).
+     */
+    fun newCameraFile(context: Context): Pair<File, Uri> {
+        val dir = File(context.cacheDir, "camera").apply { mkdirs() }
+        dir.listFiles()?.forEach { it.delete() }
+        val file = File(dir, "photo_${System.currentTimeMillis()}.jpg")
+        return file to FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    }
 
     fun decode(bytes: ByteArray): Bitmap? = runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
 }

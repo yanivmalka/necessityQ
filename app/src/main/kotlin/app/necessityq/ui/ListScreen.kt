@@ -6,9 +6,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -1099,14 +1102,29 @@ private class SwipeAction(val label: String, val icon: ImageVector, val color: C
  */
 @Composable
 private fun SwipeableTile(left: SwipeAction, right: SwipeAction, content: @Composable () -> Unit) {
-    val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     var width by remember { mutableFloatStateOf(1f) }
-    val offset = remember { Animatable(0f) }
+    // the drag writes the offset synchronously; once the finger lifts (or the gesture is cancelled) a single
+    // spring brings the tile home. Launching a coroutine per drag delta let late snaps cancel that return,
+    // leaving tiles stuck half-way.
+    var offset by remember { mutableFloatStateOf(0f) }
+    var dragging by remember { mutableStateOf(false) }
+    // bumped on every release so a quick flick (start + stop within one frame) still triggers the return
+    var releases by remember { mutableIntStateOf(0) }
+    LaunchedEffect(dragging, releases) {
+        if (!dragging && offset != 0f) {
+            animate(
+                initialValue = offset,
+                targetValue = 0f,
+                animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow),
+            ) { value, _ -> offset = value }
+            offset = 0f
+        }
+    }
     val ring = remember { Animatable(0f) }
     var armedAt by remember { mutableStateOf<Long?>(null) }
     val threshold = width * 0.3f
-    val past = abs(offset.value) >= threshold
+    val past = abs(offset) >= threshold
     LaunchedEffect(past) {
         if (past) {
             armedAt = System.currentTimeMillis()
@@ -1126,8 +1144,8 @@ private fun SwipeableTile(left: SwipeAction, right: SwipeAction, content: @Compo
     )
 
     Box(Modifier.onSizeChanged { width = it.width.toFloat().coerceAtLeast(1f) }) {
-        if (offset.value != 0f) {
-            val toRight = offset.value > 0
+        if (offset != 0f) {
+            val toRight = offset > 0
             val action = if (toRight) right else left
             Box(
                 Modifier.matchParentSize().clip(NqShapes.Tile).background(action.color).padding(horizontal = 18.dp),
@@ -1165,20 +1183,23 @@ private fun SwipeableTile(left: SwipeAction, right: SwipeAction, content: @Compo
         }
         Box(
             Modifier
-                .absoluteOffset { IntOffset(offset.value.roundToInt(), 0) }
+                .absoluteOffset { IntOffset(offset.roundToInt(), 0) }
                 .draggable(
                     orientation = Orientation.Horizontal,
                     state = rememberDraggableState { delta ->
-                        scope.launch { offset.snapTo((offset.value + delta).coerceIn(-width, width)) }
+                        offset = (offset + delta).coerceIn(-width, width)
                     },
+                    onDragStarted = { dragging = true },
+                    // also called when the gesture is cancelled (e.g. the list takes over to scroll)
                     onDragStopped = { velocity ->
-                        val dir = if (offset.value > 0) 1f else -1f
-                        val pushed = offset.value != 0f && velocity * dir >= with(density) { PUSH_SPEED_DP.dp.toPx() } &&
-                            abs(offset.value) >= width * 0.12f
+                        val dir = if (offset > 0) 1f else -1f
+                        val pushed = offset != 0f && velocity * dir >= with(density) { PUSH_SPEED_DP.dp.toPx() } &&
+                            abs(offset) >= width * 0.12f
                         val held = armedAt?.let { System.currentTimeMillis() - it >= HOLD_MS } == true
-                        val stillPast = abs(offset.value) >= width * 0.3f
-                        if (pushed || (held && stillPast)) (if (offset.value > 0) right else left).run()
-                        offset.animateTo(0f, tween(220))
+                        val stillPast = abs(offset) >= width * 0.3f
+                        dragging = false
+                        releases++
+                        if (pushed || (held && stillPast)) (if (offset > 0) right else left).run()
                     },
                 ),
         ) { content() }

@@ -28,6 +28,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.AbsoluteAlignment
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Info
@@ -800,9 +804,61 @@ private fun ImageAttachment(vm: AppViewModel, mediaId: String) {
         modifier = Modifier.padding(end = 6.dp).fillMaxWidth().heightIn(max = 220.dp).clip(NqShapes.Inset).clickable { full = true },
         contentScale = ContentScale.Crop,
     )
-    if (full) {
-        androidx.compose.ui.window.Dialog(onDismissRequest = { full = false }) {
-            Image(bmp, contentDescription = "תמונה", modifier = Modifier.fillMaxWidth().clickable { full = false }, contentScale = ContentScale.Fit)
+    if (full) ImageViewer(bmp) { full = false }
+}
+
+/** Full-screen picture: fills the screen, pinch to zoom, drag to look around, double-tap to zoom in / out. */
+@Composable
+private fun ImageViewer(bmp: androidx.compose.ui.graphics.ImageBitmap, onClose: () -> Unit) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onClose,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        var zoom by remember { mutableStateOf(1f) }
+        var pan by remember { mutableStateOf(Offset.Zero) }
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .pointerInput(Unit) {
+                    detectTransformGestures { _, panChange, zoomChange, _ ->
+                        val z = (zoom * zoomChange).coerceIn(1f, 5f)
+                        // keep the picture covering the screen: at most half the extra size each way
+                        val maxX = size.width * (z - 1f) / 2f
+                        val maxY = size.height * (z - 1f) / 2f
+                        zoom = z
+                        pan = Offset(
+                            (pan.x + panChange.x).coerceIn(-maxX, maxX),
+                            (pan.y + panChange.y).coerceIn(-maxY, maxY),
+                        )
+                    }
+                }
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onDoubleTap = {
+                            if (zoom > 1f) { zoom = 1f; pan = Offset.Zero } else zoom = 2.5f
+                        },
+                        onTap = { if (zoom == 1f) onClose() },
+                    )
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Image(
+                bmp,
+                contentDescription = "תמונה",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize().graphicsLayer {
+                    scaleX = zoom
+                    scaleY = zoom
+                    translationX = pan.x
+                    translationY = pan.y
+                },
+            )
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier.align(AbsoluteAlignment.TopRight).padding(12.dp)
+                    .background(Color.Black.copy(alpha = 0.45f), CircleShape),
+            ) { Icon(Icons.Default.Close, contentDescription = "סגירה", tint = Color.White) }
         }
     }
 }
@@ -935,7 +991,27 @@ private fun ChatComposer(
             sendImage(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ImageCodec.fromUri(context, uri) })
         }
     }
-    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap -> sendImage(bitmap) }
+    // the camera writes the full-size photo into a file of ours; kept across the activity being recreated
+    // while the camera app is open
+    var cameraPath by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { taken ->
+        val path = cameraPath
+        cameraPath = null
+        if (taken && path != null) scope.launch {
+            val file = java.io.File(path)
+            val bitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                ImageCodec.fromUri(context, android.net.Uri.fromFile(file)).also { file.delete() }
+            }
+            if (bitmap == null) vm.reportError("לא ניתן לקרוא את התמונה") else sendImage(bitmap)
+        }
+    }
+    fun openCamera() {
+        runCatching {
+            val (file, uri) = ImageCodec.newCameraFile(context)
+            cameraPath = file.absolutePath
+            camera.launch(uri)
+        }.onFailure { cameraPath = null; vm.reportError("לא ניתן לפתוח את המצלמה") }
+    }
 
     fun startRecording() {
         runCatching { vm.recorder.start() }
@@ -1048,7 +1124,7 @@ private fun ChatComposer(
                     }
                     // as in WhatsApp, the camera makes room once typing starts
                     if (draft.isBlank()) {
-                        IconButton(onClick = { camera.launch(null) }) {
+                        IconButton(onClick = { openCamera() }) {
                             Icon(Icons.Default.PhotoCamera, contentDescription = "צילום תמונה", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
