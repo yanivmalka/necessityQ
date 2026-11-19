@@ -186,7 +186,7 @@ export const refreshNutrition = onCall({ timeoutSeconds: 540, memory: "512MiB" }
  * the message has not reached the server yet (sent offline) it answers not-found and the app retries.
  * The pushes are data messages with high priority, so the app can sound the alert even on silent.
  */
-export const chatPush = onCall({ memory: "256MiB", timeoutSeconds: 30 }, async (req) => {
+export const chatPush = onCall({ memory: "256MiB", timeoutSeconds: 30, invoker: "public" }, async (req) => {
   if (!req.auth) throw new HttpsError("unauthenticated", "sign in first");
   const uid = req.auth.uid;
   const { householdId, messageId } = (req.data ?? {}) as { householdId?: string; messageId?: string };
