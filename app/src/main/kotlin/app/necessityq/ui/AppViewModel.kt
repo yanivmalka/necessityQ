@@ -1,5 +1,6 @@
 package app.necessityq.ui
 
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -1098,6 +1099,20 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         .catch { emit(emptyMap()) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
+    /** Profile pictures of the members (decoded once), for the avatars in צ'אט פוד. */
+    val memberPhotos: StateFlow<Map<String, androidx.compose.ui.graphics.ImageBitmap>> = container.household.members
+        .map { list -> list.mapNotNull { m -> m.photo }.joinToString() to list }
+        .distinctUntilChanged { a, b -> a.first == b.first }
+        .map { (_, list) ->
+            list.mapNotNull { m ->
+                val bmp = m.photo?.let { app.necessityq.platform.AvatarCodec.decode(it) } ?: return@mapNotNull null
+                m.userId to bmp.asImageBitmap()
+            }.toMap()
+        }
+        .flowOn(kotlinx.coroutines.Dispatchers.Default)
+        .catch { emit(emptyMap()) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
     /** צ'אט פוד: the household's members that can be tagged with "@". */
     val chatMembers: StateFlow<List<app.necessityq.domain.ChatMember>> = memberNames
         .map { names -> names.map { (id, name) -> app.necessityq.domain.ChatMember(id, name) }.sortedBy { it.name } }
@@ -1251,7 +1266,15 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun deleteMessage(message: ItemMessage) {
         val (hid, uid, _) = ctx() ?: return
         if (!app.necessityq.domain.MessageRules.canDelete(message, uid)) return
-        launchSafe { container.collab.deleteMessages(hid, listOf(message)) }
+        // as in WhatsApp: the message stays in place as "ההודעה נמחקה על ידי …"; its content and attachment are removed
+        launchSafe { container.collab.markDeleted(hid, message, System.currentTimeMillis()) }
+    }
+
+    /** My emoji reaction to a message; null takes it back. */
+    fun react(message: ItemMessage, emoji: String?) {
+        val (hid, uid, _) = ctx() ?: return
+        if (message.isDeleted) return
+        launchSafe { container.collab.react(hid, message.id, uid, emoji) }
     }
 
     /** Deletes a whole conversation (the open one of an item, or an archived one). */

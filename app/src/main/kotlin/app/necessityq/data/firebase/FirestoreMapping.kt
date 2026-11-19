@@ -159,6 +159,9 @@ internal object FirestoreMapping {
             waveform = (doc.get("wave") as? List<*>)?.mapNotNull { (it as? Number)?.toInt() }?.takeIf { it.isNotEmpty() },
             archivedAtMillis = doc.getLong("archivedAt"),
             mentions = (doc.get("mentions") as? List<*>)?.filterIsInstance<String>().orEmpty(),
+            reactions = (doc.get("reactions") as? Map<*, *>)
+                ?.mapNotNull { (k, v) -> if (k is String && v is String) k to v else null }?.toMap().orEmpty(),
+            deletedAtMillis = doc.getLong("deletedAt"),
         )
     }
 

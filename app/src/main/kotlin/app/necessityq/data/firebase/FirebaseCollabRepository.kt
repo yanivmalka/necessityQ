@@ -20,7 +20,7 @@ import kotlinx.coroutines.flow.map
  *   households/{hid}/stores/{id}        { name, type, lat?, lng? }
  *   households/{hid}/itemMeta/{itemId}  { favorite, price?, chatMessages?, chatThreads?, chatMedia?, chatLastAt? }
  *   households/{hid}/messages/{id}      { itemId, itemName, authorId, authorName, text, at, kind?, mediaId?, durationMs?, replyTo?,
- *                                         wave?, editedAt?, archivedAt?, mentions[]?, pushedAt? }
+ *                                         wave?, editedAt?, archivedAt?, mentions[]?, pushedTo[]?, reactions{uid: emoji}?, deletedAt? }
  *   households/{hid}/settings/chat      { retentionDays }
  *   households/{hid}/media/{id}         { mime, data (bytes), by, at }  — picture / recording of a message
  *   households/{hid}/settings/notify    { missingRecipients[] }
@@ -81,6 +81,27 @@ class FirebaseCollabRepository(private val db: FirebaseFirestore) : CollabReposi
     override suspend fun editMessage(householdId: String, messageId: String, text: String, editedAtMillis: Long, mentions: List<String>) {
         household(householdId).collection("messages").document(messageId)
             .update(mapOf("text" to text, "editedAt" to editedAtMillis, "mentions" to mentions))
+    }
+
+    override suspend fun markDeleted(householdId: String, message: ItemMessage, atMillis: Long) {
+        val hh = household(householdId)
+        val batch = db.batch()
+        batch.update(
+            hh.collection("messages").document(message.id),
+            mapOf(
+                "deletedAt" to atMillis, "text" to "",
+                "kind" to FieldValue.delete(), "mediaId" to FieldValue.delete(), "durationMs" to FieldValue.delete(),
+                "wave" to FieldValue.delete(), "mentions" to FieldValue.delete(), "reactions" to FieldValue.delete(),
+                "editedAt" to FieldValue.delete(),
+            ),
+        )
+        message.mediaId?.let { batch.delete(hh.collection("media").document(it)) }
+        batch.commit()
+    }
+
+    override suspend fun react(householdId: String, messageId: String, userId: String, emoji: String?) {
+        household(householdId).collection("messages").document(messageId)
+            .update(com.google.firebase.firestore.FieldPath.of("reactions", userId), emoji ?: FieldValue.delete())
     }
 
     override suspend fun deleteMessages(householdId: String, messages: List<ItemMessage>) {

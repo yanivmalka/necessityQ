@@ -11,12 +11,16 @@ object MessageRules {
 
     /** Own, confirmed text / picture messages inside the window (a recording has no text to edit). */
     fun canEdit(m: ItemMessage, me: String, now: Long): Boolean =
-        m.authorId == me && !m.pending && m.kind != MessageKind.AUDIO && now - m.atMillis <= EDIT_WINDOW_MS
+        m.authorId == me && !m.pending && !m.isDeleted && m.kind != MessageKind.AUDIO && now - m.atMillis <= EDIT_WINDOW_MS
 
     fun minutesLeft(m: ItemMessage, now: Long): Int =
         ((EDIT_WINDOW_MS - (now - m.atMillis) + 59_999) / 60_000).toInt().coerceAtLeast(0)
 
-    fun canDelete(m: ItemMessage, me: String): Boolean = m.authorId == me
+    fun canDelete(m: ItemMessage, me: String): Boolean = m.authorId == me && !m.isDeleted
+
+    /** What a deleted message says in its place. */
+    fun deletedLabel(m: ItemMessage, me: String, authorName: String): String =
+        if (m.authorId == me) "🚫 מחקת את ההודעה" else "🚫 ההודעה נמחקה על ידי $authorName"
 }
 
 /** Loudness bars of a voice recording. */

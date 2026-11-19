@@ -170,6 +170,8 @@ fun ItemSheet(
     val archivedAll by vm.archivedMessages.collectAsStateWithLifecycle()
     var detailsOpen by remember(itemId) { mutableStateOf(false) }
     var pastOpen by remember(itemId) { mutableStateOf(false) }
+    var pastChat by remember(itemId) { mutableStateOf<List<ItemMessage>?>(null) }
+    var selectedMessageId by remember(itemId) { mutableStateOf<String?>(null) }
     var confirmDeletePast by remember { mutableStateOf<List<ItemMessage>?>(null) }
     val pastThreads = archivedAll.filter { it.itemId == itemId }
         .groupBy { it.archivedAtMillis }.values
@@ -179,6 +181,9 @@ fun ItemSheet(
     val line = snapshot?.lines?.firstOrNull { it.itemId == itemId && it.status == LineStatus.NEEDED }
     val stats = snapshot?.stats?.get(itemId)
     val thread = allMessages.filter { it.itemId == itemId }
+    // long-pressed message: its actions are in the top bar (as in WhatsApp); back clears the choice
+    val selectedMessage = selectedMessageId?.let { id -> thread.firstOrNull { it.id == id } }
+    androidx.activity.compose.BackHandler(enabled = selectedMessage != null) { selectedMessageId = null }
     val favorite = itemId in favorites
     val lastStore = purchases.firstOrNull { it.itemId == itemId && it.storeId != null }
         ?.storeId?.let { id -> stores.firstOrNull { it.id == id }?.name }
@@ -199,6 +204,11 @@ fun ItemSheet(
     LaunchedEffect(thread.size) {
         if (thread.size > seenMessages) scroll.animateScrollTo(scroll.maxValue)
         seenMessages = thread.size
+    }
+    // someone starts typing here: their typing bubble comes into view when I am at the end of the conversation
+    val typingHereCount = typing.count { it.itemId == itemId }
+    LaunchedEffect(typingHereCount) {
+        if (typingHereCount > 0 && scroll.maxValue - scroll.value < 600) scroll.animateScrollTo(scroll.maxValue)
     }
 
     // the branch price list opens part-way; a tap on it or scrolling the page opens it fully
@@ -232,7 +242,16 @@ fun ItemSheet(
       ) {
         // pinned while the page scrolls: back, the name with its actions, and the quantity values
         Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
-            Row(Modifier.fillMaxWidth().padding(end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (selectedMessage != null) {
+                ChatSelectionBar(
+                    vm, selectedMessage, readOnly = false,
+                    onClose = { selectedMessageId = null },
+                    onReply = { replyTo = it; editingMessage = null },
+                    onEdit = { editingMessage = it; replyTo = null },
+                    onDelete = { confirmDeleteMessage = it },
+                    onDetails = { messageDetails = it },
+                )
+            } else Row(Modifier.fillMaxWidth().padding(end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "חזרה")
                 }
@@ -433,14 +452,14 @@ fun ItemSheet(
                                     Icon(Icons.Default.Delete, contentDescription = "מחיקת השיחה", Modifier.size(18.dp))
                                 }
                             }
-                            thread.forEach { m ->
-                                Text(
-                                    "${if (m.authorId == vm.me) "אני" else m.authorName} · ${fmt(m.atMillis)}" + (m.editedAtMillis?.let { " · נערכה ${fmt(it)}" } ?: ""),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                                Text(m.preview, style = MaterialTheme.typography.bodyMedium)
-                            }
+                            val last = thread.last()
+                            Text(
+                                "${if (last.authorId == vm.me) "אני" else last.authorName}: ${last.preview}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 2,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            )
+                            androidx.compose.material3.TextButton(onClick = { pastChat = thread }) { Text("פתיחת השיחה ›") }
                         }
                     }
                 }
@@ -483,17 +502,11 @@ fun ItemSheet(
             }
             ChatFoodThread(
                 thread, vm = vm,
+                typing = typing.filter { it.itemId == itemId },
+                selectedId = selectedMessageId,
+                onSelect = { selectedMessageId = it?.id },
                 onReply = { replyTo = it; editingMessage = null },
-                onEdit = { editingMessage = it; replyTo = null },
-                onDelete = { confirmDeleteMessage = it },
-                onDetails = { messageDetails = it },
             )
-            typing.filter { it.itemId == itemId }.takeIf { it.isNotEmpty() }?.let { here ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TypingDots()
-                    Text("  " + app.necessityq.domain.Typing.label(here.map { it.name }), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
             Text(
                 "השיחה שייכת לקנייה הנוכחית: כשהפריט נוקה מהרשימה היא עוברת ל\"שיחות מקניות קודמות\" בהודעות.",
                 style = MaterialTheme.typography.bodySmall,
@@ -527,7 +540,7 @@ fun ItemSheet(
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { confirmDeleteMessage = null },
             title = { Text("למחוק את ההודעה?") },
-            text = { Text("ההודעה תימחק אצל כל בני הבית ולא ניתן לשחזר אותה.") },
+            text = { Text("ההודעה תימחק אצל כל בני הבית, ובמקומה ייכתב \"מחקת את ההודעה\". לא ניתן לשחזר אותה.") },
             confirmButton = {
                 androidx.compose.material3.TextButton(onClick = { vm.deleteMessage(m); confirmDeleteMessage = null }) { Text("מחיקה") }
             },
@@ -557,6 +570,9 @@ fun ItemSheet(
         )
     }
     messageDetails?.let { m -> MessageDetailsDialog(vm, m, onDismiss = { messageDetails = null }) }
+    pastChat?.let { past ->
+        ArchivedChatScreen(vm, past, onDelete = { confirmDeletePast = past; pastChat = null }, onDismiss = { pastChat = null })
+    }
 
     if (editing && line != null) {
         EditLineDialog(
@@ -643,7 +659,7 @@ private fun fullFmt(millis: Long) = Instant.ofEpochMilli(millis).atZone(ZoneId.s
 
 /** Who wrote the message, when it was sent / edited, and who received and read it. */
 @Composable
-private fun MessageDetailsDialog(vm: AppViewModel, m: ItemMessage, onDismiss: () -> Unit) {
+internal fun MessageDetailsDialog(vm: AppViewModel, m: ItemMessage, onDismiss: () -> Unit) {
     val names by vm.memberNames.collectAsStateWithLifecycle()
     vm.receipts.collectAsStateWithLifecycle() // recompose when someone reads it
     val receipts = vm.receiptDetails(m)
@@ -875,27 +891,10 @@ fun MessagesScreen(vm: AppViewModel, modifier: Modifier = Modifier, onOpen: (ite
         }
     }
 
+    // a conversation of a past shopping opens in full (pictures, recordings, quotes), even when the item
+    // was bought or removed from the list
     openArchived?.let { thread ->
-        ModalBottomSheet(onDismissRequest = { openArchived = null }) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(thread.last().itemName, style = MaterialTheme.typography.titleLarge)
-                thread.forEach { m ->
-                    Column {
-                        Text(
-                            "${if (m.authorId == vm.me) "אני" else m.authorName} · ${fmt(m.atMillis)}" +
-                                (m.editedAtMillis?.let { " · נערכה ${fmt(it)}" } ?: ""),
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(m.preview)
-                    }
-                }
-                OutlinedButton(onClick = { confirmDelete = thread; openArchived = null }, modifier = Modifier.fillMaxWidth()) {
-                    Text("מחיקת השיחה")
-                }
-                androidx.compose.foundation.layout.Spacer(Modifier.padding(bottom = 24.dp))
-            }
-        }
+        ArchivedChatScreen(vm, thread, onDelete = { confirmDelete = thread; openArchived = null }, onDismiss = { openArchived = null })
     }
     confirmDelete?.let { thread ->
         androidx.compose.material3.AlertDialog(
@@ -1228,7 +1227,7 @@ private fun UnitChooser(
 @Composable
 fun TypingDots(color: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.primary) {
     val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "typing")
-    Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.height(12.dp), horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.Bottom) {
         repeat(3) { i ->
             val phase by transition.animateFloat(
                 initialValue = 0f,
@@ -1244,9 +1243,10 @@ fun TypingDots(color: androidx.compose.ui.graphics.Color = MaterialTheme.colorSc
                 ),
                 label = "dot$i",
             )
+            // a wave: each dot rises and falls a little after the previous one (as in WhatsApp)
             androidx.compose.foundation.layout.Box(
                 Modifier
-                    .padding(bottom = (phase * 4).dp)
+                    .graphicsLayer { translationY = -phase * 4.dp.toPx() }
                     .size(6.dp)
                     .alpha(0.35f + 0.65f * phase)
                     .background(color, androidx.compose.foundation.shape.CircleShape),
