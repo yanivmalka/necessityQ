@@ -70,6 +70,12 @@ data class BranchPrices(
 /** A branch with its distance from the user. */
 data class NearbyBranch(val branch: PriceBranch, val distanceMeters: Double?)
 
+/** One product at one branch with its previous price (null = no change on record). */
+data class BranchQuote(val branch: PriceBranch, val price: Double, val previous: Double?) {
+    /** positive = went up, negative = went down, null/zero = unchanged */
+    val change: Double? get() = previous?.let { price - it }?.takeIf { kotlin.math.abs(it) >= 0.005 }
+}
+
 /** Price of one product across the household's branches. */
 data class CrossBranchRange(val low: Double, val high: Double, val cheapestBranchIds: List<String>, val branches: Int)
 
@@ -125,6 +131,22 @@ object PriceData {
         val high = found.maxOf { it.second }
         return CrossBranchRange(low, high, found.filter { it.second == low }.map { it.first }, found.size)
     }
+
+    /**
+     * The chosen product at each of [branches] (in their order), like a stock ticker: today's price and the
+     * one before its last change. Barcodes are compared across chains; a chain-internal code only within
+     * [homeChain]. Branches whose prices are not loaded, or that don't sell the product, are left out.
+     */
+    fun quotes(code: String, internalCode: Boolean, homeChain: String, branches: List<PriceBranch>, prices: Map<String, BranchPrices>): List<BranchQuote> =
+        branches.mapNotNull { b ->
+            if (internalCode && b.chainKey != homeChain) return@mapNotNull null
+            val p = prices[b.id]?.products?.firstOrNull { it.code == code } ?: return@mapNotNull null
+            BranchQuote(b, p.price, previousPrice(p))
+        }
+
+    /** The price before the current one ([BranchProduct.history] ends with the current price, or close to it). */
+    fun previousPrice(p: BranchProduct): Double? =
+        p.history.map { it.second }.dropLastWhile { kotlin.math.abs(it - p.price) < 0.005 }.lastOrNull()
 
     fun formatPrice(price: Double): String = String.format(java.util.Locale.US, "₪%.2f", price)
 
