@@ -99,12 +99,13 @@ class FirebasePriceRepository(
             return@withLock cached
         }
         val bytes = storage.reference.child("prices/$branchId.json.gz").getBytes(MAX_BYTES).await()
+        // a branch file holds tens of thousands of products: unzipping and parsing it off the main thread keeps the UI responsive
         withContext(Dispatchers.IO) {
             val dir = File(cacheDir, "prices").apply { mkdirs() }
             File(dir, "$branchId.json.gz").writeBytes(bytes)
             File(dir, "$branchId.stamp").writeText(serverUpdated)
         }
-        parse(bytes).also { memory[branchId] = it }
+        withContext(Dispatchers.Default) { parse(bytes) }.also { memory[branchId] = it }
     }
 
     override suspend fun requestRefresh(branchId: String): Boolean {
@@ -119,8 +120,8 @@ class FirebasePriceRepository(
         val data = File(dir, "$branchId.json.gz")
         val stamp = File(dir, "$branchId.stamp")
         if (!data.exists() || !stamp.exists()) return@withContext null
-        runCatching { stamp.readText() to parse(data.readBytes()) }.getOrNull()
-    }
+        runCatching { stamp.readText() to data.readBytes() }.getOrNull()
+    }?.let { (stamp, bytes) -> withContext(Dispatchers.Default) { runCatching { stamp to parse(bytes) }.getOrNull() } }
 
     companion object {
         private const val MAX_BYTES = 40L * 1024 * 1024
