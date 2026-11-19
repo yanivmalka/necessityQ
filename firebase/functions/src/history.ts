@@ -8,7 +8,8 @@ export const HISTORY_KEEP_DAYS = 400;
  * - appends [day, price] to an item's history only when the price changed,
  * - keeps `s` = the day the current price started,
  * - lo/hi = min/max of every price that was in force at some point inside the last [rangeDays].
- * Items missing from today's file are dropped (the branch no longer sells them).
+ * Items missing from today's file are dropped (the branch no longer sells them),
+ * unless the file is `partial` (a Price delta used when no PriceFull exists): then they are kept as they were.
  */
 export function mergeSnapshot(
   branchId: string,
@@ -17,6 +18,7 @@ export function mergeSnapshot(
   today: string,
   rangeDays: number,
   meta: { file: string; stamp: string; now: string },
+  partial = false,
 ): Snapshot {
   const prev = new Map<string, SnapshotItem>();
   for (const it of previous?.items ?? []) prev.set(it.c, it);
@@ -49,6 +51,13 @@ export function mergeSnapshot(
       hi,
       h,
     });
+  }
+  if (partial) {
+    for (const old of previous?.items ?? []) {
+      if (seen.has(old.c)) continue;
+      const h = trim(old.h, today, HISTORY_KEEP_DAYS);
+      out.push({ ...old, h, ...range(h, today, rangeDays) });
+    }
   }
   return {
     v: 1,

@@ -1,8 +1,8 @@
 import { CHAINS, Chain, DEFAULT_CHAINS, chainByKey } from "./chains";
-import { latest } from "./filenames";
+import { latest, normalizeStoreId } from "./filenames";
 import { GeoCache, geocode } from "./geocode";
 import { israelDay, mergeSnapshot } from "./history";
-import { Branch, Snapshot } from "./model";
+import { Branch, FileEntry, Snapshot } from "./model";
 import { cityInScope, parsePrices, parseStores } from "./normalize";
 import { Source, sourceFor } from "./sources";
 import { decodePayload } from "./xml";
@@ -129,17 +129,25 @@ export async function refreshBranchPrices(branch: Branch, config: PriceConfig, d
   const base: BranchStatus = previousStatus ?? { updatedAt: null, items: 0, sourceFile: "", sourceStamp: "", lastAttemptAt: null, error: null };
   try {
     if (!chain) throw new Error(`unknown chain ${branch.chainKey}`);
-    const files = await src(chain).list(chain, "pricefull", branch.storeId);
-    const file = latest(files, "pricefull", branch.storeId);
-    if (!file) throw new Error("no PriceFull file listed for this branch");
+    let files = await src(chain).list(chain, "pricefull", branch.storeId);
+    // Some branches (new ones, or chains that skip full files for a store) publish only Price files:
+    // use the newest one rather than failing, and keep items it does not mention.
+    const full = latest(files, "pricefull", branch.storeId);
+    if (!full && !files.some((f) => f.kind === "price")) files = files.concat(await src(chain).list(chain, "price", branch.storeId));
+    const file = full ?? latest(files, "price", branch.storeId);
+    if (!file) throw new Error(missingFileMessage(files, branch.storeId));
     const { items } = parsePrices(decodePayload(await src(chain).fetch(chain, file)));
     if (items.length === 0) throw new Error(`no items in ${file.name}`);
     const previous = await deps.store.readSnapshot(branch.id);
-    const snapshot = mergeSnapshot(branch.id, previous, items, israelDay(now), config.rangeDays, {
-      file: file.name,
-      stamp: file.stamp,
-      now: now.toISOString(),
-    });
+    const snapshot = mergeSnapshot(
+      branch.id,
+      previous,
+      items,
+      israelDay(now),
+      config.rangeDays,
+      { file: file.name, stamp: file.stamp, now: now.toISOString() },
+      !full,
+    );
     await deps.store.writeSnapshot(snapshot);
     const status: BranchStatus = {
       updatedAt: now.toISOString(),
@@ -156,6 +164,16 @@ export async function refreshBranchPrices(branch: Branch, config: PriceConfig, d
     await deps.store.writeStatus(branch.id, status);
     return status;
   }
+}
+
+/** Explains a missing price file: how much was listed and which store ids do have price files. */
+export function missingFileMessage(files: FileEntry[], storeId: string): string {
+  const own = files.filter((f) => f.storeId === normalizeStoreId(storeId)).map((f) => f.kind ?? "other");
+  const stores = [...new Set(files.filter((f) => f.kind === "pricefull" || f.kind === "price").map((f) => f.storeId ?? "?"))];
+  stores.sort((a, b) => Number(a) - Number(b) || a.localeCompare(b));
+  const sample = stores.length > 25 ? `${stores.slice(0, 25).join(",")},…` : stores.join(",");
+  const ownPart = own.length ? `only ${[...new Set(own)].join("/")} files for it` : "no files for it";
+  return `no PriceFull/Price file for store ${storeId}: ${ownPart}; ${files.length} files listed, price files for ${stores.length} stores (${sample || "none"})`;
 }
 
 /** True when a branch's prices should be (re)loaded now. Failed attempts retry after an hour. */

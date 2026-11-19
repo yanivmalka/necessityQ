@@ -5,7 +5,7 @@ import { Chain } from "../src/chains";
 import { entry, latest, parseFileName } from "../src/filenames";
 import { cleanAddress } from "../src/geocode";
 import { addDays, mergeSnapshot, range } from "../src/history";
-import { BranchStatus, DEFAULT_CONFIG, PriceStore, isDue, tick, withDefaults } from "../src/ingest";
+import { BranchStatus, DEFAULT_CONFIG, PriceStore, isDue, refreshBranchPrices, tick, withDefaults } from "../src/ingest";
 import { Branch, FileEntry, FileKind, RawItem, Snapshot } from "../src/model";
 import { cityInScope, parsePrices, parseStores } from "../src/normalize";
 import { Source, parseLaibFiles, parsePublishPricePage, parseShufersalPage } from "../src/sources";
@@ -129,6 +129,12 @@ describe("history and ranges", () => {
     snap = mergeSnapshot("b", snap, [raw("b", 2), raw("b", 3)], "2026-11-02", 90, meta);
     expect(snap.items.map((i) => [i.c, i.p])).toEqual([["b", 2]]);
   });
+
+  it("a partial (Price) file updates what it lists and keeps the rest", () => {
+    let snap = mergeSnapshot("b", null, [raw("a", 1), raw("b", 2)], "2026-11-01", 90, meta);
+    snap = mergeSnapshot("b", snap, [raw("b", 3), raw("c", 4)], "2026-11-02", 90, meta, true);
+    expect(snap.items.map((i) => [i.c, i.p]).sort()).toEqual([["a", 1], ["b", 3], ["c", 4]]);
+  });
 });
 
 describe("config and scheduling", () => {
@@ -169,8 +175,25 @@ describe("config and scheduling", () => {
     expect(mem.index.branches.find((b) => b.id === "ramilevy_39")).toMatchObject({ lat: 31.75, lng: 35.21, chainName: "רמי לוי", city: "3000" });
     expect(mem.snapshots.get("ramilevy_39")?.items).toHaveLength(3); // duplicate line dropped
     expect(mem.status.get("ramilevy_39")).toMatchObject({ items: 3, error: null });
-    expect(mem.status.get("ramilevy_52")?.error).toContain("no PriceFull");
+    expect(mem.status.get("ramilevy_52")?.error).toContain("no PriceFull/Price file for store 52");
+    expect(mem.status.get("ramilevy_52")?.error).toContain("price files for 1 stores (39)");
     expect(report.join("\n")).toContain("branches: 2");
+  });
+
+  it("falls back to the newest Price file when a branch has no PriceFull", async () => {
+    const entries = [entry("Price7290058140886-052-202611160100.gz", "old"), entry("Price7290058140886-052-202611160300.gz", "new")];
+    const fake: Source = {
+      async list(_c: Chain, kind: FileKind) {
+        return entries.filter((f) => f.kind === kind);
+      },
+      async fetch() {
+        return fixture("pricefull.xml.gz");
+      },
+    };
+    const mem = memoryStore([]);
+    const branch = { id: "ramilevy_52", storeId: "52", chainKey: "ramilevy" } as Branch;
+    const st = await refreshBranchPrices(branch, DEFAULT_CONFIG, { store: mem, sourceFor: () => fake, now: () => new Date("2026-11-16T04:00:00Z") });
+    expect(st).toMatchObject({ error: null, items: 3, sourceFile: "Price7290058140886-052-202611160300.gz" });
   });
 });
 
