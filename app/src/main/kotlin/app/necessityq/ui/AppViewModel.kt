@@ -400,23 +400,30 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     /**
      * Puts a recipe's ingredients on the list for [servings]. When the recipe is already on the list,
      * the quantities there are changed by the difference instead of adding everything again.
+     * [only]: the item ids to add the first time (from the review sheet); null = everything not at home.
+     * What was left out is remembered on the dish, so changing servings later does not add it.
      */
-    fun addRecipeToList(dishId: String, servings: Int) {
+    fun addRecipeToList(dishId: String, servings: Int, only: Set<String>? = null) {
         val (hid, uid, _) = ctx() ?: return
-        val dish = meals.value.dish(dishId) ?: return
+        val data = meals.value
+        val dish = data.dish(dishId) ?: return
         val lines = snapshot.value?.lines.orEmpty()
         val onList = app.necessityq.domain.RecipeListSync.onList(lines, dish).isNotEmpty()
         val from = dish.listServings?.takeIf { onList }
         launchSafe {
             var current = lines
+            var skip = dish.listSkip
             if (from == null) {
-                app.necessityq.domain.Recipes.scaled(dish, servings).forEach { ing ->
+                val all = app.necessityq.domain.Recipes.scaled(dish, servings)
+                val chosen = all.filter { if (only != null) it.item.id in only else it.item.id !in data.pantry }
+                chosen.forEach { ing ->
                     container.service.add(hid, uid, ing.item, ing.quantity, LineSource.RECIPE, current, recipe = dish.name)
                     current = container.service.snapshot(hid).first().lines
                 }
-                _messages.tryEmit("${dish.name}: המרכיבים ל-$servings מנות נוספו לרשימה")
+                skip = all.map { it.item.id }.toSet() - chosen.map { it.item.id }.toSet()
+                _messages.tryEmit("${dish.name}: ${chosen.size} מרכיבים ל-$servings מנות נוספו לרשימה")
             } else {
-                app.necessityq.domain.RecipeListSync.plan(current, dish, from, servings).forEach { change ->
+                app.necessityq.domain.RecipeListSync.plan(current, dish, from, servings, skip = data.pantry + dish.listSkip).forEach { change ->
                     when (change) {
                         is app.necessityq.domain.RecipeListSync.Change.Update -> {
                             val line = current.firstOrNull { it.id == change.lineId } ?: return@forEach
@@ -430,9 +437,47 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                 }
                 _messages.tryEmit("${dish.name}: הכמויות ברשימה עודכנו ל-$servings מנות")
             }
-            updateMeals { d -> d.dish(dishId)?.let { d.withDish(it.copy(listServings = servings, cookServings = servings)) } ?: d }
+            updateMeals { d -> d.dish(dishId)?.let { d.withDish(it.copy(listServings = servings, cookServings = servings, listSkip = skip)) } ?: d }
         }
     }
+
+    /**
+     * Takes a recipe off the list: lines that only served it go to the recycle bin, shared lines shrink by the
+     * dish's amount. Undo puts it back for the same servings.
+     */
+    fun removeRecipeFromList(dishId: String) {
+        val (hid, _, lines) = ctx() ?: return
+        val dish = meals.value.dish(dishId) ?: return
+        val servings = dish.listServings ?: dish.plannedServings
+        val skip = dish.listSkip
+        launchSafe {
+            app.necessityq.domain.RecipeListSync.removal(lines, dish).forEach { change ->
+                when (change) {
+                    is app.necessityq.domain.RecipeListSync.Removal.Delete ->
+                        lines.firstOrNull { it.id == change.lineId }?.let { container.service.delete(hid, it) }
+                    is app.necessityq.domain.RecipeListSync.Removal.Shrink -> {
+                        val line = lines.firstOrNull { it.id == change.lineId } ?: return@forEach
+                        if (change.quantity != line.quantity) container.service.changeQuantity(hid, line, change.quantity)
+                        container.service.setRecipeParts(hid, line, change.parts)
+                    }
+                }
+            }
+            updateMeals { d -> d.dish(dishId)?.let { d.withDish(it.copy(listServings = null, listSkip = emptySet())) } ?: d }
+            _undo.tryEmit(
+                UndoEvent("${dish.name} הוסר מהרשימה") {
+                    val all = app.necessityq.domain.Recipes.scaled(dish, servings).map { it.item.id }.toSet()
+                    addRecipeToList(dishId, servings, only = all - skip)
+                },
+            )
+        }
+    }
+
+    /** Marks an ingredient as always at home (recipes and the menu leave it off the list), or not. */
+    fun setAtHome(itemId: String, atHome: Boolean) = updateMeals { it.withPantry(itemId, atHome) }
+
+    /** Changes one recipe (its ingredients, servings…) in place. */
+    fun editDish(dishId: String, change: (app.necessityq.domain.Dish) -> app.necessityq.domain.Dish) =
+        updateMeals { d -> d.dish(dishId)?.let { d.withDish(change(it)) } ?: d }
 
     fun setDisplay(value: DisplayOptions) { prefs.display = value; display.value = value }
     fun selectStore(id: String?) { prefs.currentStoreId = id; currentStoreId.value = id }

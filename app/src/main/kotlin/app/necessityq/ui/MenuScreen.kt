@@ -3,6 +3,7 @@ package app.necessityq.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.clickable
@@ -121,6 +122,8 @@ fun MenuScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
 private fun MenuHome(vm: AppViewModel, modifier: Modifier, onOpen: (MenuPage) -> Unit) {
     val data by vm.meals.collectAsStateWithLifecycle()
     val purchases by vm.purchases.collectAsStateWithLifecycle()
+    val listSnapshot by vm.snapshot.collectAsStateWithLifecycle()
+    val listLines = listSnapshot?.lines.orEmpty()
     val today = remember { LocalDate.now() }
     val todayDay = today.toEpochDay()
     val horizon = 7 * data.plan.cycleWeeks
@@ -223,11 +226,16 @@ private fun MenuHome(vm: AppViewModel, modifier: Modifier, onOpen: (MenuPage) ->
                 val slots = MealPlanner.daySlots + meals.map { it.slot }.filter { it !in MealPlanner.daySlots }.distinct()
                 slots.forEach { slot ->
                     val meal = meals.firstOrNull { it.slot == slot }
+                    val slotDish = meal?.let { dishes[it.dishId] }
                     SlotRow(
                         slot = slot,
                         meal = meal,
-                        dish = meal?.let { dishes[it.dishId] },
+                        dish = slotDish,
                         members = data.members,
+                        onList = slotDish != null && app.necessityq.domain.RecipeListSync.onList(listLines, slotDish).isNotEmpty(),
+                        onAddToList = {
+                            if (slotDish != null && meal != null) vm.addRecipeToList(slotDish.id, meal.servings ?: slotDish.plannedServings)
+                        },
                         onPick = { picking = selected to slot },
                         onOpenRecipe = { id -> onOpen(MenuPage.Recipe(id)) },
                         onToggleCooked = { cooked -> vm.updateMeals { MealPlanner.setCooked(it, selected, slot, cooked) } },
@@ -381,6 +389,8 @@ private fun SlotRow(
     meal: ResolvedMeal?,
     dish: Dish?,
     members: List<FamilyMember>,
+    onList: Boolean,
+    onAddToList: () -> Unit,
     onPick: () -> Unit,
     onOpenRecipe: (String) -> Unit,
     onToggleCooked: (Boolean) -> Unit,
@@ -402,6 +412,23 @@ private fun SlotRow(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // where the meal stands with the shopping list: on it (kept in step with servings), or one tap away
+                if (!meal.cooked) {
+                    if (onList) {
+                        Text(
+                            "ברשימה · מתעדכן",
+                            Modifier.padding(top = 4.dp).clip(NqShapes.Pill).background(MaterialTheme.colorScheme.primaryContainer)
+                                .padding(horizontal = 10.dp, vertical = 3.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    } else {
+                        TextButton(onClick = onAddToList, contentPadding = PaddingValues(horizontal = 0.dp)) {
+                            Text("+ מרכיבים לרשימה", fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
             }
         }
         if (dish != null && meal != null) {

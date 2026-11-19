@@ -40,6 +40,7 @@ object MealJson {
         val instructions: String = "",
         val flavor: String? = null,
         val listServings: Int? = null,
+        val listSkip: List<String> = emptyList(),
     )
     @Serializable private data class P(val day: Int, val slot: String, val dishId: String, val audience: List<String> = emptyList(), val servings: Int? = null)
     @Serializable private data class O(val epochDay: Long, val slot: String, val dishId: String? = null, val audience: List<String> = emptyList(), val servings: Int? = null)
@@ -53,6 +54,7 @@ object MealJson {
         val anchorEpochDay: Long? = null,
         val overrides: List<O> = emptyList(),
         val cooked: List<String> = emptyList(),
+        val pantry: List<String> = emptyList(),
     )
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -76,7 +78,7 @@ object MealJson {
                 M(it.id, it.name, it.avatar, it.birthYear, it.birthMonth, it.gender?.name, it.flavor?.name, it.dislikes, it.linkedUserId)
             },
             dishes = data.dishes.map {
-                D(it.id, it.name, it.ingredients, it.nutritionCode, it.servings, it.cookServings, it.instructions, it.flavor?.name, it.listServings)
+                D(it.id, it.name, it.ingredients, it.nutritionCode, it.servings, it.cookServings, it.instructions, it.flavor?.name, it.listServings, it.listSkip.toList())
             },
             tastes = data.ratings.mapValues { (_, m) -> m.mapValues { starsToLegacy(it.value) } },
             ratings = data.ratings,
@@ -85,6 +87,7 @@ object MealJson {
             anchorEpochDay = data.plan.anchorEpochDay,
             overrides = data.plan.overrides.map { O(it.epochDay, it.slot.name, it.dishId, it.audience.toList(), it.servings) },
             cooked = data.plan.cooked.toList(),
+            pantry = data.pantry.toList(),
         ),
     )
 
@@ -104,7 +107,7 @@ object MealJson {
             dishes = r.dishes.map {
                 Dish(
                     it.id, it.name, it.ingredients, it.nutritionCode, it.servings.coerceAtLeast(1), it.cookServings?.coerceAtLeast(1),
-                    it.instructions, enumOrNull<Flavor>(it.flavor), it.listServings,
+                    it.instructions, enumOrNull<Flavor>(it.flavor), it.listServings, it.listSkip.toSet(),
                 )
             },
             ratings = ratings,
@@ -119,6 +122,7 @@ object MealJson {
                 },
                 cooked = r.cooked.toSet(),
             ),
+            pantry = r.pantry.toSet(),
         )
     }
 }
