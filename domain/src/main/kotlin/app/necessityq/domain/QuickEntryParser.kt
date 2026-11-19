@@ -4,6 +4,8 @@ data class ParsedEntry(
     val item: ItemIdentity,
     val quantity: Quantity?,
     val raw: String,
+    /** The words that name the item, as written (without the amount and unit). */
+    val nameText: String = "",
 )
 
 /**
@@ -101,6 +103,6 @@ object QuickEntryParser {
         if (nameText.isBlank()) return null
         val identity = ItemIdentity.fromText(nameText)
         val quantity = amount?.takeIf { it > 0 }?.let { Quantity(it, unit ?: QuantityUnit.PIECE) }
-        return ParsedEntry(identity, quantity, input)
+        return ParsedEntry(identity, quantity, input, nameText)
     }
 }

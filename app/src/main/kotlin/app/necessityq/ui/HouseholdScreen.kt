@@ -75,7 +75,7 @@ fun HouseholdScreen(
 
     Column(modifier) {
         TopAppBar(
-            navigationIcon = { DrawerButton() },
+            navigationIcon = { BackNavButton() },
             title = { Text(household.name) },
             actions = {
                 if (vm.supportsAccounts && isOwner) {

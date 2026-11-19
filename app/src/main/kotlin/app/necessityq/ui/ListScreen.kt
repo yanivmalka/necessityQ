@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -99,8 +98,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -129,8 +126,25 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Autorenew
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.necessityq.domain.Category
+import app.necessityq.domain.Dish
+import app.necessityq.domain.RecipeListSync
+import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.runtime.mutableIntStateOf
 import app.necessityq.domain.GenerateMode
 import app.necessityq.domain.LineStatus
 import app.necessityq.domain.ListFilter
@@ -264,13 +278,22 @@ fun ListScreen(
 
     // suggestion sections: collapsed by default, hidden while typing so the list itself stays visible
     val showSuggestions = !shopping && searchText.isBlank()
-    var lowExpanded by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var lowExpanded by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(true) }
     var frequentExpanded by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
 
+    // recipes whose ingredients are on the list: their servings can be changed (or the recipe removed) from here
+    val mealData by vm.meals.collectAsStateWithLifecycle()
+    val showRecipes = !shopping && searchText.isBlank()
+    val recipesOnList = remember(mealData.dishes, snapshot?.lines) {
+        val lines = snapshot?.lines.orEmpty()
+        mealData.dishes.mapNotNull { d -> RecipeListSync.onList(lines, d).size.takeIf { it > 0 }?.let { d to it } }
+    }
+
     val listState = rememberLazyListState()
-    // LazyColumn items before the product rows (store prompt, suggestions, hint) — to find a row's index
+    // LazyColumn items before the product rows (store prompt, recipes, suggestions, hint) — to find a row's index
     val leadingItems = snapshot?.let { snap ->
         (if (shopping && storePrompt) 1 else 0) +
+            (if (showRecipes && recipesOnList.isNotEmpty()) 1 else 0) +
             (if (showSuggestions && snap.runningLow.isNotEmpty()) 1 else 0) +
             (if (showSuggestions && snap.frequent.isNotEmpty()) 1 else 0) + 1
     } ?: 0
@@ -322,113 +345,122 @@ fun ListScreen(
     }
     val storeName = stores.firstOrNull { it.id == currentStoreId }?.name
 
+    val messagesButton: @Composable (Color) -> Unit = { tint ->
+        // new messages, visible from the list itself
+        IconButton(onClick = onOpenMessages) {
+            BadgedBox(badge = { if (unreadTotal > 0) Badge { Text("$unreadTotal") } }) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Chat,
+                    contentDescription = if (unreadTotal > 0) "$unreadTotal הודעות חדשות" else "הודעות",
+                    tint = tint,
+                )
+            }
+        }
+    }
+    val menuButton: @Composable (Color) -> Unit = { tint ->
+        Box {
+            IconButton(onClick = { showMore = true }) { Icon(Icons.Default.MoreVert, contentDescription = "פעולות על הרשימה", tint = tint) }
+            DropdownMenu(expanded = showMore, onDismissRequest = { showMore = false }) {
+                DropdownMenuItem(
+                    text = { Text("יצירת רשימה מקניות עבר") },
+                    leadingIcon = { Icon(Icons.Default.AutoAwesome, null) },
+                    onClick = { showGenerate = true; showMore = false },
+                )
+                DropdownMenuItem(
+                    text = { Text("סל מחזור" + (snapshot?.removed?.size?.takeIf { it > 0 }?.let { " ($it)" } ?: "")) },
+                    leadingIcon = { Icon(Icons.Default.RestoreFromTrash, null) },
+                    onClick = { showBin = true; showMore = false },
+                )
+                HorizontalDivider()
+                DropdownMenuItem(
+                    text = { Text("ריקון הרשימה") },
+                    leadingIcon = { Icon(Icons.Default.DeleteSweep, null) },
+                    onClick = { showEmpty = true; showMore = false },
+                )
+                DropdownMenuItem(
+                    text = { Text("איפוס הרשימה") },
+                    leadingIcon = { Icon(Icons.Default.RestartAlt, null) },
+                    onClick = { showReset = true; showMore = false },
+                )
+                DropdownMenuItem(
+                    text = { Text("הגדרות תצוגה") },
+                    leadingIcon = { Icon(Icons.Default.Tune, null) },
+                    onClick = { showMore = false; onOpenDisplaySettings() },
+                )
+                DropdownMenuItem(
+                    text = { Text(if (display.showBought) "הסתרת מוצרים שסומנו/נמחקו" else "הצגת מוצרים שסומנו/נמחקו") },
+                    leadingIcon = { Icon(if (display.showBought) Icons.Default.VisibilityOff else Icons.Default.Visibility, null) },
+                    onClick = { showMore = false; vm.setDisplay(display.copy(showBought = !display.showBought)) },
+                )
+                DropdownMenuItem(
+                    text = { Text("סריקת ברקוד: מחיר והוספה") },
+                    leadingIcon = { Icon(Icons.Default.QrCodeScanner, null) },
+                    onClick = { showMore = false; scan() },
+                )
+            }
+        }
+    }
+
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        TopAppBar(
-            navigationIcon = { DrawerButton() },
-            title = {
-                Column {
-                    Text(householdName, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (shopping) {
+        val headerSnap = snapshot
+        if (shopping) {
+            ShopHeader(
+                storeName = storeName,
+                done = headerSnap?.bought?.size ?: 0,
+                open = headerSnap?.lines?.count { it.status == LineStatus.NEEDED } ?: 0,
+                remaining = if (display.showTotal && headerSnap != null) {
+                    app.necessityq.domain.ListCost.of(headerSnap.lines, prices, itemPrices)
+                } else null,
+                onBack = { vm.setMode(ListMode.PLAN) },
+                onStore = { showStoreDialog = true },
+            ) {
+                IconButton(onClick = { addOpen = !addOpen }) {
+                    Icon(Icons.Default.Add, contentDescription = "הוספת פריט", tint = NqTheme.colors.onShopHeader)
+                }
+                messagesButton(NqTheme.colors.onShopHeader)
+                menuButton(NqTheme.colors.onShopHeader)
+            }
+        } else {
+            Column(
+                Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
                         Text(
-                            (storeName?.let { "קונים ב$it" } ?: "בקנייה") + " ✎",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.clickable { showStoreDialog = true },
+                            householdName,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
-                    } else {
-                        Text(mode.label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("הרשימה", style = MaterialTheme.typography.titleLarge)
                     }
+                    if (names.size > 1) MemberAvatars(names.values.toList())
+                    messagesButton(MaterialTheme.colorScheme.onSurface)
+                    menuButton(MaterialTheme.colorScheme.onSurface)
                 }
-            },
-            actions = {
-                if (shopping) {
-                    IconButton(onClick = scan) { Icon(Icons.Default.QrCodeScanner, contentDescription = "סריקת ברקוד") }
-                    IconButton(onClick = { addOpen = !addOpen }) { Icon(Icons.Default.Add, contentDescription = "הוספת פריט") }
-                }
-                // new messages, visible from the list itself
-                IconButton(onClick = onOpenMessages) {
-                    BadgedBox(badge = { if (unreadTotal > 0) Badge { Text("$unreadTotal") } }) {
-                        Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = if (unreadTotal > 0) "$unreadTotal הודעות חדשות" else "הודעות")
-                    }
-                }
-                Box {
-                    IconButton(onClick = { showMore = true }) { Icon(Icons.Default.MoreVert, contentDescription = "פעולות על הרשימה") }
-                    DropdownMenu(expanded = showMore, onDismissRequest = { showMore = false }) {
-                        DropdownMenuItem(
-                            text = { Text("יצירת רשימה מקניות עבר") },
-                            leadingIcon = { Icon(Icons.Default.AutoAwesome, null) },
-                            onClick = { showGenerate = true; showMore = false },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("סל מחזור" + (snapshot?.removed?.size?.takeIf { it > 0 }?.let { " ($it)" } ?: "")) },
-                            leadingIcon = { Icon(Icons.Default.RestoreFromTrash, null) },
-                            onClick = { showBin = true; showMore = false },
-                        )
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text("ריקון הרשימה") },
-                            leadingIcon = { Icon(Icons.Default.DeleteSweep, null) },
-                            onClick = { showEmpty = true; showMore = false },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("איפוס הרשימה") },
-                            leadingIcon = { Icon(Icons.Default.RestartAlt, null) },
-                            onClick = { showReset = true; showMore = false },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("הגדרות תצוגה") },
-                            leadingIcon = { Icon(Icons.Default.Tune, null) },
-                            onClick = { showMore = false; onOpenDisplaySettings() },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(if (display.showBought) "הסתרת מוצרים שסומנו/נמחקו" else "הצגת מוצרים שסומנו/נמחקו") },
-                            leadingIcon = { Icon(if (display.showBought) Icons.Default.VisibilityOff else Icons.Default.Visibility, null) },
-                            onClick = { showMore = false; vm.setDisplay(display.copy(showBought = !display.showBought)) },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("סריקת ברקוד: מחיר והוספה") },
-                            leadingIcon = { Icon(Icons.Default.QrCodeScanner, null) },
-                            onClick = { showMore = false; scan() },
-                        )
-                    }
-                }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
-        )
+                ModeSwitch(shopping = false, onSelect = vm::setMode, modifier = Modifier.padding(end = 12.dp))
+            }
+        }
 
         // Quick add: always open while preparing; behind the + button while shopping
         if (!shopping || addOpen || query.isNotEmpty()) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = { vm.query.value = it },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                placeholder = { Text("הוספה או חיפוש, למשל 2 קוטג'", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                supportingText = if (searchText.isBlank()) null else {
-                    {
-                        Text(
-                            if (searchMatches == 0) "לא נמצא ברשימה — ➤ או Enter יוסיפו \"$searchText\""
-                            else "נמצא ברשימה ($searchMatches) · ➤ יוסיף כמות אם כתבתם, ✕ מוחק את הטקסט",
-                        )
-                    }
-                },
-                singleLine = true,
-                shape = NqShapes.Field,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { vm.submitQuery() }),
-                trailingIcon = {
-                    Row {
-                        if (query.isBlank()) {
-                            IconButton(onClick = scan) { Icon(Icons.Default.QrCodeScanner, contentDescription = "הוספה בסריקת ברקוד") }
-                        } else {
-                            IconButton(onClick = { vm.query.value = "" }) { Icon(Icons.Default.Close, contentDescription = "מחיקת הטקסט") }
-                        }
-                        IconButton(onClick = vm::submitQuery, enabled = query.isNotBlank()) {
-                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "הוספה לרשימה")
-                        }
-                    }
-                },
+            QuickAddField(
+                query = query,
+                onChange = { vm.query.value = it },
+                onSubmit = vm::submitQuery,
+                onClear = { vm.query.value = "" },
+                onScan = scan,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
             )
+            if (searchText.isNotBlank()) {
+                QuickAddPreview(
+                    parsed = remember(query) { QuickEntryParser.parse(query) },
+                    matches = searchMatches,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
+                )
+            }
         }
         if (completions.isNotEmpty() || onlineCompletions.isNotEmpty()) {
             // what the household buys first, then generic items from the branch's products — two scrolling rows
@@ -516,18 +548,41 @@ fun ListScreen(
                 item(key = "store_prompt") { StorePromptCard(vm) }
             }
 
+            if (showRecipes && recipesOnList.isNotEmpty()) {
+                item(key = "recipes") {
+                    RecipesOnListCard(
+                        recipesOnList,
+                        onServings = { dish, n -> vm.addRecipeToList(dish.id, n) },
+                        onRemove = { dish -> vm.removeRecipeFromList(dish.id) },
+                    )
+                }
+            }
+
             if (showSuggestions && snap.runningLow.isNotEmpty()) {
                 item(key = "low") {
-                    Column {
-                        SectionToggle("כנראה נגמר בקרוב", snap.runningLow.size, lowExpanded) { lowExpanded = !lowExpanded }
+                    Column(Modifier.padding(bottom = 6.dp)) {
+                        SuggestionHeader(
+                            title = "כנראה נגמר בקרוב",
+                            icon = Icons.Default.Schedule,
+                            iconTint = MaterialTheme.colorScheme.secondary,
+                            count = snap.runningLow.size,
+                            expanded = lowExpanded,
+                            onToggle = { lowExpanded = !lowExpanded },
+                            onAddAll = { snap.runningLow.forEach { vm.accept(it) } },
+                        )
                         if (lowExpanded) {
-                            TwoRowStrip(snap.runningLow, height = 112.dp) { s ->
-                                RunningLowChip(
-                                    s,
-                                    info = recommendationInfo(s, snap.stats[s.itemId], favorites, display, today),
-                                    onAdd = { vm.accept(s) },
-                                    onDismiss = { vm.dismiss(s) },
-                                )
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                items(snap.runningLow, key = { "low_" + it.itemId }) { s ->
+                                    RunningLowCard(
+                                        s,
+                                        info = recommendationInfo(s, snap.stats[s.itemId], favorites, display, today),
+                                        onAdd = { vm.accept(s) },
+                                        onDismiss = { vm.dismiss(s) },
+                                    )
+                                }
                             }
                         }
                     }
@@ -537,15 +592,25 @@ fun ListScreen(
             if (showSuggestions && snap.frequent.isNotEmpty()) {
                 item(key = "frequent") {
                     Column {
-                        SectionToggle("קונים בדרך כלל", snap.frequent.size, frequentExpanded) { frequentExpanded = !frequentExpanded }
+                        SuggestionHeader(
+                            title = "קונים בדרך כלל",
+                            icon = Icons.Default.Autorenew,
+                            iconTint = MaterialTheme.colorScheme.primary,
+                            count = snap.frequent.size,
+                            expanded = frequentExpanded,
+                            onToggle = { frequentExpanded = !frequentExpanded },
+                            onAddAll = null,
+                        )
                         if (frequentExpanded) {
                             TwoRowStrip(snap.frequent) { s ->
                                 val star = display.showFavorite && s.itemId in favorites
                                 AssistChip(
                                     onClick = { vm.accept(s) },
                                     label = { Text((if (star) "★ " else "") + s.identity.displayName) },
-                                    leadingIcon = { Icon(Icons.Default.Add, null) },
+                                    leadingIcon = { Icon(Icons.Default.Add, null, tint = MaterialTheme.colorScheme.primary) },
                                     shape = NqShapes.Pill,
+                                    colors = AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.surface),
+                                    border = BorderStroke(1.dp, NqTheme.colors.hairline),
                                 )
                             }
                         }
@@ -619,7 +684,7 @@ fun ListScreen(
                                         Icon(
                                             Icons.Default.DragIndicator,
                                             contentDescription = "גרירה",
-                                            tint = MaterialTheme.colorScheme.outlineVariant,
+                                            tint = MaterialTheme.colorScheme.outline,
                                             modifier = Modifier.draggableHandle(
                                                 onDragStarted = { dragging = true },
                                                 onDragStopped = {
@@ -658,9 +723,19 @@ fun ListScreen(
             }
         }
 
-        // estimated total of the open lines
-        if (display.showTotal && snap != null && snap.lines.any { it.status == LineStatus.NEEDED }) {
-            TotalBar(app.necessityq.domain.ListCost.of(snap.lines, prices, itemPrices))
+        if (shopping) {
+            ShopBottomBar(onScan = scan, onFinish = { vm.setMode(ListMode.PLAN) })
+        } else if (snap != null) {
+            // one clear way into the store, with the estimated total of the open lines
+            val open = snap.lines.count { it.status == LineStatus.NEEDED }
+            if (open > 0) {
+                GoShoppingBar(
+                    open = open,
+                    estimate = if (display.showTotal) app.necessityq.domain.ListCost.of(snap.lines, prices, itemPrices) else null,
+                    storeName = storeName,
+                    onGo = { vm.setMode(ListMode.SHOP) },
+                )
+            }
         }
     }
 
@@ -908,7 +983,7 @@ private fun recommendationInfo(s: Suggestion, stats: ItemStats?, favorites: Set<
 private fun GroupHeader(row: ListRow.Header, onToggle: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).clickable(onClick = onToggle)
-            .padding(start = 18.dp, end = 12.dp, top = 12.dp, bottom = 2.dp),
+            .padding(start = 20.dp, end = 12.dp, top = 14.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         row.category?.let {
@@ -917,7 +992,7 @@ private fun GroupHeader(row: ListRow.Header, onToggle: () -> Unit) {
         }
         Text(row.title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.width(6.dp))
-        Text("${row.count}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outlineVariant)
+        Text("${row.count}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.weight(1f))
         Icon(
             if (row.collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
@@ -1073,7 +1148,7 @@ private fun ProductTile(
                 border = when {
                     line.missing -> BorderStroke(2.dp, MaterialTheme.colorScheme.secondary)
                     controlsOpen && controlsMode -> BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
-                    else -> null
+                    else -> BorderStroke(1.dp, NqTheme.colors.hairline)
                 },
                 colors = CardDefaults.cardColors(
                     containerColor = when {
@@ -1082,20 +1157,16 @@ private fun ProductTile(
                         else -> MaterialTheme.colorScheme.surface
                     },
                 ),
-                elevation = CardDefaults.cardElevation(defaultElevation = if (lifted) 10.dp else 1.5.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = if (lifted) 10.dp else 0.dp),
             ) {
-                Row(Modifier.height(IntrinsicSize.Min)) {
-                    // auto-generated lines get a striped (lighter) strip, manual ones a solid one
-                    Box(
-                        Modifier.width(6.dp).fillMaxHeight()
-                            .background(categoryColor(line.category).copy(alpha = if (line.isAuto) 0.45f else 1f)),
-                    )
-                    Column(Modifier.weight(1f).clickable(onClick = onTap).padding(start = 4.dp, end = 12.dp, top = 8.dp, bottom = 6.dp)) {
+                Row {
+                    // the category is shown by the group header's dot; auto-generated lines carry an "אוטומטי" tag
+                    Column(Modifier.weight(1f).clickable(onClick = onTap).padding(start = 6.dp, end = 12.dp, top = 8.dp, bottom = 6.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             dragHandle?.invoke()
                             val checkSize = if (shopping) 48.dp else 40.dp
                             Box(Modifier.size(checkSize).clip(CircleShape).clickable(onClick = onBought), contentAlignment = Alignment.Center) {
-                                Box(Modifier.size(checkSize - 16.dp).border(2.5.dp, MaterialTheme.colorScheme.primary, CircleShape))
+                                Box(Modifier.size(checkSize - 18.dp).border(2.dp, MaterialTheme.colorScheme.outline, CircleShape))
                             }
                             Spacer(Modifier.width(6.dp))
                             Column(Modifier.weight(1f)) {
@@ -1111,8 +1182,8 @@ private fun ProductTile(
                                         Spacer(Modifier.width(8.dp))
                                         Text(
                                             line.quantity!!.format() + (weight?.let { "  " + app.necessityq.domain.PieceWeights.label(it) } ?: ""),
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.clip(NqShapes.Pill)
                                                 .background(MaterialTheme.colorScheme.surfaceVariant)
                                                 .padding(horizontal = 8.dp, vertical = 1.dp),
@@ -1167,34 +1238,13 @@ private fun ProductTile(
     }
 }
 
-/** Estimated cost of the open lines, from the prices the household entered. */
-@Composable
-private fun TotalBar(estimate: app.necessityq.domain.ListCostEstimate) {
-    Row(
-        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text("מחיר משוער", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(
-                when {
-                    estimate.pricedLines == 0 -> "אין עדיין מחירים — בוחרים סניף (תפריט ← סניפים ומחירים) או מזינים מחיר בדף המוצר"
-                    estimate.complete -> "לכל ${estimate.openLines} הפריטים"
-                    else -> "לפי ${estimate.pricedLines} מתוך ${estimate.openLines} פריטים"
-                },
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-        val prefix = if (estimate.complete) "" else "~"
-        Text(
-            when {
-                estimate.pricedLines == 0 -> "₪ —"
-                estimate.isRange -> prefix + "₪%.0f–%.0f".format(estimate.low, estimate.high)
-                else -> prefix + "₪%.2f".format(estimate.low)
-            },
-            fontWeight = FontWeight.ExtraBold,
-            style = MaterialTheme.typography.titleLarge,
-        )
+/** The estimated cost as one short text: "₪184", "~₪184" when not every line has a price, or a range. */
+private fun costText(estimate: app.necessityq.domain.ListCostEstimate): String {
+    val prefix = if (estimate.complete) "" else "~"
+    return when {
+        estimate.pricedLines == 0 -> "₪ —"
+        estimate.isRange -> prefix + "₪%.0f–%.0f".format(estimate.low, estimate.high)
+        else -> prefix + "₪%.0f".format(estimate.low)
     }
 }
 
@@ -1452,7 +1502,7 @@ fun PriceSlot(
             .background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 8.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.End,
     ) {
-        Text(main, fontWeight = FontWeight.ExtraBold)
+        Text(main, fontWeight = FontWeight.SemiBold)
         Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
@@ -1529,65 +1579,6 @@ private fun CompletionLabel(text: String) {
     )
 }
 
-/** Collapsible title of a suggestion section, with its count. */
-@Composable
-private fun SectionToggle(title: String, count: Int, expanded: Boolean, onToggle: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(start = 18.dp, end = 12.dp, top = 10.dp, bottom = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.width(6.dp))
-        Text("$count", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outlineVariant)
-        Spacer(Modifier.weight(1f))
-        Icon(
-            if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-            contentDescription = if (expanded) "כיווץ" else "הרחבה",
-            tint = MaterialTheme.colorScheme.outline,
-        )
-    }
-}
-
-/**
- * "Running out soon" suggestion: tap the body to add it; the reason ("usually every 5 days · bought
- * 4 days ago") sits under the name; ✕ is a full-size touch target so dismissing never adds by mistake.
- */
-@Composable
-private fun RunningLowChip(s: Suggestion, info: String, onAdd: () -> Unit, onDismiss: () -> Unit) {
-    Card(
-        onClick = onAdd,
-        shape = NqShapes.Tile,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
-    ) {
-        Row(
-            Modifier.widthIn(max = 280.dp).padding(start = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Default.Add, contentDescription = "הוסף לרשימה", Modifier.size(18.dp))
-            Column(Modifier.padding(start = 6.dp).weight(1f, fill = false)) {
-                Text(
-                    s.identity.displayName + (s.quantity?.let { " · " + it.format() } ?: ""),
-                    style = MaterialTheme.typography.labelLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (info.isNotBlank()) {
-                    Text(
-                        info,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.75f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-            IconButton(onClick = onDismiss) {
-                Icon(Icons.Default.Close, contentDescription = "לא עכשיו", Modifier.size(18.dp))
-            }
-        }
-    }
-}
-
 /** Chips in two rows that scroll sideways, so suggestions never push the list off the screen. */
 @Composable
 private fun <T> TwoRowStrip(
@@ -1611,6 +1602,423 @@ private fun <T> TwoRowStrip(
             },
         ) { i ->
             Box(contentAlignment = Alignment.Center) { chip(entries[i]) }
+        }
+    }
+}
+
+// ---------- redesign building blocks ----------
+
+/** "הכנת רשימה | בקנייה" as one segmented switch: the two stages of using the list. */
+@Composable
+fun ModeSwitch(shopping: Boolean, onSelect: (ListMode) -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier.fillMaxWidth().clip(NqShapes.Field).background(NqTheme.colors.segmentTrack).padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        listOf(ListMode.PLAN, ListMode.SHOP).forEach { m ->
+            val selected = (m == ListMode.SHOP) == shopping
+            Row(
+                Modifier.weight(1f).height(40.dp).clip(RoundedCornerShape(12.dp))
+                    .background(if (selected) MaterialTheme.colorScheme.surface else Color.Transparent)
+                    .selectable(selected = selected, role = Role.Tab, onClick = { onSelect(m) }),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (m == ListMode.SHOP) {
+                    Icon(
+                        Icons.Default.ShoppingCart, null, Modifier.size(16.dp),
+                        tint = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text(
+                    m.label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                    color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/** Green header while shopping: the store (tap to change), how much is already in the cart and what is left to pay. */
+@Composable
+private fun ShopHeader(
+    storeName: String?,
+    done: Int,
+    open: Int,
+    remaining: app.necessityq.domain.ListCostEstimate?,
+    onBack: () -> Unit,
+    onStore: () -> Unit,
+    actions: @Composable () -> Unit,
+) {
+    val c = NqTheme.colors
+    val total = done + open
+    Column(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp))
+            .background(c.shopHeader)
+            .padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "חזרה להכנת רשימה", tint = c.onShopHeader)
+            }
+            Column(
+                Modifier.weight(1f).clip(NqShapes.Panel).clickable(onClickLabel = "החלפת חנות", onClick = onStore)
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+            ) {
+                Text(
+                    storeName ?: "בקנייה",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = c.onShopHeader,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    if (storeName == null) "בחירת חנות ✎" else "החלפת חנות ✎",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = c.onShopHeaderMuted,
+                )
+            }
+            actions()
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            Text("$done", color = c.onShopHeader, fontWeight = FontWeight.Bold, fontSize = 30.sp)
+            Text(
+                " / $total בעגלה",
+                color = c.onShopHeaderMuted,
+                fontSize = 17.sp,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+            Spacer(Modifier.weight(1f))
+            if (remaining != null && remaining.pricedLines > 0 && open > 0) {
+                Text(
+                    "נשארו " + costText(remaining),
+                    color = c.onShopHeaderMuted,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(bottom = 5.dp),
+                )
+            }
+        }
+        // progress of the trip; drawn with two boxes so it reads the same on every Material version
+        Box(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp).height(8.dp)
+                .clip(NqShapes.Pill).background(Color.White.copy(alpha = 0.2f))
+                .semantics { contentDescription = "$done מתוך $total בעגלה" },
+        ) {
+            val fraction = if (total == 0) 0f else done.toFloat() / total
+            if (fraction > 0f) {
+                Box(Modifier.fillMaxWidth(fraction).fillMaxHeight().clip(NqShapes.Pill).background(c.shopProgress))
+            }
+        }
+    }
+}
+
+/** The quick-add box: white, rounded, a scan button when empty and a clear "הוספה" button once something is typed. */
+@Composable
+private fun QuickAddField(
+    query: String,
+    onChange: (String) -> Unit,
+    onSubmit: () -> Unit,
+    onClear: () -> Unit,
+    onScan: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedTextField(
+        value = query,
+        onValueChange = onChange,
+        modifier = modifier.fillMaxWidth(),
+        placeholder = { Text("מה חסר? למשל: 2 קוטג' 5%", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+        trailingIcon = {
+            if (query.isBlank()) {
+                IconButton(onClick = onScan) {
+                    Box(
+                        Modifier.size(40.dp).clip(NqShapes.Panel).background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Default.QrCodeScanner, contentDescription = "הוספה בסריקת ברקוד", tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 6.dp)) {
+                    IconButton(onClick = onClear) { Icon(Icons.Default.Close, contentDescription = "מחיקת הטקסט") }
+                    Button(
+                        onClick = onSubmit,
+                        shape = NqShapes.Panel,
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        modifier = Modifier.height(40.dp),
+                    ) { Text("הוספה") }
+                }
+            }
+        },
+        singleLine = true,
+        shape = NqShapes.Field,
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedContainerColor = MaterialTheme.colorScheme.surface,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+            focusedBorderColor = MaterialTheme.colorScheme.primary,
+            unfocusedBorderColor = NqTheme.colors.hairline,
+        ),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { onSubmit() }),
+    )
+}
+
+/** Under the quick-add box: what will be added (name · amount · group), or that it is already on the list. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun QuickAddPreview(parsed: app.necessityq.domain.ParsedEntry?, matches: Int, modifier: Modifier = Modifier) {
+    if (matches > 0) {
+        Text(
+            "כבר ברשימה ($matches). \"הוספה\" תוסיף רק כמות שכתבתם.",
+            modifier,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+    if (parsed == null) return
+    FlowRow(
+        modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            "יתווסף:",
+            Modifier.padding(vertical = 3.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        PreviewPill(parsed.item.displayName, MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer, bold = true)
+        parsed.quantity?.let { PreviewPill(it.format(), MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.onSurface) }
+        Text(
+            "· " + parsed.item.category.label,
+            Modifier.padding(vertical = 3.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun PreviewPill(text: String, background: Color, ink: Color, bold: Boolean = false) {
+    Text(
+        text,
+        Modifier.clip(NqShapes.Pill).background(background).border(1.dp, NqTheme.colors.hairline, NqShapes.Pill)
+            .padding(horizontal = 10.dp, vertical = 3.dp),
+        color = ink,
+        fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal,
+        style = MaterialTheme.typography.bodySmall,
+        maxLines = 1,
+    )
+}
+
+/** Title of a suggestion section: tap to fold it; "להוסיף הכל" when the section offers it. */
+@Composable
+private fun SuggestionHeader(
+    title: String,
+    icon: ImageVector,
+    iconTint: Color,
+    count: Int,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onAddAll: (() -> Unit)?,
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            Modifier.weight(1f).clip(NqShapes.Panel).clickable(onClick = onToggle).padding(horizontal = 4.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.width(6.dp))
+            Text("$count", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.width(2.dp))
+            Icon(
+                if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = if (expanded) "כיווץ" else "הרחבה",
+                tint = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        if (expanded && onAddAll != null) {
+            TextButton(onClick = onAddAll) { Text("להוסיף הכל", fontWeight = FontWeight.SemiBold) }
+        }
+    }
+}
+
+/**
+ * "Running out soon" card: name and usual amount, the reason in an amber note, a clear "לרשימה" button,
+ * and ✕ as its own full-size target so dismissing never adds by mistake.
+ */
+@Composable
+private fun RunningLowCard(s: Suggestion, info: String, onAdd: () -> Unit, onDismiss: () -> Unit) {
+    val name = s.identity.displayName
+    Column(
+        Modifier.width(196.dp).clip(NqShapes.Tile).background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, NqTheme.colors.hairline, NqShapes.Tile)
+            .padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row {
+            Column(Modifier.weight(1f).padding(top = 10.dp)) {
+                Text(name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                s.quantity?.let {
+                    Text(it.format(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            IconButton(onClick = onDismiss, modifier = Modifier.size(44.dp)) {
+                Icon(Icons.Default.Close, contentDescription = "לא עכשיו: $name", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Column(Modifier.padding(end = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (info.isNotBlank()) {
+                Text(
+                    info,
+                    Modifier.fillMaxWidth().clip(NqShapes.Inset).background(MaterialTheme.colorScheme.secondaryContainer)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Row(
+                Modifier.fillMaxWidth().height(44.dp).clip(NqShapes.Panel).background(MaterialTheme.colorScheme.primaryContainer)
+                    .clickable(role = Role.Button, onClickLabel = "הוספת $name לרשימה", onClick = onAdd),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                Spacer(Modifier.width(6.dp))
+                Text("לרשימה", color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+/** Bottom of the list while preparing: one button into the store, with the count and the estimated total. */
+@Composable
+private fun GoShoppingBar(open: Int, estimate: app.necessityq.domain.ListCostEstimate?, storeName: String?, onGo: () -> Unit) {
+    val details = listOfNotNull(
+        if (open == 1) "פריט אחד" else "$open פריטים",
+        estimate?.takeIf { it.pricedLines > 0 }?.let { costText(it) },
+        storeName?.let { "ב$it" },
+    ).joinToString(" · ")
+    Box(
+        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().height(56.dp).clip(NqShapes.Field).background(MaterialTheme.colorScheme.primary)
+                .clickable(role = Role.Button, onClick = onGo).padding(horizontal = 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("יוצאים לקנות", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.SemiBold)
+                Text(
+                    details,
+                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f),
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary)
+        }
+    }
+}
+
+/** Bottom of the list while shopping: scan a product, or finish and go back to preparing. */
+@Composable
+private fun ShopBottomBar(onScan: () -> Unit, onFinish: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(horizontal = 16.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        OutlinedButton(
+            onClick = onScan,
+            modifier = Modifier.weight(1f).height(56.dp),
+            shape = NqShapes.Field,
+            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary),
+        ) {
+            Icon(Icons.Default.QrCodeScanner, contentDescription = null, Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("סריקת מוצר")
+        }
+        Button(onClick = onFinish, modifier = Modifier.weight(1f).height(56.dp), shape = NqShapes.Field) {
+            Text("סיום קנייה")
+        }
+    }
+}
+
+/**
+ * "מתכונים ברשימה": each recipe whose ingredients are on the list, with its servings. Changing them updates the
+ * amounts on the list (after a short pause between taps); ✕ takes the recipe's ingredients off the list.
+ */
+@Composable
+private fun RecipesOnListCard(recipes: List<Pair<Dish, Int>>, onServings: (Dish, Int) -> Unit, onRemove: (Dish) -> Unit) {
+    Column(
+        Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().clip(NqShapes.Tile)
+            .background(MaterialTheme.colorScheme.surface).border(1.dp, NqTheme.colors.hairline, NqShapes.Tile)
+            .padding(start = 14.dp, end = 4.dp, top = 10.dp, bottom = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Restaurant, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("מתכונים ברשימה", style = MaterialTheme.typography.titleSmall)
+        }
+        recipes.forEach { (dish, count) ->
+            androidx.compose.runtime.key(dish.id) { RecipeOnListRow(dish, count, onServings, onRemove) }
+        }
+    }
+}
+
+@Composable
+private fun RecipeOnListRow(dish: Dish, count: Int, onServings: (Dish, Int) -> Unit, onRemove: (Dish) -> Unit) {
+    val listed = dish.listServings ?: dish.plannedServings
+    var pending by remember(dish.id, listed) { mutableIntStateOf(listed) }
+    LaunchedEffect(pending) {
+        if (pending != listed) {
+            kotlinx.coroutines.delay(700)
+            onServings(dish, pending)
+        }
+    }
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(dish.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                if (count == 1) "פריט אחד ברשימה" else "$count פריטים ברשימה",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Row(
+            Modifier.clip(NqShapes.Panel).background(MaterialTheme.colorScheme.surfaceVariant),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = { pending = (pending + 1).coerceAtMost(40) }, modifier = Modifier.size(40.dp)) {
+                Icon(Icons.Default.Add, contentDescription = "עוד מנה: ${dish.name}", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+            }
+            Text("$pending מנות", fontWeight = FontWeight.SemiBold, modifier = Modifier.widthIn(min = 56.dp), textAlign = TextAlign.Center)
+            IconButton(onClick = { pending = (pending - 1).coerceAtLeast(1) }, modifier = Modifier.size(40.dp), enabled = pending > 1) {
+                Icon(Icons.Default.Remove, contentDescription = "מנה פחות: ${dish.name}", Modifier.size(18.dp))
+            }
+        }
+        IconButton(onClick = { onRemove(dish) }) {
+            Icon(Icons.Default.Close, contentDescription = "הסרת ${dish.name} מהרשימה", tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

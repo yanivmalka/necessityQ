@@ -14,10 +14,13 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.necessityq.R
 import app.necessityq.domain.Category
 import app.necessityq.domain.TagKind
 
@@ -30,10 +33,10 @@ import app.necessityq.domain.TagKind
 /** Colours that are the same in every theme. */
 object NqPalette {
     /** Reveal behind a tile swiped left: bought. */
-    val SwipeBought = Color(0xFF00875A)
+    val SwipeBought = Color(0xFF0B6E4F)
 
     /** Reveal behind a tile swiped right while shopping: missing. */
-    val SwipeMissing = Color(0xFFE8590C)
+    val SwipeMissing = Color(0xFFB45309)
 
     /** Reveal behind a tile swiped right while preparing: delete. */
     val SwipeDelete = Color(0xFFD92D20)
@@ -87,6 +90,18 @@ class NqColors(private val dark: Boolean) {
 
     /** Double tick of a message that was read; lighter on dark so it shows on the dark bubbles. */
     val readBlue: Color = if (dark) Color(0xFF4DABF7) else Color(0xFF1570EF)
+
+    /** Hairline border around cards and fields. */
+    val hairline: Color = if (dark) Color(0xFF2E3430) else Color(0xFFECE9E1)
+
+    /** Background of the segmented mode switch. */
+    val segmentTrack: Color = if (dark) Color(0xFF262B28) else Color(0xFFE9E6DD)
+
+    /** Header of the shopping screen and the text on it. */
+    val shopHeader: Color = if (dark) Color(0xFF0F5139) else Color(0xFF0B6E4F)
+    val onShopHeader: Color = Color.White
+    val onShopHeaderMuted: Color = if (dark) Color(0xFFB7DCC8) else Color(0xFFCFE7DB)
+    val shopProgress: Color = Color(0xFFFFD8A8)
 }
 
 private val LocalNqColors = staticCompositionLocalOf { NqColors(dark = false) }
@@ -117,64 +132,121 @@ object NqShapes {
     val Pill = RoundedCornerShape(50)
 }
 
-/** Product names on tiles: bold and large in every theme. */
-val ProductNameStyle = TextStyle(fontWeight = FontWeight.ExtraBold, fontSize = 21.sp)
+/** Rubik: a rounded sans with full Hebrew support (SIL OFL, see third_party/rubik). */
+val Rubik = FontFamily(
+    Font(R.font.rubik_400, FontWeight.Normal),
+    Font(R.font.rubik_500, FontWeight.Medium),
+    Font(R.font.rubik_600, FontWeight.SemiBold),
+    Font(R.font.rubik_700, FontWeight.Bold),
+)
+
+/** Product names on tiles: clear and a little larger than body text. */
+val ProductNameStyle = TextStyle(fontFamily = Rubik, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+
+/*
+ * "Market" palette: a warm off-white ground, white cards with a hairline border, one deep green for
+ * every main action and amber only for "running out", deals and missing items.
+ */
+private val MarketLight = lightColorScheme(
+    primary = Color(0xFF0B6E4F),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFE3F1EA),
+    onPrimaryContainer = Color(0xFF08513A),
+    secondary = Color(0xFFB45309),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFFDF0E1),
+    onSecondaryContainer = Color(0xFF8A4108),
+    tertiary = Color(0xFF3B5BDB),
+    onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFEEF2FF),
+    onTertiaryContainer = Color(0xFF3B4AA8),
+    background = Color(0xFFF6F4EE),
+    onBackground = Color(0xFF1B1F1C),
+    surface = Color.White,
+    onSurface = Color(0xFF1B1F1C),
+    surfaceVariant = Color(0xFFF0EEE8),
+    onSurfaceVariant = Color(0xFF545B56),
+    surfaceContainerLowest = Color.White,
+    surfaceContainerLow = Color(0xFFFBFAF7),
+    surfaceContainer = Color.White,
+    surfaceContainerHigh = Color.White,
+    surfaceContainerHighest = Color.White,
+    outline = Color(0xFF7A817C),
+    outlineVariant = Color(0xFFE4E1D8),
+    error = Color(0xFFC92A2A),
+)
+
+private val MarketDark = darkColorScheme(
+    primary = Color(0xFF7FD1A8),
+    onPrimary = Color(0xFF00391F),
+    primaryContainer = Color(0xFF0F5139),
+    onPrimaryContainer = Color(0xFFC7EBD8),
+    secondary = Color(0xFFF5B26B),
+    onSecondary = Color(0xFF4A2800),
+    secondaryContainer = Color(0xFF5A3209),
+    onSecondaryContainer = Color(0xFFFDE3C6),
+    tertiary = Color(0xFFA5B4FC),
+    onTertiary = Color(0xFF1E2A78),
+    tertiaryContainer = Color(0xFF2B3480),
+    onTertiaryContainer = Color(0xFFE0E6FF),
+    background = Color(0xFF121513),
+    onBackground = Color(0xFFE6E9E7),
+    surface = Color(0xFF1B1F1C),
+    onSurface = Color(0xFFE6E9E7),
+    surfaceVariant = Color(0xFF262B28),
+    onSurfaceVariant = Color(0xFFB9C0BB),
+    surfaceContainerLowest = Color(0xFF0E110F),
+    surfaceContainerLow = Color(0xFF171A18),
+    surfaceContainer = Color(0xFF1B1F1C),
+    surfaceContainerHigh = Color(0xFF222724),
+    surfaceContainerHighest = Color(0xFF1B1F1C),
+    outline = Color(0xFF8A928C),
+    outlineVariant = Color(0xFF343A36),
+    error = Color(0xFFFF8A80),
+)
+
+private fun Typography.withFont(family: FontFamily) = Typography(
+    displayLarge = displayLarge.copy(fontFamily = family),
+    displayMedium = displayMedium.copy(fontFamily = family),
+    displaySmall = displaySmall.copy(fontFamily = family),
+    headlineLarge = headlineLarge.copy(fontFamily = family),
+    headlineMedium = headlineMedium.copy(fontFamily = family),
+    headlineSmall = headlineSmall.copy(fontFamily = family),
+    titleLarge = titleLarge.copy(fontFamily = family),
+    titleMedium = titleMedium.copy(fontFamily = family),
+    titleSmall = titleSmall.copy(fontFamily = family),
+    bodyLarge = bodyLarge.copy(fontFamily = family),
+    bodyMedium = bodyMedium.copy(fontFamily = family),
+    bodySmall = bodySmall.copy(fontFamily = family),
+    labelLarge = labelLarge.copy(fontFamily = family),
+    labelMedium = labelMedium.copy(fontFamily = family),
+    labelSmall = labelSmall.copy(fontFamily = family),
+)
 
 /**
- * Two looks:
- *  - bright (default): for supermarkets and sunlight — pure white, near-black text, saturated
- *    dark accents, bold large product names, strong outlines; never switches to dark.
- *  - system: the regular light/dark palette following the phone setting.
+ * Two looks, both in the Market palette and the Rubik typeface:
+ *  - bright (default): for supermarkets and sunlight. Always light, with larger text.
+ *  - system: regular text sizes, light or dark following the phone setting.
  */
 @Composable
 fun NecessityTheme(bright: Boolean, content: @Composable () -> Unit) {
     val dark = !bright && isSystemInDarkTheme()
-    val colors = when {
-        // modern, high-contrast: white tiles floating on a cool light-grey canvas, ink-dark text
-        bright -> lightColorScheme(
-            primary = Color(0xFF00875A),
-            onPrimary = Color.White,
-            primaryContainer = Color(0xFFD3F4E4),
-            onPrimaryContainer = Color(0xFF00301F),
-            secondary = Color(0xFFE8590C),
-            onSecondary = Color.White,
-            secondaryContainer = Color(0xFFFFE8D9),
-            onSecondaryContainer = Color(0xFF3D1300),
-            tertiary = Color(0xFF3B5BDB),
-            onTertiary = Color.White,
-            background = Color(0xFFF2F4F7),
-            onBackground = Color(0xFF101828),
-            surface = Color.White,
-            onSurface = Color(0xFF101828),
-            surfaceVariant = Color(0xFFEEF1F5),
-            onSurfaceVariant = Color(0xFF344054),
-            surfaceContainer = Color.White,
-            surfaceContainerLow = Color(0xFFF9FAFB),
-            surfaceContainerHigh = Color.White,
-            outline = Color(0xFF667085),
-            outlineVariant = Color(0xFF98A2B3),
-            error = Color(0xFFD92D20),
-        )
-        dark -> darkColorScheme(primary = Color(0xFF81C784), secondary = Color(0xFFFFB74D))
-        else -> lightColorScheme(primary = Color(0xFF2E7D32), secondary = Color(0xFFEF6C00), background = Color(0xFFF7FAF5))
-    }
+    val colors = if (dark) MarketDark else MarketLight
     val base = Typography()
-    val typography = if (bright) {
-        base.copy(
-            titleLarge = base.titleLarge.copy(fontWeight = FontWeight.ExtraBold, fontSize = 24.sp),
-            titleMedium = base.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 19.sp),
-            titleSmall = base.titleSmall.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp),
-            bodyLarge = base.bodyLarge.copy(fontSize = 18.sp),
-            bodyMedium = base.bodyMedium.copy(fontSize = 16.sp, fontWeight = FontWeight.Medium),
-            bodySmall = base.bodySmall.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium),
-            labelLarge = base.labelLarge.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp),
-        )
-    } else base
+    val sized = base.copy(
+        titleLarge = base.titleLarge.copy(fontWeight = FontWeight.Bold, fontSize = if (bright) 26.sp else 24.sp),
+        titleMedium = base.titleMedium.copy(fontWeight = FontWeight.SemiBold, fontSize = if (bright) 18.sp else 16.sp),
+        titleSmall = base.titleSmall.copy(fontWeight = FontWeight.SemiBold, fontSize = if (bright) 15.sp else 14.sp),
+        bodyLarge = base.bodyLarge.copy(fontSize = if (bright) 17.sp else 16.sp),
+        bodyMedium = base.bodyMedium.copy(fontSize = if (bright) 15.sp else 14.sp),
+        bodySmall = base.bodySmall.copy(fontSize = if (bright) 13.sp else 12.sp),
+        labelLarge = base.labelLarge.copy(fontWeight = FontWeight.SemiBold, fontSize = 15.sp),
+    )
     // The app is Hebrew-first: force RTL regardless of the device language.
     CompositionLocalProvider(
         LocalLayoutDirection provides LayoutDirection.Rtl,
         LocalNqColors provides NqColors(dark),
     ) {
-        MaterialTheme(colorScheme = colors, typography = typography, content = content)
+        MaterialTheme(colorScheme = colors, typography = sized.withFont(Rubik), content = content)
     }
 }
