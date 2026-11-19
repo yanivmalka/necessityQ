@@ -98,7 +98,10 @@ class ConsumptionStatsEngine(
         val dim = trips.lastOrNull { it.baseAmount != null }?.quantity?.dimension
         val knownAmounts = trips.filter { it.quantity?.dimension == dim }.mapNotNull { it.baseAmount }
         val typicalBase = if (dim == null || knownAmounts.isEmpty()) null else median(knownAmounts)
-        val typicalQuantity = Quantity.homeSized(typicalBase?.let { Quantity.fromBase(it, dim!!) })
+        // a median far beyond any home purchase of this item is a slip in the data (750 יח' of cottage cheese)
+        val typicalQuantity = QuantityNorms.homeSized(
+            latestIdentity.name, latestIdentity.category, typicalBase?.let { Quantity.fromBase(it, dim!!) },
+        )
 
         fun sizeRatio(trip: Trip): Double {
             if (trip.quantity?.dimension != dim) return 1.0

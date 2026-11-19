@@ -155,10 +155,18 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         if (next != line.quantity) changeQuantity(line, next)
     }
 
-    fun changeQuantity(line: ListLine, quantity: Quantity?) {
+    /** [approved]: the person confirmed an amount that is more than usual for the item (no "כמות חריגה" tag). */
+    fun changeQuantity(line: ListLine, quantity: Quantity?, approved: Boolean = false) {
         val (hid, _, _) = ctx() ?: return
-        launchSafe { container.service.changeQuantity(hid, line, quantity) }
+        launchSafe {
+            if (approved && quantity != null) container.service.changeQuantityApproved(hid, line, quantity)
+            else container.service.changeQuantity(hid, line, quantity)
+        }
     }
+
+    /** The household's usual amount widens what counts as usual for the item. */
+    fun quantityCheck(line: ListLine, quantity: Quantity?): app.necessityq.domain.QuantityCheck? =
+        app.necessityq.domain.QuantityNorms.check(line.name, line.category, quantity, snapshot.value?.stats?.get(line.itemId)?.typicalQuantity)
 
     /**
      * Renames the product as the user wrote it. The exact product the household chose for it (by

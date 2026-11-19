@@ -724,7 +724,8 @@ fun ListScreen(
                                 onRightSwipe = { if (shopping) vm.setMissing(line, !line.missing) else vm.delete(line) },
                                 onPlus = { vm.adjustQuantity(line, +1) },
                                 onMinus = { vm.adjustQuantity(line, -1) },
-                                onSetQuantity = { vm.changeQuantity(line, it) },
+                                onSetQuantity = { q, approved -> vm.changeQuantity(line, q, approved) },
+                                quantityCheck = { vm.quantityCheck(line, it) },
                                 onTap = {
                                     if (display.tapMode == TapMode.INFO) openItem = line
                                     else expanded = if (line.id in expanded) expanded - line.id else expanded + line.id
@@ -1183,7 +1184,8 @@ private fun ProductTile(
     onRightSwipe: () -> Unit,
     onPlus: () -> Unit,
     onMinus: () -> Unit,
-    onSetQuantity: ((Quantity?) -> Unit)? = null,
+    onSetQuantity: ((Quantity?, Boolean) -> Unit)? = null,
+    quantityCheck: (Quantity) -> app.necessityq.domain.QuantityCheck? = { null },
     onTap: () -> Unit,
     onInfo: () -> Unit,
 ) {
@@ -1283,7 +1285,7 @@ private fun ProductTile(
                                         modifier = Modifier.padding(end = 6.dp),
                                     )
                                 }
-                                if (showStepper) QuantityStepper(line.quantity, onMinus, onPlus, onSetQuantity)
+                                if (showStepper) QuantityStepper(line.quantity, onMinus, onPlus, onSetQuantity, line.displayName, quantityCheck)
                                 if (controlsMode && controlsOpen) {
                                     IconButton(onClick = onInfo) { Icon(Icons.Outlined.Info, contentDescription = "דף מידע") }
                                 }
@@ -1581,14 +1583,25 @@ fun PromoStrip(promo: String?) {
     )
 }
 
-/** Tapping the amount opens a field to type it, so a child's thousand taps on "+" is one edit, not a thousand on "−". */
+/**
+ * Tapping the amount opens a field to type it, so a child's thousand taps on "+" is one edit, not a thousand on "−".
+ * An amount above what the item is usually bought in is allowed, but only after saying so: the warning shows
+ * under the field and the button becomes "כן, זו הכמות" (the line is then not flagged as "כמות חריגה").
+ */
 @Composable
-private fun QuantityEditDialog(quantity: Quantity?, onSet: (Quantity?) -> Unit, onDismiss: () -> Unit) {
+private fun QuantityEditDialog(
+    quantity: Quantity?,
+    itemName: String,
+    check: (Quantity) -> app.necessityq.domain.QuantityCheck?,
+    onSet: (Quantity?, Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
     val unit = quantity?.unit ?: app.necessityq.domain.QuantityUnit.PIECE
     var text by remember { mutableStateOf(quantity?.let { Quantity.formatNumber(it.amount) } ?: "") }
     val amount = text.trim().replace(',', '.').toDoubleOrNull()
     val blank = text.isBlank()
-    val valid = blank || (amount != null && amount > 0.0 && Quantity(amount, unit).isHomePlausible)
+    val valid = blank || (amount != null && amount > 0.0)
+    val verdict = if (!blank && valid) check(Quantity(amount!!, unit))?.takeIf { it.isUnusual } else null
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("כמות (${unit.label})") },
@@ -1597,25 +1610,38 @@ private fun QuantityEditDialog(quantity: Quantity?, onSet: (Quantity?) -> Unit, 
                 value = text,
                 onValueChange = { text = it },
                 singleLine = true,
-                isError = !valid,
-                supportingText = { if (!valid) Text("כמות לא הגיונית לקנייה ביתית") },
+                isError = !valid || verdict?.level == app.necessityq.domain.QuantityLevel.ABSURD,
+                supportingText = {
+                    when {
+                        !valid -> Text("צריך מספר גדול מאפס")
+                        verdict != null -> Text(verdict.message(itemName), color = NqTheme.colors.tag(TagKind.LARGE_AMOUNT).second)
+                    }
+                },
                 keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal, imeAction = ImeAction.Done),
             )
         },
         confirmButton = {
             TextButton(
                 enabled = valid,
-                onClick = { onSet(if (blank) null else Quantity(amount!!, unit)); onDismiss() },
-            ) { Text("אישור") }
+                onClick = { onSet(if (blank) null else Quantity(amount!!, unit), verdict != null); onDismiss() },
+            ) { Text(if (verdict != null) "כן, זו הכמות" else "אישור") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("ביטול") } },
     )
 }
 
 @Composable
-fun QuantityStepper(quantity: Quantity?, onMinus: () -> Unit, onPlus: () -> Unit, onSet: ((Quantity?) -> Unit)? = null) {
+fun QuantityStepper(
+    quantity: Quantity?,
+    onMinus: () -> Unit,
+    onPlus: () -> Unit,
+    /** (amount, confirmed as more than usual) */
+    onSet: ((Quantity?, Boolean) -> Unit)? = null,
+    itemName: String = "",
+    check: (Quantity) -> app.necessityq.domain.QuantityCheck? = { null },
+) {
     var editing by remember { mutableStateOf(false) }
-    if (editing && onSet != null) QuantityEditDialog(quantity, onSet) { editing = false }
+    if (editing && onSet != null) QuantityEditDialog(quantity, itemName, check, onSet) { editing = false }
     Row(
         Modifier.clip(NqShapes.Pill).background(MaterialTheme.colorScheme.surfaceVariant),
         verticalAlignment = Alignment.CenterVertically,

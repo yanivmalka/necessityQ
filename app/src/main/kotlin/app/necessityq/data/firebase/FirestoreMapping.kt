@@ -65,6 +65,7 @@ internal object FirestoreMapping {
         "removedAt" to line.removedAtMillis,
         "removedReason" to line.removedReason?.name,
         "removedFrom" to line.removedFrom?.name,
+        "approvedQuantity" to quantityToMap(line.approvedQuantity),
     )
 
     fun lineFrom(doc: DocumentSnapshot): ListLine? {
@@ -92,6 +93,7 @@ internal object FirestoreMapping {
             removedAtMillis = doc.getLong("removedAt"),
             removedReason = doc.getString("removedReason")?.let { runCatching { RemoveReason.valueOf(it) }.getOrNull() },
             removedFrom = doc.getString("removedFrom")?.let { runCatching { LineStatus.valueOf(it) }.getOrNull() },
+            approvedQuantity = quantityFrom(doc.get("approvedQuantity")),
         )
     }
 

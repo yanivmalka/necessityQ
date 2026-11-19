@@ -1,7 +1,7 @@
 package app.necessityq.domain
 
 /** Kinds of badge a product tile can carry, so items are easy to tell apart at a glance. */
-enum class TagKind { ROUTINE, OCCASIONAL, SPECIAL, FAVORITE, MISSING, RECIPE, AUTO }
+enum class TagKind { ROUTINE, OCCASIONAL, SPECIAL, FAVORITE, MISSING, RECIPE, AUTO, LARGE_AMOUNT }
 
 data class ItemTag(val kind: TagKind, val label: String)
 
@@ -14,9 +14,13 @@ object ItemTags {
      *  - מתכון / תפריט: the line was derived from a recipe or the menu. With [compact] (the list) only the kind
      *    is shown, with a count when there are several ("מתכון | 2"); otherwise (the item page) each one is named.
      *  - אוטומטי: generated from past purchases (not added by a person)
+     *  - כמות חריגה: more than this item is usually bought in one trip, and nobody confirmed it ([QuantityNorms])
      */
     fun of(line: ListLine, stats: ItemStats?, favorite: Boolean, compact: Boolean = false): List<ItemTag> = buildList {
         if (line.missing) add(ItemTag(TagKind.MISSING, "חסר"))
+        if (line.status == LineStatus.NEEDED && QuantityNorms.warningFor(line, stats?.typicalQuantity) != null) {
+            add(ItemTag(TagKind.LARGE_AMOUNT, "כמות חריגה"))
+        }
         val parts = line.recipeParts.ifEmpty {
             listOfNotNull(line.recipe?.let { RecipePart(it, null, fromMenu = line.isFromMenu) })
         }

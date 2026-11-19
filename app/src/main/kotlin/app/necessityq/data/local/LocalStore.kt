@@ -33,6 +33,7 @@ internal data class LineDto(
     val position: Long = 0, val missing: Boolean = false, val recipe: String? = null,
     val removedAt: Long? = null, val removedReason: String? = null, val removedFrom: String? = null,
     val recipeParts: List<RecipePartDto> = emptyList(),
+    val approvedQuantity: QuantityDto? = null,
 )
 
 @Serializable
@@ -118,6 +119,7 @@ private fun ListLine.toDto() = LineDto(
     addedBy, addedAtMillis, updatedAtMillis, boughtAtMillis,
     position, missing, recipe, removedAtMillis, removedReason?.name, removedFrom?.name,
     recipeParts.map { RecipePartDto(it.dish, it.quantity?.toDto(), it.fromMenu) },
+    approvedQuantity?.toDto(),
 )
 
 private fun Purchase.toDto() = PurchaseDto(
@@ -136,6 +138,7 @@ private fun StateDto.toDomain(): LocalState = LocalState(
             removedReason = d.removedReason?.let { runCatching { app.necessityq.domain.RemoveReason.valueOf(it) }.getOrNull() },
             removedFrom = d.removedFrom?.let { runCatching { LineStatus.valueOf(it) }.getOrNull() },
             recipeParts = d.recipeParts.map { app.necessityq.domain.RecipePart(it.dish, it.quantity?.toDomain(), it.menu) },
+            approvedQuantity = d.approvedQuantity?.toDomain(),
         )
     },
     purchases = purchases.associate { d ->
