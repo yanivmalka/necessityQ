@@ -265,10 +265,14 @@ fun ListScreen(
         buildSections(snapshot?.lines.orEmpty(), sort, pickRanks, descending, display.chilledLast, listFilter, chatItemIds)
     }
     val searchMatches = if (searchText.isBlank()) 0 else sections.sumOf { sec -> sec.lines.count { it.status == LineStatus.NEEDED } }
-    // while searching every group is open, so matches are never hidden in a collapsed group
-    val built = remember(sections, collapsed, searchText) { buildRows(sections, if (searchText.isBlank()) collapsed else emptySet()) }
+    // while filtering (by tag, group or search) every group starts open, so matches are never hidden in a
+    // collapsed group; groups closed meanwhile are closed for this filter only — the saved state is untouched
+    val filtering = listFilter.isActive
+    var filterCollapsed by remember(listFilter) { mutableStateOf(emptySet<String>()) }
+    val shownCollapsed = if (filtering) filterCollapsed else collapsed
+    val built = remember(sections, shownCollapsed) { buildRows(sections, shownCollapsed) }
     val titledKeys = sections.filter { it.title != null }.map { it.key }.toSet()
-    val allCollapsed = titledKeys.isNotEmpty() && titledKeys.all { it in collapsed }
+    val allCollapsed = titledKeys.isNotEmpty() && titledKeys.all { it in shownCollapsed }
     LaunchedEffect(built, dragging) {
         if (!dragging) {
             rows.clear()
@@ -321,6 +325,7 @@ fun ListScreen(
             listState.animateScrollToItem(maxOf(0, target - 1))
         }
     }
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
     val reorderState = rememberReorderableLazyListState(listState) { from, to ->
         val fromIndex = rows.indexOfFirst { it.key == from.key }
         val toIndex = rows.indexOfFirst { it.key == to.key }
@@ -522,7 +527,10 @@ fun ListScreen(
             )
             Spacer(Modifier.weight(1f))
             if (titledKeys.isNotEmpty()) {
-                IconButton(onClick = { vm.setAllCollapsed(if (allCollapsed) null else titledKeys) }) {
+                IconButton(onClick = {
+                    if (filtering) filterCollapsed = if (allCollapsed) emptySet() else titledKeys
+                    else vm.setAllCollapsed(if (allCollapsed) null else titledKeys)
+                }) {
                     Icon(
                         if (allCollapsed) Icons.Default.UnfoldMore else Icons.Default.UnfoldLess,
                         contentDescription = if (allCollapsed) "פתיחת כל הקבוצות" else "כיווץ כל הקבוצות",
@@ -655,7 +663,13 @@ fun ListScreen(
             items(rows, key = { it.key }) { row ->
                 ReorderableItem(reorderState, key = row.key) { isDragging ->
                     when (row) {
-                        is ListRow.Header -> GroupHeader(row, onToggle = { vm.toggleCollapsed(row.sectionKey) })
+                        is ListRow.Header -> GroupHeader(row, onToggle = {
+                            if (filtering) {
+                                filterCollapsed = if (row.sectionKey in filterCollapsed) filterCollapsed - row.sectionKey else filterCollapsed + row.sectionKey
+                            } else {
+                                vm.toggleCollapsed(row.sectionKey)
+                            }
+                        })
                         is ListRow.Item -> {
                             val line = row.line
                             val stats = snap.stats[line.itemId]
@@ -685,8 +699,12 @@ fun ListScreen(
                                             Icons.Default.DragIndicator,
                                             contentDescription = "גרירה",
                                             tint = MaterialTheme.colorScheme.outline,
-                                            modifier = Modifier.draggableHandle(
-                                                onDragStarted = { dragging = true },
+                                            // a long press first, so a scroll that starts on the handle scrolls the list
+                                            modifier = Modifier.longPressDraggableHandle(
+                                                onDragStarted = {
+                                                    haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                                    dragging = true
+                                                },
                                                 onDragStopped = {
                                                     persistMove(line.id)
                                                     dragging = false

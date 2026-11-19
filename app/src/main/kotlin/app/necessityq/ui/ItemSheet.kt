@@ -6,6 +6,24 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.material.icons.filled.Check
@@ -107,7 +125,6 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
-import kotlin.math.roundToInt
 
 private val timeFormat = DateTimeFormatter.ofPattern("d.M HH:mm")
 private fun fmt(millis: Long) = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).format(timeFormat)
@@ -134,10 +151,7 @@ fun ItemSheet(
     val purchases by vm.purchases.collectAsStateWithLifecycle()
     val stores by vm.stores.collectAsStateWithLifecycle()
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val prices by vm.prices.collectAsStateWithLifecycle()
-    val price = prices[itemId]
     var editing by remember { mutableStateOf(false) }
-    var editingPrice by remember { mutableStateOf(false) }
     var confirmDeleteMessage by remember { mutableStateOf<ItemMessage?>(null) }
     var messageDetails by remember { mutableStateOf<ItemMessage?>(null) }
     var confirmDeleteChat by remember { mutableStateOf(false) }
@@ -171,16 +185,74 @@ fun ItemSheet(
         seenMessages = thread.size
     }
 
+    // the branch price list opens part-way; a tap on it or scrolling the page opens it fully
+    var pricesOpen by remember(itemId) { mutableStateOf(false) }
+    // pulling down closes the sheet only from a fresh drag that starts with the page already at the top —
+    // never from the tail of a scroll or fling that just reached the top
+    val dragStartedAtTop = remember { booleanArrayOf(true) }
+    val scrollGuard = remember(itemId, scroll) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.UserInput && available.y < 0) pricesOpen = true
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset =
+                if (available.y > 0 && (!dragStartedAtTop[0] || source != NestedScrollSource.UserInput)) Offset(0f, available.y) else Offset.Zero
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity =
+                if (available.y > 0 && !dragStartedAtTop[0]) Velocity(0f, available.y) else Velocity.Zero
+        }
+    }
+    // once there is a conversation, its latest messages stay docked above the message bar until the
+    // conversation itself scrolls into view
+    val density = LocalDensity.current
+    var viewportBottom by remember { mutableFloatStateOf(0f) }
+    var chatTop by remember(itemId) { mutableFloatStateOf(Float.MAX_VALUE) }
+    val chatInView = chatTop < viewportBottom - with(density) { 140.dp.toPx() }
+    val scope = rememberCoroutineScope()
+
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet) {
       // details and conversation scroll; the message bar stays pinned at the bottom of the sheet
       Column(Modifier.fillMaxWidth()) {
         Column(
-            Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(scroll).padding(horizontal = 16.dp, vertical = 4.dp),
+            Modifier.fillMaxWidth().weight(1f, fill = false)
+                .onGloballyPositioned { viewportBottom = it.boundsInRoot().bottom }
+                .pointerInput(scroll) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        dragStartedAtTop[0] = scroll.value == 0
+                    }
+                }
+                .nestedScroll(scrollGuard)
+                .verticalScroll(scroll).padding(horizontal = 16.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                if (line != null) {
+                    // bought: the same round check as on the list
+                    Box(
+                        Modifier.size(40.dp).clip(androidx.compose.foundation.shape.CircleShape)
+                            .clickable { vm.checkOff(line); onDismiss() }
+                            .semantics { contentDescription = "נקנה" },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(Modifier.size(24.dp).border(2.dp, MaterialTheme.colorScheme.outline, androidx.compose.foundation.shape.CircleShape))
+                    }
+                }
                 if (favorite) Icon(Icons.Default.Star, "מועדף", tint = NqPalette.FavoriteStar)
-                Text(line?.displayName ?: itemName, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f).padding(horizontal = 4.dp))
+                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        line?.displayName ?: itemName,
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.weight(1f, fill = false).padding(horizontal = 4.dp),
+                    )
+                    if (line != null) {
+                        IconButton(onClick = { editing = true }, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Default.Edit, contentDescription = "עריכת שם, כמות והערה", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
                 // ⋮ actions — on the left edge in Hebrew layout
                 androidx.compose.foundation.layout.Box {
                     var menu by remember { mutableStateOf(false) }
@@ -193,7 +265,7 @@ fun ItemSheet(
                         )
                         if (line != null) {
                             androidx.compose.material3.DropdownMenuItem(
-                                text = { Text(if (line.missing) "ביטול סימון חסר" else "סימון כחסר") },
+                                text = { Text(if (line.missing) "ביטול חסר" else "חסר") },
                                 leadingIcon = { Icon(Icons.Default.ReportProblem, null) },
                                 onClick = { vm.setMissing(line, !line.missing); menu = false },
                             )
@@ -216,33 +288,34 @@ fun ItemSheet(
                 androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     app.necessityq.domain.ItemTags.of(line, stats, favorite).forEach { TagBadge(it) }
                 }
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    QuantityStepper(line.quantity, onMinus = { vm.adjustQuantity(line, -1) }, onPlus = { vm.adjustQuantity(line, +1) })
-                    PriceSlot(price = null, average = null)
-                }
+                QuantityStepper(line.quantity, onMinus = { vm.adjustQuantity(line, -1) }, onPlus = { vm.adjustQuantity(line, +1) })
                 UnitChooser(line.quantity?.unit) { vm.setQuantityUnit(line, it) }
-                androidx.compose.foundation.layout.FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Button(onClick = { vm.checkOff(line); onDismiss() }) { Text("נקנה ✓") }
-                    OutlinedButton(onClick = { vm.setMissing(line, !line.missing) }) {
-                        Icon(Icons.Default.ReportProblem, null, Modifier.padding(end = 4.dp))
-                        Text(if (line.missing) "ביטול סימון חסר" else "סימון כחסר")
+                // one row: missing (a toggle — filled while marked), remove, scan (icon only)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val missingContent: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
+                        Icon(Icons.Default.ReportProblem, null, Modifier.padding(end = 4.dp).size(18.dp))
+                        Text("חסר")
+                    }
+                    if (line.missing) {
+                        androidx.compose.material3.FilledTonalButton(
+                            onClick = { vm.setMissing(line, false) },
+                            modifier = Modifier.semantics { contentDescription = "מסומן כחסר — ביטול" },
+                            content = missingContent,
+                        )
+                    } else {
+                        OutlinedButton(onClick = { vm.setMissing(line, true) }, content = missingContent)
                     }
                     OutlinedButton(onClick = { vm.delete(line); onDismiss() }) {
-                        Icon(Icons.Default.Delete, null, Modifier.padding(end = 4.dp))
+                        Icon(Icons.Default.Delete, null, Modifier.padding(end = 4.dp).size(18.dp))
                         Text("הסרה")
                     }
                     // the exact product (for price only — the name stays as written); remembered for next time
                     val scanProduct = rememberBarcodeScan(vm) { vm.linkScannedProduct(itemId, it) }
-                    OutlinedButton(onClick = scanProduct) {
-                        Icon(Icons.Default.QrCodeScanner, null, Modifier.padding(end = 4.dp))
-                        Text("סריקת המוצר")
-                    }
-                    OutlinedButton(onClick = { editing = true }) {
-                        Icon(Icons.Default.Edit, null, Modifier.padding(end = 4.dp))
-                        Text("עריכה")
+                    OutlinedButton(
+                        onClick = scanProduct,
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp),
+                    ) {
+                        Icon(Icons.Default.QrCodeScanner, contentDescription = "סריקת המוצר")
                     }
                 }
                 if (line.missing) {
@@ -255,12 +328,19 @@ fun ItemSheet(
                 Button(onClick = { vm.addByName(itemName) }) { Text("הוספה לרשימה") }
             }
 
-            // how the household buys it: always visible once there is history
-            stats?.let { s ->
-                RhythmCard(s, purchases.filter { it.itemId == itemId }.map { it.boughtAtMillis })
-            }
+            line?.note?.let { InfoLine("הערה", it) }
+
+            BranchPriceSection(
+                vm,
+                itemId = itemId,
+                name = line?.name ?: stats?.identity?.name ?: itemName,
+                variant = line?.variant ?: stats?.identity?.variant,
+                expanded = pricesOpen,
+                onExpandedChange = { pricesOpen = it },
+            )
+
             HorizontalDivider()
-            // category, source and statistics: collapsed until asked for
+            // the household's rhythm, category, source and statistics: collapsed until asked for
             Row(
                 Modifier.fillMaxWidth().clickable { detailsOpen = !detailsOpen },
                 verticalAlignment = Alignment.CenterVertically,
@@ -269,14 +349,17 @@ fun ItemSheet(
                 Icon(if (detailsOpen) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = if (detailsOpen) "כיווץ" else "הרחבה")
             }
             if (detailsOpen) {
+                stats?.let { s ->
+                    RhythmCard(s, purchases.filter { it.itemId == itemId }.map { it.boughtAtMillis })
+                }
                 InfoLine("קטגוריה", (line?.category ?: stats?.identity?.category)?.label)
                 line?.let { InfoLine("מקור", it.source.label) }
                 line?.let { InfoLine(if (it.isAuto) "נוצר עבור" else "נוסף", "${names[it.addedBy] ?: "בן/בת בית"} · ${fmt(it.addedAtMillis)}") }
                 stats?.let { s ->
                     val days = ChronoUnit.DAYS.between(s.lastPurchase, LocalDate.now())
                     InfoLine("נקנה לאחרונה", if (days <= 0) "היום" else "לפני $days ימים")
-                    InfoLine("תדירות", s.cadenceDays?.let { "בערך כל ${it.roundToInt().coerceAtLeast(1)} ימים" } ?: "אין עדיין מספיק היסטוריה")
-                    InfoLine("כמות רגילה", s.typicalQuantity?.format())
+                    // frequency and usual amount are in the rhythm card above
+                    if (s.cadenceDays == null) InfoLine("תדירות", "אין עדיין מספיק היסטוריה")
                     InfoLine("נקנה", "${s.purchaseDays} פעמים")
                 }
                 InfoLine("נקנה לאחרונה ב", lastStore)
@@ -284,19 +367,6 @@ fun ItemSheet(
                     InfoLine("שיחות שנמחקו", "${it.messages} הודעות ב-${it.threads.coerceAtLeast(1)} שיחות (נשמרו רק הספירות)")
                 }
             }
-            line?.note?.let { InfoLine("הערה", it) }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("מחיר משוער: ", fontWeight = FontWeight.Bold)
-                Text(price?.let { "₪%.2f".format(it) + unitHint(line?.quantity) } ?: "לא הוזן", Modifier.weight(1f))
-                androidx.compose.material3.TextButton(onClick = { editingPrice = true }) { Text(if (price == null) "הזנה" else "עריכה") }
-            }
-
-            BranchPriceSection(
-                vm,
-                itemId = itemId,
-                name = line?.name ?: stats?.identity?.name ?: itemName,
-                variant = line?.variant ?: stats?.identity?.variant,
-            )
 
             if (pastThreads.isNotEmpty()) {
                 HorizontalDivider()
@@ -337,7 +407,10 @@ fun ItemSheet(
                 }
             }
             HorizontalDivider()
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.onGloballyPositioned { chatTop = it.positionInRoot().y },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text("שיחה על המוצר", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 if (thread.isNotEmpty()) {
                     IconButton(onClick = { confirmDeleteChat = true }) {
@@ -389,6 +462,14 @@ fun ItemSheet(
             )
             androidx.compose.foundation.layout.Spacer(Modifier.padding(bottom = 8.dp))
         }
+        AnimatedVisibility(visible = thread.isNotEmpty() && !chatInView) {
+            DockedChatPeek(
+                vm = vm,
+                thread = thread,
+                typingHere = typing.filter { it.itemId == itemId }.map { it.name },
+                onOpen = { scope.launch { scroll.animateScrollTo(scroll.maxValue) } },
+            )
+        }
         Column(
             Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerLow)
                 .padding(horizontal = 8.dp, vertical = 6.dp),
@@ -438,15 +519,6 @@ fun ItemSheet(
     }
     messageDetails?.let { m -> MessageDetailsDialog(vm, m, onDismiss = { messageDetails = null }) }
 
-    if (editingPrice) {
-        PriceDialog(
-            initial = price,
-            unit = unitHint(line?.quantity),
-            onDismiss = { editingPrice = false },
-            onSave = { vm.setPrice(itemId, it); editingPrice = false },
-        )
-    }
-
     if (editing && line != null) {
         EditLineDialog(
             line = line,
@@ -462,6 +534,49 @@ fun ItemSheet(
     }
 }
 
+/** The latest messages of the conversation, docked above the message bar; a tap scrolls to the conversation. */
+@Composable
+private fun DockedChatPeek(vm: AppViewModel, thread: List<ItemMessage>, typingHere: List<String>, onOpen: () -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        HorizontalDivider()
+        Column(
+            Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "שיחה על המוצר · ${thread.size} הודעות",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(Icons.Default.ExpandLess, contentDescription = "מעבר לשיחה", tint = MaterialTheme.colorScheme.primary)
+            }
+            thread.takeLast(2).forEach { m ->
+                val mine = m.authorId == vm.me
+                Text(
+                    "${if (mine) "אני" else m.authorName}: ${m.preview}",
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth()
+                        .background(
+                            if (mine) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                            NqShapes.Inset,
+                        )
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                )
+            }
+            if (typingHere.isNotEmpty()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TypingDots()
+                    Text("  " + app.necessityq.domain.Typing.label(typingHere), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun InfoLine(label: String, value: String?) {
     if (value.isNullOrBlank()) return
@@ -469,46 +584,6 @@ private fun InfoLine(label: String, value: String?) {
         Text("$label: ", fontWeight = FontWeight.Bold)
         Text(value)
     }
-}
-
-/** "per unit" wording for the entered price, by the line's unit. */
-private fun unitHint(q: app.necessityq.domain.Quantity?): String = when (q?.unit) {
-    app.necessityq.domain.QuantityUnit.KILOGRAM, app.necessityq.domain.QuantityUnit.GRAM -> " לק\"ג"
-    app.necessityq.domain.QuantityUnit.LITER, app.necessityq.domain.QuantityUnit.MILLILITER -> " לליטר"
-    app.necessityq.domain.QuantityUnit.PACKAGE -> " לחבילה"
-    else -> " ליחידה"
-}
-
-@Composable
-private fun PriceDialog(initial: Double?, unit: String, onDismiss: () -> Unit, onSave: (Double?) -> Unit) {
-    var text by remember { mutableStateOf(initial?.let { "%.2f".format(it) } ?: "") }
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("מחיר משוער$unit") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedTextField(
-                    text, { text = it.filter { c -> c.isDigit() || c == '.' } },
-                    label = { Text("₪") },
-                    singleLine = true,
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal,
-                    ),
-                )
-                Text(
-                    "משמש לחישוב המחיר המשוער של הרשימה, עד שיחובר מאגר מחירים עדכני. משותף לכל בני הבית.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-        },
-        confirmButton = { androidx.compose.material3.TextButton(onClick = { onSave(text.toDoubleOrNull()) }) { Text("שמירה") } },
-        dismissButton = {
-            Row {
-                if (initial != null) androidx.compose.material3.TextButton(onClick = { onSave(null) }) { Text("מחיקה") }
-                androidx.compose.material3.TextButton(onClick = onDismiss) { Text("ביטול") }
-            }
-        },
-    )
 }
 
 /** Quick setting: sound on new messages. */
@@ -1172,20 +1247,27 @@ fun MessagesScreen(vm: AppViewModel, modifier: Modifier = Modifier, onOpen: (ite
  */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun BranchPriceSection(vm: AppViewModel, itemId: String, name: String, variant: String?) {
+private fun BranchPriceSection(
+    vm: AppViewModel,
+    itemId: String,
+    name: String,
+    variant: String?,
+    /** false = a peek at the first products; a tap (or scrolling the page) opens the full list */
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+) {
     val primary by vm.primaryBranch.collectAsStateWithLifecycle()
     val infos by vm.itemPriceInfo.collectAsStateWithLifecycle()
     val loaded by vm.branchPrices.collectAsStateWithLifecycle()
     val branch = primary ?: return
     val fallback = remember(loaded, infos, branch.id, itemId) { vm.priceInfoFor(itemId, name, variant) }
     val info = infos[itemId] ?: fallback
-    var open by remember(itemId) { mutableStateOf(false) }
     var brand by remember(itemId) { mutableStateOf<String?>(null) }
     var pct by remember(itemId) { mutableStateOf<String?>(null) }
     var showAll by remember(itemId) { mutableStateOf(false) }
 
     HorizontalDivider()
-    Row(Modifier.fillMaxWidth().clickable(enabled = info != null) { open = !open }, verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().clickable(enabled = info != null) { onExpandedChange(!expanded) }, verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("מחיר ב${branch.title}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
             Text(
@@ -1198,9 +1280,37 @@ private fun BranchPriceSection(vm: AppViewModel, itemId: String, name: String, v
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
-        if (info != null) Icon(if (open) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = if (open) "כיווץ" else "דיוק לפי מוצר")
+        if (info != null) {
+            Text(
+                if (expanded) "כווץ הכל" else "פתח הכל",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        }
     }
-    if (!open || info == null) return
+    if (info == null || info.candidates.isEmpty()) return
+
+    if (!expanded) {
+        // part-way open: the chosen product first, then the next ones, fading out; a tap opens the list
+        val peek = (listOfNotNull(info.preferred) + info.candidates.filter { it.code != info.preferred?.code }).take(3)
+        val fadeTo = MaterialTheme.colorScheme.surfaceContainerLow // the sheet's background
+        Box(Modifier.fillMaxWidth().clickable { onExpandedChange(true) }) {
+            Column {
+                peek.forEach { c -> BranchProductRow(c, chosen = info.preferred?.code == c.code, onChoose = null) }
+            }
+            if (info.candidates.size > peek.size) {
+                Box(Modifier.matchParentSize().background(Brush.verticalGradient(0.45f to Color.Transparent, 1f to fadeTo)))
+            }
+        }
+        Text(
+            if (info.candidates.size > peek.size) "עוד ${info.candidates.size - peek.size} מוצרים · נגיעה להרחבה" else "נגיעה לבחירת מוצר",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.fillMaxWidth().clickable { onExpandedChange(true) }.padding(vertical = 2.dp),
+        )
+        return
+    }
 
     Text("דיוק לפי מוצר (לא חובה) — המוצר שתבחרו יוצג ברשימה במקום הטווח.", style = MaterialTheme.typography.bodySmall)
     val brands = remember(info) { app.necessityq.domain.ItemPrices.brands(info.candidates) }
@@ -1221,24 +1331,30 @@ private fun BranchPriceSection(vm: AppViewModel, itemId: String, name: String, v
     val shown = if (showAll) filtered else filtered.take(15)
     shown.forEach { c ->
         val chosen = info.preferred?.code == c.code
-        Row(
-            Modifier.fillMaxWidth().clickable { vm.setPreferredProduct(itemId, if (chosen) null else c.code) }.padding(vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            androidx.compose.material3.RadioButton(selected = chosen, onClick = { vm.setPreferredProduct(itemId, if (chosen) null else c.code) })
-            Column(Modifier.weight(1f)) {
-                Text(c.name, fontWeight = if (chosen) FontWeight.Bold else FontWeight.Normal)
-                val range = if (c.high > c.low) " · היה ${app.necessityq.domain.PriceData.formatRange(c.low, c.high)}" else ""
-                Text(listOf(c.brand, range.removePrefix(" · ")).filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
-            }
-            Text(app.necessityq.domain.PriceData.formatPrice(c.price), fontWeight = FontWeight.Bold)
-        }
+        BranchProductRow(c, chosen, onChoose = { vm.setPreferredProduct(itemId, if (chosen) null else c.code) })
     }
     if (filtered.size > shown.size) {
         androidx.compose.material3.TextButton(onClick = { showAll = true }) { Text("הצגת כל ${filtered.size} המוצרים") }
     }
     if (info.preferred != null) {
         androidx.compose.material3.TextButton(onClick = { vm.setPreferredProduct(itemId, null) }) { Text("ביטול הבחירה — הצגת טווח בלבד") }
+    }
+}
+
+/** One product of the branch: name, brand (and past range), price; choosable when [onChoose] is given. */
+@Composable
+private fun BranchProductRow(c: app.necessityq.domain.BranchProduct, chosen: Boolean, onChoose: (() -> Unit)?) {
+    Row(
+        Modifier.fillMaxWidth().then(if (onChoose != null) Modifier.clickable(onClick = onChoose) else Modifier).padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (onChoose != null) androidx.compose.material3.RadioButton(selected = chosen, onClick = onChoose)
+        Column(Modifier.weight(1f)) {
+            Text(c.name, fontWeight = if (chosen) FontWeight.Bold else FontWeight.Normal, maxLines = if (onChoose == null) 1 else Int.MAX_VALUE)
+            val range = if (c.high > c.low) " · היה ${app.necessityq.domain.PriceData.formatRange(c.low, c.high)}" else ""
+            Text(listOf(c.brand, range.removePrefix(" · ")).filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
+        }
+        Text(app.necessityq.domain.PriceData.formatPrice(c.price), fontWeight = FontWeight.Bold)
     }
 }
 
