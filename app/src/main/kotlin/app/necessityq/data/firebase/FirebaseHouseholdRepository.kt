@@ -28,14 +28,18 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import app.necessityq.platform.AvatarCodec
 import java.security.SecureRandom
 
 /**
  * Firebase identity (anonymous, upgradable to a Google account) + household membership.
  *
- *   users/{uid}                   { householdId, displayName?, googleName?, email?, photoUrl? }
+ *   users/{uid}                   { householdId, displayName?, googleName?, email?, photoUrl?, photo?, googlePhoto? }
  *   households/{hid}              { name, joinCode, ownerId, members[], createdAt }
- *   households/{hid}/members/{uid} { displayName, email }   (each member writes only their own)
+ *   households/{hid}/members/{uid} { displayName, email, photo }   (each member writes only their own)
+ *
+ * Pictures are small Base64 JPEGs: `photo` is one the user picked, `googlePhoto` a copy of the Google
+ * account's picture (fetched once, so other members never need to reach Google for it).
  *   joinCodes/{code}              { householdId }
  *
  * A member invites others by sharing the 6-character join code; only the owner can remove
@@ -70,6 +74,7 @@ class FirebaseHouseholdRepository(
         } else {
             db.collection("users").document(uid).observe().flatMapLatest { userDoc ->
                 val account = accountFrom(userDoc)
+                cacheGooglePhoto(uid, userDoc)
                 val hid = userDoc.getString("householdId")
                 if (hid == null) {
                     flowOf<Session>(Session.SignedIn(uid, null, account))
@@ -93,7 +98,8 @@ class FirebaseHouseholdRepository(
             } else {
                 membersRef(household.id).observe().map { snap ->
                     val profiles = snap.documents.associate { it.id to (it.getString("displayName") to it.getString("email")) }
-                    Members.resolve(household, profiles)
+                    val photos = snap.documents.associate { it.id to it.getString("photo") }
+                    Members.resolve(household, profiles, photos)
                 }.catch { emit(Members.resolve(household, emptyMap())) }
             }
         }
@@ -102,11 +108,45 @@ class FirebaseHouseholdRepository(
 
     private fun accountFrom(userDoc: DocumentSnapshot): Account {
         val user = auth.currentUser
+        val custom = userDoc.getString("photo")?.takeIf { it.isNotBlank() }
+        val googleName = userDoc.getString("googleName") ?: user?.takeIf { !it.isAnonymous }?.displayName
         return Account(
-            displayName = userDoc.getString("displayName") ?: userDoc.getString("googleName") ?: user?.displayName,
+            displayName = userDoc.getString("displayName") ?: googleName,
             email = userDoc.getString("email") ?: user?.email,
             isAnonymous = user?.isAnonymous ?: true,
+            photo = custom ?: userDoc.getString("googlePhoto")?.takeIf { it.isNotBlank() },
+            googleName = googleName,
+            customPhoto = custom != null,
         )
+    }
+
+    private val photoFetches = mutableSetOf<String>()
+
+    /**
+     * Accounts that signed in with Google before pictures were kept (or whose picture changed) get a
+     * copy of the Google picture, once per session.
+     */
+    private fun cacheGooglePhoto(uid: String, userDoc: DocumentSnapshot) {
+        val user = auth.currentUser ?: return
+        if (user.isAnonymous || user.uid != uid) return
+        val url = user.photoUrl?.toString() ?: userDoc.getString("photoUrl") ?: return
+        // the picture is copied once per Google picture URL: a new URL means the picture changed
+        if (userDoc.getString("googlePhoto") != null && userDoc.getString("photoUrl") == url) return
+        if (!photoFetches.add(url)) return
+        scope.launch {
+            val photo = AvatarCodec.fromUrl(url) ?: return@launch
+            runCatching {
+                db.collection("users").document(uid).set(
+                    mapOf(
+                        "googlePhoto" to photo,
+                        "photoUrl" to url,
+                        "googleName" to user.displayName,
+                        "email" to user.email,
+                    ),
+                    SetOptions.merge(),
+                ).await()
+            }
+        }
     }
 
     /** Keeps this user's own member document (name, email) current so others see who they are. */
@@ -114,13 +154,14 @@ class FirebaseHouseholdRepository(
         val household = session.household ?: return
         if (session.userId !in household.members) return
         val name = session.account.displayName.orEmpty()
-        val key = "${household.id}|${session.userId}|$name|${session.account.email}"
+        val photo = session.account.photo
+        val key = "${household.id}|${session.userId}|$name|${session.account.email}|${photo?.hashCode()}"
         if (key == lastProfileKey) return
         lastProfileKey = key
         scope.launch {
             runCatching {
                 membersRef(household.id).document(session.userId).set(
-                    mapOf("displayName" to name, "email" to session.account.email),
+                    mapOf("displayName" to name, "email" to session.account.email, "photo" to photo),
                     SetOptions.merge(),
                 ).await()
             }.onFailure { lastProfileKey = null }
@@ -204,6 +245,7 @@ class FirebaseHouseholdRepository(
             ),
             SetOptions.merge(),
         ).await()
+        // the session then keeps a copy of the Google picture (cacheGooglePhoto)
     }
 
     override suspend fun signOut() {
@@ -215,6 +257,12 @@ class FirebaseHouseholdRepository(
         val uid = requireUid()
         db.collection("users").document(uid)
             .set(mapOf("displayName" to name.trim().ifBlank { null }), SetOptions.merge()).await()
+    }
+
+    override suspend fun updatePhoto(photo: String?) {
+        val uid = requireUid()
+        db.collection("users").document(uid)
+            .set(mapOf("photo" to (photo ?: FieldValue.delete())), SetOptions.merge()).await()
     }
 
     override suspend fun renameHousehold(name: String) {

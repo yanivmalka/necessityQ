@@ -48,6 +48,46 @@ object ImageCodec {
     fun decode(bytes: ByteArray): Bitmap? = runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
 }
 
+/**
+ * Profile pictures: a centred square, 256 px, JPEG — about 15 KB, Base64-encoded so it fits in the
+ * member's profile document and every household member sees it without extra downloads.
+ */
+object AvatarCodec {
+    private const val SIDE = 256
+
+    fun encode(bitmap: Bitmap): String {
+        val side = minOf(bitmap.width, bitmap.height)
+        val square = Bitmap.createBitmap(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side)
+        val scaled = if (side > SIDE) Bitmap.createScaledBitmap(square, SIDE, SIDE, true) else square
+        val out = ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.JPEG, 80, out)
+        return android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP)
+    }
+
+    fun decode(photo: String): Bitmap? = runCatching {
+        val bytes = android.util.Base64.decode(photo, android.util.Base64.DEFAULT)
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    }.getOrNull()
+
+    /** Downloads a Google account picture at a size that suits [SIDE] and encodes it; null when it fails. */
+    fun fromUrl(url: String): String? = runCatching {
+        // Google picture URLs end with a size directive such as "=s96-c"
+        val sized = if (Regex("=s\\d+(-c)?$").containsMatchIn(url)) url.replace(Regex("=s\\d+(-c)?$"), "=s${SIDE}-c") else url
+        val connection = (java.net.URL(sized).openConnection() as java.net.HttpURLConnection).apply {
+            connectTimeout = 15_000
+            readTimeout = 20_000
+            instanceFollowRedirects = true
+        }
+        try {
+            check(connection.responseCode == 200)
+            val bitmap = connection.inputStream.use { BitmapFactory.decodeStream(it) } ?: return null
+            encode(bitmap)
+        } finally {
+            connection.disconnect()
+        }
+    }.getOrNull()
+}
+
 /** Short voice messages: AAC, mono, low bit-rate — about 3 KB per second. */
 class VoiceRecorder(private val context: Context) {
     class Recording(val bytes: ByteArray, val durationMs: Long, val waveform: List<Int>)

@@ -87,6 +87,12 @@ class MainActivity : ComponentActivity() {
             NecessityTheme(bright) { Root(vm) }
         }
     }
+
+    override fun onStart() {
+        super.onStart()
+        // Android often keeps the app in memory, so "opening" it is usually a return to the foreground
+        vm.onForeground()
+    }
 }
 
 /** Screens of the app. The first four are the bottom-bar tabs; the rest open from the "הבית" hub. */

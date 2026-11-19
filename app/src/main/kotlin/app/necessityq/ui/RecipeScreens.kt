@@ -50,6 +50,8 @@ import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.AssistChip
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -191,6 +193,8 @@ fun RecipeScreen(vm: AppViewModel, dishId: String, onBack: () -> Unit, onEdit: (
         val openLines = lines.filter { it.status == LineStatus.NEEDED }.associateBy { it.itemId }
         val ownIds = onList.map { it.itemId }.toSet()
         val steps = remember(dish.instructions) { Recipes.steps(dish.instructions) }
+        var importingMethod by remember(dish.id) { mutableStateOf(false) }
+        if (importingMethod) ImportMethodSheet(vm, dish, onDismiss = { importingMethod = false })
 
         // servings are remembered on the dish; once the recipe is on the list they also update the list (after a short pause)
         LaunchedEffect(servings) {
@@ -255,6 +259,7 @@ fun RecipeScreen(vm: AppViewModel, dishId: String, onBack: () -> Unit, onEdit: (
                     done = doneSteps,
                     onToggle = { i -> if (i in doneSteps) doneSteps.remove(i) else doneSteps.add(i) },
                     onWrite = onEdit,
+                    onImport = { importingMethod = true },
                 )
             }
 
@@ -606,11 +611,21 @@ private fun StateBadge(state: IngredientState, name: String, onClick: () -> Unit
 
 /** The method as numbered steps; tapping one marks it done while cooking. */
 @Composable
-private fun StepsSection(steps: List<String>, done: List<Int>, onToggle: (Int) -> Unit, onWrite: () -> Unit) {
+private fun StepsSection(steps: List<String>, done: List<Int>, onToggle: (Int) -> Unit, onWrite: () -> Unit, onImport: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (steps.isEmpty()) {
             DetailCard {
                 Text("עוד אין אופן הכנה למתכון הזה.", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "מאגר צמרת נותן רק את ההרכב של המאכל. אפשר למצוא מתכון ברשת ולייבא ממנו את אופן ההכנה, או לכתוב אותו.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Button(onClick = onImport) {
+                    Icon(Icons.Default.Link, contentDescription = null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("ייבוא אופן הכנה מהרשת")
+                }
                 OutlinedButton(onClick = onWrite) {
                     Icon(Icons.Default.Edit, contentDescription = null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
@@ -912,6 +927,15 @@ fun RecipeSearchScreen(vm: AppViewModel, onBack: () -> Unit, onOpen: (String) ->
     }
     val visible = hits.take(shown)
     val typing = query.trim() != debounced
+    // a result opens as a preview first; only "הוספה למתכונים שלי" saves it
+    var preview by remember { mutableStateOf<NutritionFood?>(null) }
+    var importing by remember { mutableStateOf(false) }
+    preview?.let { food ->
+        RecipePreviewSheet(vm, food, imported = null, onDismiss = { preview = null }, onSaved = { id -> preview = null; onOpen(id) })
+    }
+    if (importing) {
+        LinkImportSheet(vm, onDismiss = { importing = false }, onSaved = { id -> importing = false; onOpen(id) })
+    }
 
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         TopAppBar(
@@ -934,6 +958,11 @@ fun RecipeSearchScreen(vm: AppViewModel, onBack: () -> Unit, onOpen: (String) ->
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             SearchScope.entries.forEach { s -> FilterChip(selected = scope == s, onClick = { scope = s }, label = { Text(s.label) }) }
+            AssistChip(
+                onClick = { importing = true },
+                label = { Text("ייבוא מקישור") },
+                leadingIcon = { Icon(Icons.Default.Link, contentDescription = null, Modifier.size(18.dp)) },
+            )
             if (scope != SearchScope.MINE && hasComposite) {
                 FilterChip(selected = allFoods, onClick = { allFoods = !allFoods }, label = { Text("גם מזונות בודדים") })
             }
@@ -979,7 +1008,7 @@ fun RecipeSearchScreen(vm: AppViewModel, onBack: () -> Unit, onOpen: (String) ->
                 items(visible, key = { h -> when (h) { is RecipeHit.Mine -> "m_" + h.dish.id; is RecipeHit.Food -> "f_" + h.food.code } }) { hit ->
                     when (hit) {
                         is RecipeHit.Mine -> MineCard(hit.dish) { onOpen(hit.dish.id) }
-                        is RecipeHit.Food -> FoodCard(hit.food) { vm.addDishFromNutrition(hit.food)?.let(onOpen) }
+                        is RecipeHit.Food -> FoodCard(hit.food) { preview = hit.food }
                     }
                 }
                 if (hits.size > shown) {
@@ -990,7 +1019,7 @@ fun RecipeSearchScreen(vm: AppViewModel, onBack: () -> Unit, onOpen: (String) ->
                 if (visible.any { it is RecipeHit.Food }) {
                     item {
                         Text(
-                            "מקור: מאגר צמרת, משרד הבריאות (data.gov.il). בחירה במאכל שומרת אותו במתכונים שלך.",
+                            "מקור: מאגר צמרת, משרד הבריאות (data.gov.il). בחירה במאכל מציגה אותו, והוא נשמר רק ב\"הוספה למתכונים שלי\".",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
