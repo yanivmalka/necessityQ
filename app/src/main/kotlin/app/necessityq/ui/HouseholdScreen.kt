@@ -1,6 +1,20 @@
 package app.necessityq.ui
 
 import android.content.Intent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,6 +66,20 @@ import app.necessityq.domain.Household
 import app.necessityq.domain.Member
 import app.necessityq.domain.MemberRole
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.sp
+import app.necessityq.platform.AvatarCodec
+import app.necessityq.platform.ImageCodec
 import kotlin.math.roundToInt
 
 // ---------- Household: participants, account, updates ----------
@@ -87,6 +115,7 @@ fun HouseholdScreen(
             Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (vm.supportsAccounts) AccountCard(vm, account)
             if (vm.isShared) {
                 SectionTitle("קוד הצטרפות")
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -193,12 +222,7 @@ private fun SectionTitle(text: String) = Text(text, style = MaterialTheme.typogr
 @Composable
 private fun MemberRow(member: Member, isMe: Boolean, canRemove: Boolean, onRemove: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Box(
-            Modifier.size(40.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(member.displayName.trim().firstOrNull()?.toString() ?: "?", style = MaterialTheme.typography.titleMedium)
-        }
+        ProfileAvatar(member.displayName, member.photo, size = 40.dp)
         Column(Modifier.weight(1f)) {
             Text(member.displayName + if (isMe) " (את/ה)" else "")
             val sub = listOfNotNull(if (member.role == MemberRole.OWNER) "מנהל הבית" else null, member.email).joinToString(" · ")
@@ -217,14 +241,70 @@ fun AccountCard(vm: AppViewModel, account: Account) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var editingName by remember { mutableStateOf(false) }
+    var photoMenu by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) scope.launch {
+            val photo = withContext(Dispatchers.IO) { ImageCodec.fromUri(context, uri)?.let(AvatarCodec::encode) }
+            if (photo != null) vm.updatePhoto(photo) else vm.reportError("לא הצלחנו לקרוא את התמונה")
+        }
+    }
 
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SectionTitle("החשבון שלי")
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                // the picture: tap to change it
+                Box {
+                    Box(Modifier.clip(CircleShape).clickable { photoMenu = true }) {
+                        ProfileAvatar(account.displayName ?: "?", account.photo, size = 64.dp)
+                    }
+                    Box(
+                        Modifier.align(Alignment.BottomStart).size(22.dp)
+                            .background(MaterialTheme.colorScheme.primary, CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Default.PhotoCamera, contentDescription = "שינוי תמונה", tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(13.dp))
+                    }
+                    DropdownMenu(expanded = photoMenu, onDismissRequest = { photoMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("בחירת תמונה") },
+                            leadingIcon = { Icon(Icons.Default.PhotoCamera, null) },
+                            onClick = { photoMenu = false; picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                        )
+                        if (account.customPhoto) {
+                            DropdownMenuItem(
+                                text = { Text(if (account.isAnonymous) "הסרת התמונה" else "התמונה מחשבון Google") },
+                                leadingIcon = { Icon(Icons.Default.Refresh, null) },
+                                onClick = { photoMenu = false; vm.updatePhoto(null) },
+                            )
+                        }
+                    }
+                }
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            account.displayName ?: if (account.isAnonymous) "אורח/ת" else "חשבון Google",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        IconButton(onClick = { editingName = true }) {
+                            Icon(Icons.Default.Edit, contentDescription = "שינוי שם תצוגה", modifier = Modifier.size(18.dp))
+                        }
+                    }
+                    if (account.isAnonymous) {
+                        Text("לא מחובר לחשבון Google", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        account.email?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        account.googleName?.takeIf { it != account.displayName }?.let {
+                            Text("ב-Google: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
             if (account.isAnonymous) {
                 Text(
-                    "כרגע את/ה מחובר/ת כאורח/ת. כדי לא לאבד את הבית כשמחליפים מכשיר או מתקינים מחדש, התחברו עם חשבון Google. הרשימה וההיסטוריה נשמרות.",
+                    "כרגע את/ה מחובר/ת כאורח/ת. התחברו עם חשבון Google כדי שהשם, הכתובת והתמונה יגיעו מהחשבון, ושהבית לא יאבד כשמחליפים מכשיר או מתקינים מחדש. הרשימה וההיסטוריה נשמרות.",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Button(
@@ -242,14 +322,9 @@ fun AccountCard(vm: AppViewModel, account: Account) {
                         }
                     },
                 ) { Text("התחברות עם Google") }
-                TextButton(onClick = { editingName = true }) { Text("קביעת שם תצוגה") }
             } else {
-                Text(account.displayName ?: "חשבון Google", style = MaterialTheme.typography.titleMedium)
-                account.email?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { editingName = true }) { Text("שינוי שם תצוגה") }
-                    OutlinedButton(onClick = vm::signOut) { Text("התנתקות") }
-                }
+                Text("השם והתמונה כאן הם מה שבני הבית רואים. אפשר לשנות אותם בלי לגעת בחשבון Google.", style = MaterialTheme.typography.bodySmall)
+                OutlinedButton(onClick = vm::signOut) { Text("התנתקות") }
                 Text("אחרי התנתקות המכשיר ממשיך כאורח חדש, ואפשר להתחבר שוב כדי לחזור לבית.", style = MaterialTheme.typography.bodySmall)
             }
         }
@@ -261,11 +336,40 @@ fun AccountCard(vm: AppViewModel, account: Account) {
             onDismissRequest = { editingName = false },
             title = { Text("שם תצוגה") },
             text = {
-                OutlinedTextField(name, { name = it }, singleLine = true, label = { Text("כך יראו אותך בני הבית") })
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedTextField(name, { name = it }, singleLine = true, label = { Text("כך יראו אותך בני הבית") })
+                    account.googleName?.takeIf { it != name }?.let { g ->
+                        TextButton(onClick = { name = g }) { Text("השם מ-Google: $g") }
+                    }
+                }
             },
             confirmButton = { TextButton(onClick = { editingName = false; vm.updateDisplayName(name) }) { Text("שמירה") } },
             dismissButton = { TextButton(onClick = { editingName = false }) { Text("ביטול") } },
         )
+    }
+}
+
+/** A participant's round picture, or the first letter of the name on a coloured circle when there is none. */
+@Composable
+fun ProfileAvatar(name: String, photo: String?, size: androidx.compose.ui.unit.Dp = 40.dp, modifier: Modifier = Modifier) {
+    val bitmap = remember(photo) { photo?.let(AvatarCodec::decode)?.asImageBitmap() }
+    if (bitmap != null) {
+        Image(
+            bitmap, contentDescription = name, contentScale = ContentScale.Crop,
+            modifier = modifier.size(size).clip(CircleShape),
+        )
+    } else {
+        Box(
+            modifier.size(size).background(avatarColor(name), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                name.trim().firstOrNull()?.toString() ?: "?",
+                fontSize = (size.value * 0.42f).sp,
+                fontWeight = FontWeight.Bold,
+                color = androidx.compose.ui.graphics.Color(0xFF3A3A3A),
+            )
+        }
     }
 }
 
@@ -275,9 +379,11 @@ fun AccountCard(vm: AppViewModel, account: Account) {
 fun UpdateCard(vm: AppViewModel) {
     val context = LocalContext.current
     val state by vm.update.collectAsStateWithLifecycle()
+    val autoCheck by vm.autoCheckUpdates.collectAsStateWithLifecycle()
+    val autoInstall by vm.autoInstallUpdates.collectAsStateWithLifecycle()
 
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(16.dp).animateContentSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SectionTitle("עדכוני אפליקציה")
             Text("גרסה מותקנת: ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall)
             when (val s = state) {
@@ -292,34 +398,113 @@ fun UpdateCard(vm: AppViewModel) {
                 }
                 is UpdateState.Available -> {
                     Text("גרסה חדשה זמינה: ${s.release.versionName}", fontWeight = FontWeight.Bold)
-                    if (s.release.sizeBytes > 0) Text("גודל: ${(s.release.sizeBytes / 1_000_000.0 * 10).roundToInt() / 10.0} MB", style = MaterialTheme.typography.bodySmall)
-                    Button(onClick = vm::downloadUpdate) { Text("הורדה") }
+                    if (s.release.sizeBytes > 0) Text("גודל: ${megabytes(s.release.sizeBytes)} MB", style = MaterialTheme.typography.bodySmall)
+                    Button(onClick = vm::downloadUpdate) {
+                        Icon(Icons.Default.Download, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("הורדה ברקע")
+                    }
                 }
                 is UpdateState.Downloading -> {
-                    Text("מוריד… ${(s.progress * 100).roundToInt()}%")
-                    LinearProgressIndicator(progress = { s.progress }, modifier = Modifier.fillMaxWidth())
+                    val shown by animateFloatAsState(s.progress, label = "updateProgress")
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        DownloadingIcon()
+                        Column(Modifier.weight(1f)) {
+                            Text("מוריד את ${s.release.versionName}… ${(s.progress * 100).roundToInt()}%", fontWeight = FontWeight.Bold)
+                            if (s.release.sizeBytes > 0) {
+                                Text(
+                                    "${megabytes((s.release.sizeBytes * s.progress).toLong())} / ${megabytes(s.release.sizeBytes)} MB",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                        OutlinedButton(onClick = vm::stopDownload) {
+                            Icon(Icons.Default.Stop, contentDescription = null)
+                            Spacer(Modifier.width(4.dp))
+                            Text("עצירה")
+                        }
+                    }
+                    LinearProgressIndicator(progress = { shown }, modifier = Modifier.fillMaxWidth())
+                    Text(
+                        "ההורדה ממשיכה ברקע — אפשר להמשיך להשתמש באפליקציה או לצאת ממנה.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                is UpdateState.Stopped -> {
+                    Text("ההורדה של ${s.release.versionName} נעצרה.")
+                    Button(onClick = vm::downloadUpdate) {
+                        Icon(Icons.Default.Download, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("הורדה מחדש")
+                    }
                 }
                 is UpdateState.Ready -> {
                     Text("הגרסה ${s.release.versionName} הורדה ומוכנה להתקנה.")
-                    Button(onClick = {
-                        val updater = vm.updater
-                        if (updater.canInstall()) {
-                            context.startActivity(updater.installIntent(s.file))
-                        } else {
-                            vm.reportError("יש לאשר לאפליקציה להתקין עדכונים, ואז ללחוץ שוב על \"התקנה\"")
-                            context.startActivity(updater.permissionIntent())
-                        }
-                    }) { Text("התקנה") }
+                    Button(onClick = { startInstall(vm, context, s.file) }) { Text("התקנה") }
                 }
                 is UpdateState.Failed -> {
                     Text(s.message, color = MaterialTheme.colorScheme.error)
                     OutlinedButton(onClick = { vm.checkForUpdates(manual = true) }) { Text("ניסיון חוזר") }
                 }
             }
+            HorizontalDivider()
+            UpdateOption("בדיקת עדכונים אוטומטית בפתיחת האפליקציה", autoCheck, vm::setAutoCheckUpdates)
+            UpdateOption("התקנה אוטומטית בסיום ההורדה", autoInstall, vm::setAutoInstallUpdates)
             Text("העדכונים נלקחים מגרסאות האפליקציה ב-GitHub.", style = MaterialTheme.typography.bodySmall)
         }
     }
 }
+
+@Composable
+private fun UpdateOption(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }, verticalAlignment = Alignment.CenterVertically) {
+        androidx.compose.material3.Checkbox(checked = checked, onCheckedChange = onChange)
+        Text(label)
+    }
+}
+
+/** A download arrow that keeps dropping into its tray while the update downloads. */
+@Composable
+fun DownloadingIcon(modifier: Modifier = Modifier, size: androidx.compose.ui.unit.Dp = 28.dp) {
+    val transition = rememberInfiniteTransition(label = "downloading")
+    val drop by transition.animateFloat(
+        initialValue = -0.25f, targetValue = 0.2f,
+        animationSpec = infiniteRepeatable(tween(700, easing = FastOutSlowInEasing), RepeatMode.Restart),
+        label = "drop",
+    )
+    val fade by transition.animateFloat(
+        initialValue = 1f, targetValue = 0.35f,
+        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Restart),
+        label = "fade",
+    )
+    Box(
+        modifier.size(size + 12.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Default.Download, contentDescription = "מוריד",
+            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+            modifier = Modifier.size(size).graphicsLayer {
+                translationY = drop * this.size.height
+                alpha = fade
+            },
+        )
+    }
+}
+
+/** Hands a downloaded update to the system installer, or first asks for the install permission. */
+fun startInstall(vm: AppViewModel, context: android.content.Context, file: java.io.File) {
+    val updater = vm.updater
+    if (updater.canInstall()) {
+        context.startActivity(updater.installIntent(file))
+    } else {
+        vm.reportError("יש לאשר לאפליקציה להתקין עדכונים, ואז ללחוץ שוב על \"התקנה\"")
+        context.startActivity(updater.permissionIntent())
+    }
+}
+
+private fun megabytes(bytes: Long): String = "${(bytes / 1_000_000.0 * 10).roundToInt() / 10.0}"
 
 // ---------- display ----------
 

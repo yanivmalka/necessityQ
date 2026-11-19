@@ -106,10 +106,15 @@ private fun BranchesTab(vm: AppViewModel, branches: List<PriceBranch>, selected:
     }
     LaunchedEffect(Unit) { if (vm.hasLocationPermission()) vm.locate() }
 
-    val list = remember(branches, position, radiusKm, filter) {
+    val list = remember(branches, position, radiusKm, filter, selected) {
         val key = HebrewText.matchKey(filter)
         PriceData.nearby(branches, position?.first, position?.second, radiusKm)
+            .filter { it.branch.id !in selected }
             .filter { key.isBlank() || HebrewText.matchKey("${it.branch.title} ${it.branch.address}").contains(key) }
+    }
+    // the followed branches stay at the top whatever the radius or the search, nearest first
+    val pinned = remember(branches, position, selected) {
+        PriceData.nearby(branches.filter { it.id in selected }, position?.first, position?.second, radiusKm = Double.MAX_VALUE)
     }
 
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -150,9 +155,25 @@ private fun BranchesTab(vm: AppViewModel, branches: List<PriceBranch>, selected:
         )
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)) {
-        if (list.isEmpty()) item { Text("אין סניפים ברדיוס הזה.") }
-        items(list, key = { it.branch.id }) { nb -> BranchRow(nb, nb.branch.id in selected, status[nb.branch.id]) { vm.toggleBranch(nb.branch.id) } }
+        if (pinned.isNotEmpty()) {
+            item(key = "pinned-title") { BranchSectionTitle("במעקב · ${pinned.size}") }
+            items(pinned, key = { "pinned-" + it.branch.id }) { nb -> BranchRow(nb, true, status[nb.branch.id]) { vm.toggleBranch(nb.branch.id) } }
+            item(key = "others-title") { BranchSectionTitle("סניפים נוספים") }
+        }
+        if (list.isEmpty()) item(key = "empty") { Text("אין סניפים נוספים ברדיוס הזה.") }
+        items(list, key = { it.branch.id }) { nb -> BranchRow(nb, false, status[nb.branch.id]) { vm.toggleBranch(nb.branch.id) } }
     }
+}
+
+@Composable
+private fun BranchSectionTitle(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
+    )
 }
 
 @Composable

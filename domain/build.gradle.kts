@@ -9,5 +9,6 @@ kotlin {
 
 dependencies {
     implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.kotlinx.serialization.json) // JSON parsing only (recipe pages), no plugin needed
     testImplementation(libs.junit)
 }

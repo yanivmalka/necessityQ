@@ -265,10 +265,14 @@ fun ListScreen(
         buildSections(snapshot?.lines.orEmpty(), sort, pickRanks, descending, display.chilledLast, listFilter, chatItemIds)
     }
     val searchMatches = if (searchText.isBlank()) 0 else sections.sumOf { sec -> sec.lines.count { it.status == LineStatus.NEEDED } }
-    // while searching every group is open, so matches are never hidden in a collapsed group
-    val built = remember(sections, collapsed, searchText) { buildRows(sections, if (searchText.isBlank()) collapsed else emptySet()) }
+    // while filtering (by tag, group or search) every group starts open, so matches are never hidden in a
+    // collapsed group; groups closed meanwhile are closed for this filter only — the saved state is untouched
+    val filtering = listFilter.isActive
+    var filterCollapsed by remember(listFilter) { mutableStateOf(emptySet<String>()) }
+    val shownCollapsed = if (filtering) filterCollapsed else collapsed
+    val built = remember(sections, shownCollapsed) { buildRows(sections, shownCollapsed) }
     val titledKeys = sections.filter { it.title != null }.map { it.key }.toSet()
-    val allCollapsed = titledKeys.isNotEmpty() && titledKeys.all { it in collapsed }
+    val allCollapsed = titledKeys.isNotEmpty() && titledKeys.all { it in shownCollapsed }
     LaunchedEffect(built, dragging) {
         if (!dragging) {
             rows.clear()
@@ -321,6 +325,7 @@ fun ListScreen(
             listState.animateScrollToItem(maxOf(0, target - 1))
         }
     }
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
     val reorderState = rememberReorderableLazyListState(listState) { from, to ->
         val fromIndex = rows.indexOfFirst { it.key == from.key }
         val toIndex = rows.indexOfFirst { it.key == to.key }
@@ -520,9 +525,18 @@ fun ListScreen(
                 label = { Text(if (filter.isActive) "סינון · ${filter.activeCount}" else "סינון") },
                 leadingIcon = { Icon(Icons.Default.FilterList, null, Modifier.size(18.dp)) },
             )
+            FilterChip(
+                selected = false,
+                onClick = onOpenDisplaySettings,
+                label = { Text("תצוגה") },
+                leadingIcon = { Icon(Icons.Default.Tune, contentDescription = "הגדרות תצוגה", modifier = Modifier.size(18.dp)) },
+            )
             Spacer(Modifier.weight(1f))
             if (titledKeys.isNotEmpty()) {
-                IconButton(onClick = { vm.setAllCollapsed(if (allCollapsed) null else titledKeys) }) {
+                IconButton(onClick = {
+                    if (filtering) filterCollapsed = if (allCollapsed) emptySet() else titledKeys
+                    else vm.setAllCollapsed(if (allCollapsed) null else titledKeys)
+                }) {
                     Icon(
                         if (allCollapsed) Icons.Default.UnfoldMore else Icons.Default.UnfoldLess,
                         contentDescription = if (allCollapsed) "פתיחת כל הקבוצות" else "כיווץ כל הקבוצות",
@@ -655,7 +669,13 @@ fun ListScreen(
             items(rows, key = { it.key }) { row ->
                 ReorderableItem(reorderState, key = row.key) { isDragging ->
                     when (row) {
-                        is ListRow.Header -> GroupHeader(row, onToggle = { vm.toggleCollapsed(row.sectionKey) })
+                        is ListRow.Header -> GroupHeader(row, onToggle = {
+                            if (filtering) {
+                                filterCollapsed = if (row.sectionKey in filterCollapsed) filterCollapsed - row.sectionKey else filterCollapsed + row.sectionKey
+                            } else {
+                                vm.toggleCollapsed(row.sectionKey)
+                            }
+                        })
                         is ListRow.Item -> {
                             val line = row.line
                             val stats = snap.stats[line.itemId]
@@ -664,7 +684,7 @@ fun ListScreen(
                                 line = line,
                                 shopping = shopping,
                                 subline = tileInfo(line, stats, names, display, today),
-                                tags = ItemTags.of(line, stats, favorite = line.itemId in favorites)
+                                tags = ItemTags.of(line, stats, favorite = line.itemId in favorites, compact = true)
                                     .filter { display.showFavorite || it.kind != TagKind.FAVORITE },
                                 chat = if (thread.isEmpty()) null else {
                                     val last = thread.maxBy { it.atMillis }
@@ -685,8 +705,12 @@ fun ListScreen(
                                             Icons.Default.DragIndicator,
                                             contentDescription = "גרירה",
                                             tint = MaterialTheme.colorScheme.outline,
-                                            modifier = Modifier.draggableHandle(
-                                                onDragStarted = { dragging = true },
+                                            // a long press first, so a scroll that starts on the handle scrolls the list
+                                            modifier = Modifier.longPressDraggableHandle(
+                                                onDragStarted = {
+                                                    haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                                    dragging = true
+                                                },
                                                 onDragStopped = {
                                                     persistMove(line.id)
                                                     dragging = false
@@ -847,6 +871,32 @@ private fun StoreChooser(vm: AppViewModel, allowNone: Boolean, onChosen: (String
                 leadingIcon = { Icon(Icons.Default.LocationOn, null, Modifier.size(18.dp)) },
             )
         }
+        // the branches followed on the prices screen, nearest first: one tap saves it as a household store
+        val followedIds by vm.selectedPriceBranches.collectAsStateWithLifecycle()
+        val allBranches by vm.priceBranches.collectAsStateWithLifecycle()
+        val position by vm.userPosition.collectAsStateWithLifecycle()
+        val storeKeys = stores.map { app.necessityq.domain.HebrewText.matchKey(it.name) }.toSet()
+        val followed = followedIds.mapNotNull { id -> allBranches.firstOrNull { it.id == id } }
+            .filter { it.id != branchHere?.id && app.necessityq.domain.HebrewText.matchKey(app.necessityq.domain.BranchLocator.storeName(it)) !in storeKeys }
+            .map { b ->
+                val lat = b.latitude
+                val lon = b.longitude
+                b to position?.let { (la, lo) -> if (lat != null && lon != null) app.necessityq.domain.Stores.distanceMeters(la, lo, lat, lon) else null }
+            }
+            .sortedBy { it.second ?: Double.MAX_VALUE }
+        followed.forEachIndexed { i, (b, meters) ->
+            val close = i == 0 && meters != null && meters <= 500
+            AssistChip(
+                onClick = { vm.addStoreFromBranch(b)?.let(onChosen) },
+                label = {
+                    Text(
+                        app.necessityq.domain.BranchLocator.storeName(b) + (meters?.let { " · " + distanceLabel(it) } ?: ""),
+                        fontWeight = if (close) FontWeight.Bold else null,
+                    )
+                },
+                leadingIcon = { Icon(Icons.Default.Storefront, null, Modifier.size(18.dp)) },
+            )
+        }
         stores.filter { it.id != nearby?.id }.forEach { store ->
             FilterChip(selected = store.id == currentId, onClick = { onChosen(store.id) }, label = { Text(store.name) })
         }
@@ -889,6 +939,11 @@ private fun StoreChooser(vm: AppViewModel, allowNone: Boolean, onChosen: (String
         )
     }
 }
+
+/** "350 מ'" / "1.4 ק"מ" */
+private fun distanceLabel(meters: Double): String =
+    if (meters < 1000) "${(meters / 10).toInt() * 10} מ'"
+    else String.format(java.util.Locale.US, "%.1f ק\"מ", meters / 1000)
 
 // ---------- recycle bin ----------
 

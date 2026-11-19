@@ -47,6 +47,7 @@ class HubEntry(val title: String, val icon: ImageVector, val badge: String? = nu
 @Composable
 fun HomeHubScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Modifier, entries: List<List<HubEntry>>) {
     val names by vm.memberNames.collectAsStateWithLifecycle()
+    val members by vm.members.collectAsStateWithLifecycle()
     Column(
         modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 20.dp),
@@ -63,7 +64,11 @@ fun HomeHubScreen(vm: AppViewModel, householdName: String, modifier: Modifier = 
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                MemberAvatars(names.values.toList(), size = 36.dp, max = 5)
+                if (members.isNotEmpty()) {
+                    MemberAvatars(members.map { it.displayName }, size = 36.dp, max = 5, photos = members.map { it.photo })
+                } else {
+                    MemberAvatars(names.values.toList(), size = 36.dp, max = 5)
+                }
                 Text(
                     if (names.size == 1) "רק את/ה ברשימה כרגע" else "${names.size} בני בית משתפים את הרשימה",
                     style = MaterialTheme.typography.bodyMedium,
@@ -111,7 +116,7 @@ private val AvatarColors = listOf(Color(0xFF0B6E4F), Color(0xFFB45309), Color(0x
 
 /** Overlapping initials of household members; the first name sits on the right. */
 @Composable
-fun MemberAvatars(names: List<String>, size: Dp = 32.dp, max: Int = 3) {
+fun MemberAvatars(names: List<String>, size: Dp = 32.dp, max: Int = 3, photos: List<String?> = emptyList()) {
     val shown = names.take(max)
     val ring = MaterialTheme.colorScheme.background
     Row(Modifier.semantics { contentDescription = "${names.size} בני בית" }) {
@@ -122,7 +127,8 @@ fun MemberAvatars(names: List<String>, size: Dp = 32.dp, max: Int = 3) {
                     .clip(CircleShape).background(AvatarColors[index % AvatarColors.size]),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(
+                val photo = photos.getOrNull(index)
+                if (photo != null) ProfileAvatar(name, photo, size = size - 4.dp) else Text(
                     name.trim().take(1).ifEmpty { "?" },
                     color = Color.White,
                     fontWeight = FontWeight.SemiBold,

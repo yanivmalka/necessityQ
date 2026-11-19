@@ -62,6 +62,26 @@ class PricesTest {
         assertEquals("1.2 ק\"מ", PriceData.formatDistance(1234.0))
         assertEquals("350 מ'", PriceData.formatDistance(351.0))
     }
+
+    @Test
+    fun quotesShowEachBranchWithItsLastChange() {
+        fun b(id: String, chain: String) = PriceBranch(id, chain, chain, id, id, "", "ירושלים", null, null)
+        fun p(price: Double, history: List<Pair<String, Double>>, internal: Boolean = false) =
+            BranchProduct("729", "חלב", "", null, "", false, internal, price, null, "", price, price, history)
+        val branches = listOf(b("a", "x"), b("b", "y"), b("c", "y"), b("d", "y"))
+        val prices = mapOf(
+            "a" to BranchPrices("a", 0, 90, listOf(p(6.0, listOf("2026-10-01" to 5.5, "2026-11-01" to 6.0)))),
+            "b" to BranchPrices("b", 0, 90, listOf(p(5.0, listOf("2026-10-01" to 5.9, "2026-11-01" to 5.0)))),
+            "c" to BranchPrices("c", 0, 90, listOf(p(5.2, emptyList()))),
+        )
+        val q = PriceData.quotes("729", internalCode = false, homeChain = "x", branches = branches, prices = prices)
+        assertEquals(listOf("a", "b", "c"), q.map { it.branch.id })
+        assertEquals(0.5, q[0].change!!, 0.001)
+        assertEquals(-0.9, q[1].change!!, 0.001)
+        assertNull(q[2].change)
+        // a chain-internal code is not looked up in other chains
+        assertEquals(listOf("a"), PriceData.quotes("729", internalCode = true, homeChain = "x", branches = branches, prices = prices).map { it.branch.id })
+    }
 }
 
 class ItemPricesTest {

@@ -373,10 +373,35 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
      * Adds a dish built from a Tzameret food (its composition becomes the ingredient list) and returns its id;
      * when that food is already one of the household's recipes, the existing recipe's id.
      */
-    fun addDishFromNutrition(food: app.necessityq.domain.NutritionFood): String? {
+    fun addDishFromNutrition(food: app.necessityq.domain.NutritionFood, imported: app.necessityq.domain.ImportedRecipe? = null): String? {
         meals.value.dishes.firstOrNull { it.nutritionCode == food.code }?.let { return it.id }
         val index = _nutrition.value ?: return null
-        val dish = index.dishFrom(food, java.util.UUID.randomUUID().toString())
+        val base = index.dishFrom(food, java.util.UUID.randomUUID().toString())
+        // a method found on the web comes with that recipe's own ingredients and yield
+        val dish = if (imported == null) base else base.copy(
+            ingredients = imported.ingredients.ifEmpty { base.ingredients },
+            instructions = imported.instructions,
+            servings = imported.servings ?: base.servings,
+        )
+        updateMeals { it.withDish(dish) }
+        _messages.tryEmit("נשמר במתכונים: ${dish.name}")
+        return dish.id
+    }
+
+    /** Reads the recipe on a web page (for a preview; nothing is saved). */
+    suspend fun fetchRecipe(url: String): app.necessityq.domain.ImportedRecipe = app.necessityq.platform.RecipeFetcher.fetch(url)
+
+    /** Saves a recipe read from a web page as one of the household's recipes and returns its id. */
+    fun addImportedRecipe(recipe: app.necessityq.domain.ImportedRecipe): String {
+        val servings = recipe.servings ?: app.necessityq.domain.Dish.DEFAULT_SERVINGS
+        val dish = app.necessityq.domain.Dish(
+            id = java.util.UUID.randomUUID().toString(),
+            name = recipe.name.ifBlank { "מתכון" },
+            ingredients = recipe.ingredients,
+            servings = servings,
+            cookServings = servings,
+            instructions = recipe.instructions,
+        )
         updateMeals { it.withDish(dish) }
         _messages.tryEmit("נשמר במתכונים: ${dish.name}")
         return dish.id
@@ -732,13 +757,21 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
      */
     fun addStoreFromBranch(branch: app.necessityq.domain.PriceBranch): String? {
         val (hid, _, _) = ctx() ?: return null
-        val location = lastLocation
+        // an exactly geocoded branch keeps its own coordinates (it may be chosen from afar, from the
+        // followed list); one known only by its city centre takes where the user is shopping now
+        val exact = !branch.approximate && branch.latitude != null && branch.longitude != null
+        val bLat = branch.latitude
+        val bLon = branch.longitude
+        // the current position only when it is plausibly in the branch's city (within 10 km of its centre)
+        val location = lastLocation?.takeIf { l ->
+            bLat == null || bLon == null || Stores.distanceMeters(l.latitude, l.longitude, bLat, bLon) <= 10_000
+        }
         val store = Store(
             id = java.util.UUID.randomUUID().toString(),
             name = app.necessityq.domain.BranchLocator.storeName(branch),
             type = StoreType.SUPERMARKET,
-            latitude = location?.latitude ?: branch.latitude,
-            longitude = location?.longitude ?: branch.longitude,
+            latitude = if (exact) bLat else location?.latitude ?: bLat,
+            longitude = if (exact) bLon else location?.longitude ?: bLon,
         )
         launchSafe { container.collab.saveStore(hid, store) }
         return store.id
@@ -1246,6 +1279,11 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     fun signOut() = launchSafe { container.household.signOut() }
     fun updateDisplayName(name: String) = launchSafe { container.household.updateDisplayName(name) }
+    /** [photo]: a small Base64 JPEG (AvatarCodec); null goes back to the Google account's picture. */
+    fun updatePhoto(photo: String?) = launchSafe {
+        container.household.updatePhoto(photo)
+        _messages.tryEmit(if (photo == null) "חזרה לתמונה מחשבון Google" else "התמונה עודכנה")
+    }
     fun renameHousehold(name: String) = launchSafe { container.household.renameHousehold(name) }
     fun removeMember(userId: String) = launchSafe {
         container.household.removeMember(userId)
@@ -1264,12 +1302,42 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     val updater get() = container.updater
 
-    init {
-        checkForUpdates(manual = false)
+    /** Look for a new version on every launch. */
+    val autoCheckUpdates = MutableStateFlow(prefs.autoCheckUpdates)
+    fun setAutoCheckUpdates(on: Boolean) { prefs.autoCheckUpdates = on; autoCheckUpdates.value = on }
+
+    /** Open the installer by itself once the download finishes. */
+    val autoInstallUpdates = MutableStateFlow(prefs.autoInstallUpdates)
+    fun setAutoInstallUpdates(on: Boolean) { prefs.autoInstallUpdates = on; autoInstallUpdates.value = on }
+
+    /**
+     * A finished download the screen should hand to the installer (auto-install). The activity takes it
+     * while it is in the foreground, because Android does not let a backgrounded app open the installer.
+     */
+    private val _pendingInstall = MutableStateFlow<File?>(null)
+    val pendingInstall: StateFlow<File?> = _pendingInstall
+    fun consumePendingInstall() { _pendingInstall.value = null }
+
+    private var downloadJob: kotlinx.coroutines.Job? = null
+
+    private var lastUpdateCheck = 0L
+
+    /**
+     * Every return to the app checks for an update (when automatic checks are on), at most every
+     * 15 minutes. The first call comes from the activity's start, so this also covers opening the app.
+     */
+    fun onForeground() {
+        if (!prefs.autoCheckUpdates) return
+        if (System.currentTimeMillis() - lastUpdateCheck < 15 * 60_000L) return
+        when (_update.value) {
+            UpdateState.Idle, UpdateState.UpToDate, is UpdateState.Failed -> checkForUpdates(manual = false)
+            else -> Unit // a found / downloading / downloaded update stays as it is
+        }
     }
 
     fun checkForUpdates(manual: Boolean) {
         if (_update.value is UpdateState.Checking || _update.value is UpdateState.Downloading) return
+        lastUpdateCheck = System.currentTimeMillis()
         _update.value = UpdateState.Checking
         viewModelScope.launch {
             runCatching { container.updater.latest() }
@@ -1277,7 +1345,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                     _update.value = when {
                         release == null -> UpdateState.UpToDate
                         Releases.isNewer(release.versionCode, BuildConfig.VERSION_CODE) -> {
-                            if (!manual) _messages.tryEmit("יצאה גרסה חדשה ${release.versionName} — ב\"הבית\" אפשר לעדכן")
+                            if (!manual) _messages.tryEmit("יצאה גרסה חדשה ${release.versionName} — ב\"הבית\" ← \"עדכונים\" אפשר לעדכן")
                             UpdateState.Available(release)
                         }
                         else -> UpdateState.UpToDate
@@ -1290,17 +1358,49 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /**
+     * Downloads the update in the background: it keeps going while the user moves around the app or
+     * leaves it, with an ongoing notification showing the progress. [stopDownload] cancels it.
+     */
     fun downloadUpdate() {
-        val available = _update.value as? UpdateState.Available ?: return
-        _update.value = UpdateState.Downloading(available.release, 0f)
-        viewModelScope.launch {
-            runCatching {
-                container.updater.download(available.release) { p ->
-                    _update.value = UpdateState.Downloading(available.release, p)
-                }
-            }.onSuccess { file -> _update.value = UpdateState.Ready(available.release, file) }
-                .onFailure { _update.value = UpdateState.Failed(it.message ?: "ההורדה נכשלה") }
+        val release = when (val s = _update.value) {
+            is UpdateState.Available -> s.release
+            is UpdateState.Stopped -> s.release
+            else -> return
         }
+        _update.value = UpdateState.Downloading(release, 0f)
+        container.notifier.updateProgress(release.versionName, null)
+        downloadJob = viewModelScope.launch {
+            var shownPercent = -1
+            try {
+                val file = container.updater.download(release) { p ->
+                    _update.value = UpdateState.Downloading(release, p)
+                    val percent = (p * 100).toInt()
+                    if (percent != shownPercent) { // one notification update per percent, not per chunk
+                        shownPercent = percent
+                        container.notifier.updateProgress(release.versionName, percent)
+                    }
+                }
+                _update.value = UpdateState.Ready(release, file)
+                container.notifier.updateReady(release.versionName, container.updater.installIntent(file))
+                if (prefs.autoInstallUpdates) _pendingInstall.value = file
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                container.notifier.cancelUpdate()
+                throw e
+            } catch (e: Exception) {
+                container.notifier.cancelUpdate()
+                _update.value = UpdateState.Failed(e.message ?: "ההורדה נכשלה")
+            }
+        }
+    }
+
+    /** Stops a running download; the partial file is deleted and the update can be downloaded again. */
+    fun stopDownload() {
+        val downloading = _update.value as? UpdateState.Downloading ?: return
+        downloadJob?.cancel()
+        downloadJob = null
+        container.notifier.cancelUpdate()
+        _update.value = UpdateState.Stopped(downloading.release)
     }
 
     fun createHousehold(name: String) = launchSafe { container.household.createHousehold(name) }
@@ -1323,6 +1423,8 @@ sealed interface UpdateState {
     data object UpToDate : UpdateState
     data class Available(val release: app.necessityq.domain.ReleaseInfo) : UpdateState
     data class Downloading(val release: app.necessityq.domain.ReleaseInfo, val progress: Float) : UpdateState
+    /** The user stopped the download; it can be started again. */
+    data class Stopped(val release: app.necessityq.domain.ReleaseInfo) : UpdateState
     data class Ready(val release: app.necessityq.domain.ReleaseInfo, val file: File) : UpdateState
     data class Failed(val message: String) : UpdateState
 }

@@ -46,6 +46,12 @@ object NqPalette {
 
     /** Star beside a favourite item's name. */
     val FavoriteStar = Color(0xFFC77700)
+
+    /** A price that went up (▲), as on a stock ticker. */
+    val PriceUp = Color(0xFFD92D20)
+
+    /** A price that went down (▼). */
+    val PriceDown = Color(0xFF16A34A)
 }
 
 /** Accent colour per category: a thin strip on each tile and a dot on the group header. */

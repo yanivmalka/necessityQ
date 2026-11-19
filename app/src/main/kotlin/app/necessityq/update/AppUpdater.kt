@@ -8,6 +8,7 @@ import androidx.core.content.FileProvider
 import app.necessityq.domain.ReleaseInfo
 import app.necessityq.domain.Releases
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
@@ -23,19 +24,32 @@ class AppUpdater(private val context: Context, private val repo: String = "yaniv
 
     private val updatesDir get() = File(context.cacheDir, "updates")
 
-    /** The newest published release, or null when it has no APK. */
+    /**
+     * The newest published release, or null when it has no APK. Asks the Releases API first; when that
+     * refuses (it allows 60 requests an hour per IP address, and mobile carriers put many phones behind
+     * one address) or fails, it reads the tag from the website's "latest release" redirect instead.
+     */
     suspend fun latest(): ReleaseInfo? = withContext(Dispatchers.IO) {
+        val api = runCatching { latestFromApi() }
+        api.getOrNull()?.let { return@withContext it }
+        runCatching { latestFromWebsite() }.getOrElse { web ->
+            throw api.exceptionOrNull() ?: web
+        }
+    }
+
+    private fun latestFromApi(): ReleaseInfo? {
         val connection = open("https://api.github.com/repos/$repo/releases/latest")
         try {
             connection.setRequestProperty("Accept", "application/vnd.github+json")
+            connection.useCaches = false
             check(connection.responseCode == 200) { "בדיקת העדכון נכשלה (${connection.responseCode})" }
             val json = JSONObject(connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() })
             val tag = json.getString("tag_name")
-            val code = Releases.versionCodeOf(tag) ?: return@withContext null
+            val code = Releases.versionCodeOf(tag) ?: return null
             val assets = json.getJSONArray("assets")
             val apk = (0 until assets.length()).map { assets.getJSONObject(it) }
-                .firstOrNull { it.getString("name").endsWith(".apk") } ?: return@withContext null
-            ReleaseInfo(
+                .firstOrNull { it.getString("name").endsWith(".apk") } ?: return null
+            return ReleaseInfo(
                 tag = tag,
                 versionCode = code,
                 notes = json.optString("body").trim(),
@@ -47,7 +61,33 @@ class AppUpdater(private val context: Context, private val repo: String = "yaniv
         }
     }
 
-    /** Downloads the APK, reporting progress in 0..1, and returns the file. */
+    /**
+     * github.com/<repo>/releases/latest redirects to …/releases/tag/<tag>; CI names the APK
+     * necessityQ-<run number>.apk, so its address follows from the tag. The size is unknown here.
+     */
+    private fun latestFromWebsite(): ReleaseInfo? {
+        val connection = open("https://github.com/$repo/releases/latest").apply { instanceFollowRedirects = false }
+        try {
+            check(connection.responseCode in 300..399) { "בדיקת העדכון נכשלה (${connection.responseCode})" }
+            val location = connection.getHeaderField("Location") ?: return null
+            val tag = location.substringAfter("/releases/tag/", "").substringBefore('?').takeIf { it.isNotBlank() } ?: return null
+            val code = Releases.versionCodeOf(tag) ?: return null
+            return ReleaseInfo(
+                tag = tag,
+                versionCode = code,
+                notes = "",
+                apkUrl = "https://github.com/$repo/releases/download/$tag/necessityQ-$code.apk",
+                sizeBytes = 0,
+            )
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    /**
+     * Downloads the APK, reporting progress in 0..1, and returns the file. Cancelling the calling
+     * coroutine stops the download between chunks and deletes the partial file.
+     */
     suspend fun download(info: ReleaseInfo, onProgress: (Float) -> Unit): File = withContext(Dispatchers.IO) {
         updatesDir.mkdirs()
         updatesDir.listFiles()?.forEach { it.delete() }
@@ -61,6 +101,7 @@ class AppUpdater(private val context: Context, private val repo: String = "yaniv
                 target.outputStream().use { output ->
                     val buffer = ByteArray(64 * 1024)
                     while (true) {
+                        ensureActive()
                         val read = input.read(buffer)
                         if (read < 0) break
                         output.write(buffer, 0, read)

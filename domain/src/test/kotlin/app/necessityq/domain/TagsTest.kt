@@ -18,4 +18,20 @@ class TagsTest {
         assertEquals(listOf(TagKind.MISSING, TagKind.RECIPE, TagKind.SPECIAL, TagKind.FAVORITE), tags.map { it.kind })
         assertEquals("מתכון: שקשוקה", tags[1].label)
     }
+
+    @Test fun `compact tags show only the kind, with a count when there are several`() {
+        val parts = listOf(
+            RecipePart("שקשוקה", null), RecipePart("פשטידה", null),
+            RecipePart("ארוחת שישי", null, fromMenu = true),
+        )
+        val compact = ItemTags.of(line.copy(recipeParts = parts), null, favorite = false, compact = true)
+        assertEquals(listOf("מתכון | 2", "תפריט"), compact.filter { it.kind == TagKind.RECIPE }.map { it.label })
+        val full = ItemTags.of(line.copy(recipeParts = parts), null, favorite = false)
+        assertEquals(listOf("מתכון: שקשוקה", "מתכון: פשטידה", "תפריט: ארוחת שישי"), full.filter { it.kind == TagKind.RECIPE }.map { it.label })
+    }
+
+    @Test fun `a single legacy recipe name is just the kind in compact form`() {
+        val tags = ItemTags.of(line.copy(recipe = "שקשוקה"), null, favorite = false, compact = true)
+        assertEquals("מתכון", tags.first { it.kind == TagKind.RECIPE }.label)
+    }
 }
