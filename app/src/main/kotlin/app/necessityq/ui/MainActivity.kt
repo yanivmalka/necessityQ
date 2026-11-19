@@ -2,29 +2,14 @@ package app.necessityq.ui
 
 import android.Manifest
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material.icons.filled.ShoppingCart
-import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.NavigationDrawerItem
-import androidx.compose.material3.rememberDrawerState
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import app.necessityq.domain.ListMode
-import kotlinx.coroutines.launch
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -48,6 +33,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -59,7 +46,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -86,12 +72,19 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** Destinations of the navigation drawer. */
+/** Screens of the app. The first four are the bottom-bar tabs; the rest open from the "הבית" hub. */
 private enum class Dest(val title: String) {
-    PLAN("הכנת רשימה"), SHOP("בקנייה"), MENU("תפריט"), MESSAGES("הודעות"), HISTORY("היסטוריה"),
-    PRICES("סניפים ומחירים"), HOUSEHOLD("הבית ומשתתפים"), ACCOUNT("חשבון"), SETTINGS("הגדרות תצוגה"), APPEARANCE("מראה"),
-    UPDATES("עדכונים"), ABOUT("אודות"),
+    LIST("רשימה"), MENU("תפריט"), PRICES("מחירים"), HOME("הבית"),
+    HOUSEHOLD("הבית ומשתתפים"), MESSAGES("הודעות"), HISTORY("היסטוריה"), ACCOUNT("חשבון"),
+    SETTINGS("הגדרות תצוגה"), APPEARANCE("מראה"), UPDATES("עדכונים"), ABOUT("אודות"),
 }
+
+/** The tab that is lit while a screen is open. */
+private val Dest.tab: Dest
+    get() = when (this) {
+        Dest.LIST, Dest.MENU, Dest.PRICES -> this
+        else -> Dest.HOME
+    }
 
 @Composable
 private fun Root(vm: AppViewModel) {
@@ -123,76 +116,89 @@ private fun Root(vm: AppViewModel) {
                 return
             }
             val mode by vm.mode.collectAsStateWithLifecycle()
-            var dest by rememberSaveable { mutableStateOf(if (mode == ListMode.SHOP) Dest.SHOP else Dest.PLAN) }
+            var dest by rememberSaveable { mutableStateOf(Dest.LIST) }
+            /** Where the back arrow of a secondary page leads; null on the tabs. */
+            var backTo by rememberSaveable { mutableStateOf<Dest?>(null) }
             val unread by vm.unreadTotal.collectAsStateWithLifecycle()
             val update by vm.update.collectAsStateWithLifecycle()
-            val drawer = rememberDrawerState(DrawerValue.Closed)
-            val scope = rememberCoroutineScope()
             var openChat by remember { mutableStateOf<Pair<String, String>?>(null) }
 
-            fun go(d: Dest) {
-                when (d) {
-                    Dest.PLAN -> vm.setMode(ListMode.PLAN)
-                    Dest.SHOP -> vm.setMode(ListMode.SHOP)
-                    else -> Unit
-                }
+            fun go(d: Dest, from: Dest? = null) {
                 dest = d
-                scope.launch { drawer.close() }
+                backTo = from
             }
 
-            BackHandler(enabled = drawer.isOpen || (dest != Dest.PLAN && dest != Dest.SHOP)) {
-                if (drawer.isOpen) scope.launch { drawer.close() } else dest = if (mode == ListMode.SHOP) Dest.SHOP else Dest.PLAN
+            fun back() {
+                go(backTo ?: Dest.LIST)
             }
 
-            ModalNavigationDrawer(
-                drawerState = drawer,
-                drawerContent = {
-                    ModalDrawerSheet(Modifier.widthIn(max = 320.dp)) {
-                        Column(Modifier.verticalScroll(rememberScrollState()).padding(vertical = 8.dp)) {
-                            Text(
-                                household.name,
-                                style = MaterialTheme.typography.titleLarge,
-                                modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
-                            )
-                            DrawerItem("הכנת רשימה", Icons.AutoMirrored.Filled.List, dest == Dest.PLAN) { go(Dest.PLAN) }
-                            DrawerItem("בקנייה", Icons.Default.ShoppingCart, dest == Dest.SHOP) { go(Dest.SHOP) }
-                            DrawerItem("תפריט", Icons.Default.Restaurant, dest == Dest.MENU) { go(Dest.MENU) }
-                            DrawerItem("הודעות", Icons.AutoMirrored.Filled.Chat, dest == Dest.MESSAGES, badge = unread.takeIf { it > 0 }?.toString()) { go(Dest.MESSAGES) }
-                            DrawerItem("היסטוריה", Icons.Default.History, dest == Dest.HISTORY) { go(Dest.HISTORY) }
-                            DrawerItem("סניפים ומחירים", Icons.Default.Storefront, dest == Dest.PRICES) { go(Dest.PRICES) }
-                            HorizontalDivider(Modifier.padding(vertical = 8.dp, horizontal = 24.dp))
-                            DrawerItem("הבית ומשתתפים", Icons.Default.Group, dest == Dest.HOUSEHOLD) { go(Dest.HOUSEHOLD) }
-                            DrawerItem("חשבון", Icons.Default.AccountCircle, dest == Dest.ACCOUNT) { go(Dest.ACCOUNT) }
-                            DrawerItem("הגדרות תצוגה", Icons.Default.Tune, dest == Dest.SETTINGS) { go(Dest.SETTINGS) }
-                            DrawerItem("מראה", Icons.Default.Palette, dest == Dest.APPEARANCE) { go(Dest.APPEARANCE) }
-                            DrawerItem(
-                                "עדכונים", Icons.Default.SystemUpdate, dest == Dest.UPDATES,
-                                badge = if (update is UpdateState.Available) "חדש" else null,
-                            ) { go(Dest.UPDATES) }
-                            DrawerItem("אודות", Icons.Default.Info, dest == Dest.ABOUT) { go(Dest.ABOUT) }
-                        }
-                    }
-                },
+            val shoppingOnList = dest == Dest.LIST && mode == ListMode.SHOP
+            BackHandler(enabled = dest != Dest.LIST || shoppingOnList) {
+                if (shoppingOnList) vm.setMode(ListMode.PLAN) else back()
+            }
+
+            CompositionLocalProvider(
+                LocalNavBack provides (if (backTo != null) ({ back() }) else null),
+                LocalUnreadTotal provides unread,
             ) {
-                CompositionLocalProvider(
-                    LocalOpenDrawer provides { scope.launch { drawer.open() } },
-                    LocalUnreadTotal provides unread,
-                ) {
-                    Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
-                        val modifier = Modifier.padding(padding)
-                        when (dest) {
-                            Dest.PLAN, Dest.SHOP -> ListScreen(vm, household.name, modifier, onOpenMessages = { go(Dest.MESSAGES) }, onOpenDisplaySettings = { go(Dest.SETTINGS) })
-                            Dest.MENU -> MenuScreen(vm, modifier)
-                            Dest.MESSAGES -> MessagesScreen(vm, modifier, onOpen = { itemId, name -> openChat = itemId to name })
-                            Dest.HISTORY -> HistoryScreen(vm, modifier)
-                            Dest.PRICES -> PricesScreen(vm, modifier)
-                            Dest.HOUSEHOLD -> HouseholdScreen(vm, household, s.account, s.userId, modifier)
-                            Dest.ACCOUNT -> AccountScreen(vm, s.account, modifier)
-                            Dest.SETTINGS -> DisplaySettingsScreen(vm, modifier)
-                            Dest.APPEARANCE -> AppearanceScreen(vm, modifier)
-                            Dest.UPDATES -> UpdatesScreen(vm, modifier)
-                            Dest.ABOUT -> AboutScreen(modifier)
+                Scaffold(
+                    snackbarHost = { SnackbarHost(snackbar) },
+                    bottomBar = {
+                        // shopping is a focused mode: the list takes the whole screen and has its own way back
+                        if (!shoppingOnList) {
+                            BottomBar(
+                                current = dest.tab,
+                                homeBadge = when {
+                                    unread > 0 -> "$unread"
+                                    update is UpdateState.Available -> "חדש"
+                                    else -> null
+                                },
+                                onSelect = { go(it) },
+                            )
                         }
+                    },
+                ) { padding ->
+                    val modifier = Modifier.padding(padding)
+                    when (dest) {
+                        Dest.LIST -> ListScreen(
+                            vm, household.name, modifier,
+                            onOpenMessages = { go(Dest.MESSAGES, from = Dest.LIST) },
+                            onOpenDisplaySettings = { go(Dest.SETTINGS, from = Dest.LIST) },
+                        )
+                        Dest.MENU -> MenuScreen(vm, modifier)
+                        Dest.PRICES -> PricesScreen(vm, modifier)
+                        Dest.HOME -> HomeHubScreen(
+                            vm, household.name, modifier,
+                            entries = listOf(
+                                listOf(
+                                    HubEntry(Dest.HOUSEHOLD.title, Icons.Default.Group) { go(Dest.HOUSEHOLD, from = Dest.HOME) },
+                                    HubEntry(Dest.MESSAGES.title, Icons.AutoMirrored.Filled.Chat, badge = unread.takeIf { it > 0 }?.toString()) {
+                                        go(Dest.MESSAGES, from = Dest.HOME)
+                                    },
+                                    HubEntry(Dest.HISTORY.title, Icons.Default.History) { go(Dest.HISTORY, from = Dest.HOME) },
+                                ),
+                                listOf(
+                                    HubEntry(Dest.ACCOUNT.title, Icons.Default.AccountCircle) { go(Dest.ACCOUNT, from = Dest.HOME) },
+                                    HubEntry(Dest.SETTINGS.title, Icons.Default.Tune) { go(Dest.SETTINGS, from = Dest.HOME) },
+                                    HubEntry(Dest.APPEARANCE.title, Icons.Default.Palette) { go(Dest.APPEARANCE, from = Dest.HOME) },
+                                ),
+                                listOf(
+                                    HubEntry(
+                                        Dest.UPDATES.title, Icons.Default.SystemUpdate,
+                                        badge = if (update is UpdateState.Available) "חדש" else null,
+                                    ) { go(Dest.UPDATES, from = Dest.HOME) },
+                                    HubEntry(Dest.ABOUT.title, Icons.Default.Info) { go(Dest.ABOUT, from = Dest.HOME) },
+                                ),
+                            ),
+                        )
+                        Dest.MESSAGES -> MessagesScreen(vm, modifier, onOpen = { itemId, name -> openChat = itemId to name })
+                        Dest.HISTORY -> HistoryScreen(vm, modifier)
+                        Dest.HOUSEHOLD -> HouseholdScreen(vm, household, s.account, s.userId, modifier)
+                        Dest.ACCOUNT -> AccountScreen(vm, s.account, modifier)
+                        Dest.SETTINGS -> DisplaySettingsScreen(vm, modifier)
+                        Dest.APPEARANCE -> AppearanceScreen(vm, modifier)
+                        Dest.UPDATES -> UpdatesScreen(vm, modifier)
+                        Dest.ABOUT -> AboutScreen(modifier)
                     }
                 }
             }
@@ -204,14 +210,33 @@ private fun Root(vm: AppViewModel) {
     }
 }
 
+/** The four tabs: רשימה · תפריט · מחירים · הבית. The lit tab gets a tinted pill behind its icon. */
 @Composable
-private fun DrawerItem(label: String, icon: ImageVector, selected: Boolean, badge: String? = null, onClick: () -> Unit) {
-    NavigationDrawerItem(
-        label = { Text(label, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) },
-        icon = { Icon(icon, null) },
-        selected = selected,
-        onClick = onClick,
-        badge = badge?.let { { Badge { Text(it) } } },
-        modifier = Modifier.padding(horizontal = 12.dp),
-    )
+private fun BottomBar(current: Dest, homeBadge: String?, onSelect: (Dest) -> Unit) {
+    NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
+        listOf(
+            Dest.LIST to Icons.AutoMirrored.Filled.List,
+            Dest.MENU to Icons.Default.Restaurant,
+            Dest.PRICES to Icons.Default.Sell,
+            Dest.HOME to Icons.Default.Home,
+        ).forEach { (tab, icon) ->
+            val selected = current == tab
+            NavigationBarItem(
+                selected = selected,
+                onClick = { onSelect(tab) },
+                icon = {
+                    val badge = if (tab == Dest.HOME) homeBadge else null
+                    BadgedBox(badge = { if (badge != null) Badge { Text(badge) } }) { Icon(icon, contentDescription = null) }
+                },
+                label = { Text(tab.title, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal) },
+                colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = MaterialTheme.colorScheme.primary,
+                    selectedTextColor = MaterialTheme.colorScheme.primary,
+                    indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
+            )
+        }
+    }
 }

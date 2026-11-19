@@ -106,6 +106,14 @@ class ShoppingService(
         }
     }
 
+    /** Replaces the dishes a line serves (after a recipe was taken off the list); no dishes left = no recipe name. */
+    suspend fun setRecipeParts(householdId: String, line: ListLine, parts: List<RecipePart>) =
+        repository.updateLineRecipes(
+            householdId, line.id,
+            line.recipe?.takeIf { r -> parts.any { it.dish == r } } ?: parts.firstOrNull()?.dish,
+            parts, clock.nowMillis(),
+        )
+
     /** Sets how much of a line one dish needs (after its servings changed). */
     suspend fun setRecipePart(householdId: String, line: ListLine, part: RecipePart) =
         repository.updateLineRecipes(householdId, line.id, line.recipe ?: part.dish, RecipeParts.replace(line.recipeParts, part), clock.nowMillis())

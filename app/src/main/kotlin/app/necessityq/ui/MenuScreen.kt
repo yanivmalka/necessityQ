@@ -2,6 +2,10 @@ package app.necessityq.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -118,6 +122,8 @@ fun MenuScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
 private fun MenuHome(vm: AppViewModel, modifier: Modifier, onOpen: (MenuPage) -> Unit) {
     val data by vm.meals.collectAsStateWithLifecycle()
     val purchases by vm.purchases.collectAsStateWithLifecycle()
+    val listSnapshot by vm.snapshot.collectAsStateWithLifecycle()
+    val listLines = listSnapshot?.lines.orEmpty()
     val today = remember { LocalDate.now() }
     val todayDay = today.toEpochDay()
     val horizon = 7 * data.plan.cycleWeeks
@@ -130,8 +136,8 @@ private fun MenuHome(vm: AppViewModel, modifier: Modifier, onOpen: (MenuPage) ->
 
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         TopAppBar(
-            navigationIcon = { DrawerButton() },
-            title = { Text("תפריט", fontWeight = FontWeight.ExtraBold) },
+            navigationIcon = { BackNavButton() },
+            title = { Text("התפריט", style = MaterialTheme.typography.titleLarge) },
             actions = { IconButton(onClick = { onOpen(MenuPage.Search) }) { Icon(Icons.Default.Search, contentDescription = "חיפוש מתכון") } },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
         )
@@ -220,11 +226,16 @@ private fun MenuHome(vm: AppViewModel, modifier: Modifier, onOpen: (MenuPage) ->
                 val slots = MealPlanner.daySlots + meals.map { it.slot }.filter { it !in MealPlanner.daySlots }.distinct()
                 slots.forEach { slot ->
                     val meal = meals.firstOrNull { it.slot == slot }
+                    val slotDish = meal?.let { dishes[it.dishId] }
                     SlotRow(
                         slot = slot,
                         meal = meal,
-                        dish = meal?.let { dishes[it.dishId] },
+                        dish = slotDish,
                         members = data.members,
+                        onList = slotDish != null && app.necessityq.domain.RecipeListSync.onList(listLines, slotDish).isNotEmpty(),
+                        onAddToList = {
+                            if (slotDish != null && meal != null) vm.addRecipeToList(slotDish.id, meal.servings ?: slotDish.plannedServings)
+                        },
                         onPick = { picking = selected to slot },
                         onOpenRecipe = { id -> onOpen(MenuPage.Recipe(id)) },
                         onToggleCooked = { cooked -> vm.updateMeals { MealPlanner.setCooked(it, selected, slot, cooked) } },
@@ -342,21 +353,31 @@ private fun MemberBubble(member: FamilyMember, isMe: Boolean, age: String?, onCl
 
 @Composable
 private fun DayChip(date: LocalDate, isToday: Boolean, selected: Boolean, meals: List<ResolvedMeal>, onClick: () -> Unit) {
+    val shabbat = date.dayOfWeek == java.time.DayOfWeek.FRIDAY || date.dayOfWeek == java.time.DayOfWeek.SATURDAY
     val bg = when {
         selected -> MaterialTheme.colorScheme.primary
         isToday -> MaterialTheme.colorScheme.primaryContainer
-        else -> MaterialTheme.colorScheme.surfaceVariant
+        shabbat -> MaterialTheme.colorScheme.secondaryContainer
+        else -> MaterialTheme.colorScheme.surface
     }
+    val border = if (selected || isToday) Color.Transparent else NqTheme.colors.hairline
     val fg = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+    val dot = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
     Column(
-        Modifier.width(52.dp).background(bg, RoundedCornerShape(16.dp)).clickable(onClick = onClick).padding(vertical = 8.dp),
+        Modifier.width(52.dp).height(68.dp).clip(RoundedCornerShape(14.dp)).background(bg)
+            .border(1.dp, border, RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
-        Text(MealPlanner.shortDayNames[MealPlanner.weekdayIndex(date)], style = MaterialTheme.typography.labelMedium, color = fg)
-        Text("${date.dayOfMonth}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, color = fg)
-        Row(horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.height(8.dp)) {
+        Text(
+            MealPlanner.shortDayNames[MealPlanner.weekdayIndex(date)],
+            style = MaterialTheme.typography.labelMedium,
+            color = if (selected) fg else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text("${date.dayOfMonth}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = fg)
+        Row(horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.height(8.dp), verticalAlignment = Alignment.CenterVertically) {
             meals.take(3).forEach { m ->
-                Box(Modifier.size(6.dp).background(if (m.cooked) fg.copy(alpha = 0.4f) else fg, CircleShape))
+                Box(Modifier.size(5.dp).background(if (m.cooked) dot.copy(alpha = 0.4f) else dot, CircleShape))
             }
         }
     }
@@ -368,6 +389,8 @@ private fun SlotRow(
     meal: ResolvedMeal?,
     dish: Dish?,
     members: List<FamilyMember>,
+    onList: Boolean,
+    onAddToList: () -> Unit,
     onPick: () -> Unit,
     onOpenRecipe: (String) -> Unit,
     onToggleCooked: (Boolean) -> Unit,
@@ -389,6 +412,23 @@ private fun SlotRow(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // where the meal stands with the shopping list: on it (kept in step with servings), or one tap away
+                if (!meal.cooked) {
+                    if (onList) {
+                        Text(
+                            "ברשימה · מתעדכן",
+                            Modifier.padding(top = 4.dp).clip(NqShapes.Pill).background(MaterialTheme.colorScheme.primaryContainer)
+                                .padding(horizontal = 10.dp, vertical = 3.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    } else {
+                        TextButton(onClick = onAddToList, contentPadding = PaddingValues(horizontal = 0.dp)) {
+                            Text("+ מרכיבים לרשימה", fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
             }
         }
         if (dish != null && meal != null) {
@@ -430,10 +470,11 @@ private fun MenuCard(title: String, content: @Composable () -> Unit) {
     Card(
         shape = NqShapes.Tile,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.5.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, NqTheme.colors.hairline),
     ) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             content()
         }
     }

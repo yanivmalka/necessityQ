@@ -168,7 +168,7 @@ fun ItemSheet(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (favorite) Icon(Icons.Default.Star, "מועדף", tint = NqPalette.FavoriteStar)
-                Text(line?.displayName ?: itemName, style = ProductNameStyle, modifier = Modifier.weight(1f).padding(horizontal = 4.dp))
+                Text(line?.displayName ?: itemName, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f).padding(horizontal = 4.dp))
                 // ⋮ actions — on the left edge in Hebrew layout
                 androidx.compose.foundation.layout.Box {
                     var menu by remember { mutableStateOf(false) }
@@ -243,6 +243,10 @@ fun ItemSheet(
                 Button(onClick = { vm.addByName(itemName) }) { Text("הוספה לרשימה") }
             }
 
+            // how the household buys it: always visible once there is history
+            stats?.let { s ->
+                RhythmCard(s, purchases.filter { it.itemId == itemId }.map { it.boughtAtMillis })
+            }
             HorizontalDivider()
             // category, source and statistics: collapsed until asked for
             Row(
@@ -953,7 +957,7 @@ fun MessagesScreen(vm: AppViewModel, modifier: Modifier = Modifier, onOpen: (ite
 
     Column(modifier.fillMaxSize()) {
         TopAppBar(
-            navigationIcon = { DrawerButton() },
+            navigationIcon = { BackNavButton() },
             title = { Text("הודעות על מוצרים", fontWeight = FontWeight.ExtraBold) },
             actions = {
                 IconButton(onClick = { showRetention = true }) { Icon(Icons.Default.Schedule, contentDescription = "משך שמירת שיחות שהסתיימו") }
