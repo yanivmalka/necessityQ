@@ -128,9 +128,19 @@ object PriceData {
 
     fun formatPrice(price: Double): String = String.format(java.util.Locale.US, "₪%.2f", price)
 
-    /** "₪5.90" when the range is a single price, otherwise "₪5.50–₪6.90". */
-    fun formatRange(low: Double, high: Double): String =
-        if (kotlin.math.abs(high - low) < 0.005) formatPrice(low) else "${formatPrice(low)}–${formatPrice(high)}"
+    /**
+     * "₪5.90" when the range is a single price, otherwise "₪5.50–₪6.90" ("₪5.50–6.90" without [currencyOnBoth]),
+     * kept left-to-right so the low price sits left of the dash and the high one right of it in Hebrew text.
+     */
+    fun formatRange(low: Double, high: Double, currencyOnBoth: Boolean = true): String =
+        if (kotlin.math.abs(high - low) < 0.005) formatPrice(low)
+        else ltrRange(formatPrice(low), if (currencyOnBoth) formatPrice(high) else String.format(java.util.Locale.US, "%.2f", high))
+
+    /**
+     * "low–high" wrapped in a left-to-right isolate (U+2066 … U+2069). In a right-to-left line the bidi algorithm
+     * would otherwise lay the two numbers out right-to-left, putting the high one on the left.
+     */
+    fun ltrRange(low: String, high: String): String = "\u2066$low–$high\u2069"
 }
 
 /** Port to the price data (Firestore index + per-branch snapshots in the backend). */

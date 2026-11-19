@@ -1274,7 +1274,7 @@ private fun costText(estimate: app.necessityq.domain.ListCostEstimate): String {
     val prefix = if (estimate.complete) "" else "~"
     return when {
         estimate.pricedLines == 0 -> "₪ —"
-        estimate.isRange -> prefix + "₪%.0f–%.0f".format(estimate.low, estimate.high)
+        estimate.isRange -> prefix + app.necessityq.domain.PriceData.ltrRange("₪%.0f".format(estimate.low), "%.0f".format(estimate.high))
         else -> prefix + "₪%.0f".format(estimate.low)
     }
 }
@@ -1513,17 +1513,17 @@ fun PriceSlot(
     // the household's own price wins; otherwise the branch data: chosen product, or the typical range
     val (main, sub) = when {
         price != null -> "₪%.2f".format(price) to "ממוצע " + (average?.let { "₪%.2f".format(it) } ?: "—")
-        weighted != null -> app.necessityq.domain.PriceData.formatRange(weighted.low, weighted.high).replace("–₪", "–") to
+        weighted != null -> app.necessityq.domain.PriceData.formatRange(weighted.low, weighted.high, currencyOnBoth = false) to
             listOfNotNull(quantity?.format(), weighted.estimatedWeight?.let { app.necessityq.domain.PieceWeights.label(it) })
                 .joinToString(" ").ifEmpty { "לפי משקל" }
         info?.preferred != null -> app.necessityq.domain.PriceData.formatPrice(info.preferred!!.price) to "המוצר שבחרת"
         // produce priced per kilo with no amount on the list: the price is per kilo
         info != null && info.candidates.isNotEmpty() && info.candidates.all { it.soldByWeight } ->
-            app.necessityq.domain.PriceData.formatRange(info.low, info.high).replace("–₪", "–") to "לק\"ג"
+            app.necessityq.domain.PriceData.formatRange(info.low, info.high, currencyOnBoth = false) to "לק\"ג"
         info != null -> {
             // packaged goods: the price of the amount on the list ("2 יח'"), not a count of matching products
             val n = app.necessityq.domain.ListCost.packages(quantity, false) ?: 1.0
-            app.necessityq.domain.PriceData.formatRange(info.low * n, info.high * n).replace("–₪", "–") to
+            app.necessityq.domain.PriceData.formatRange(info.low * n, info.high * n, currencyOnBoth = false) to
                 (quantity?.format() ?: if (info.candidates.size == 1) "מוצר אחד" else "${info.candidates.size} מוצרים")
         }
         else -> "₪ —" to "ממוצע " + (average?.let { "₪%.2f".format(it) } ?: "—")
