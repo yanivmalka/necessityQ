@@ -19,6 +19,7 @@ import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -1297,14 +1298,13 @@ private fun ProductTile(
     }
 }
 
-/** The estimated cost as one short text: "₪184", "~₪184" when not every line has a price, or a range. */
+/** The estimated cost as one short text: "184 ₪", "~184 ₪" when not every line has a price, or "~150–184 ₪". */
 private fun costText(estimate: app.necessityq.domain.ListCostEstimate): String {
     val prefix = if (estimate.complete) "" else "~"
     return when {
-        estimate.pricedLines == 0 -> "₪ —"
-        // right-to-left: the dear price first, so the cheap one ends up on the left
-        estimate.isRange -> prefix + "₪%.0f–%.0f".format(estimate.high, estimate.low)
-        else -> prefix + "₪%.0f".format(estimate.low)
+        estimate.pricedLines == 0 -> "\u200E—\u00A0₪\u200E"
+        estimate.isRange -> app.necessityq.domain.PriceData.formatRange(estimate.low, estimate.high, decimals = 0, prefix = prefix)
+        else -> app.necessityq.domain.PriceData.formatRange(estimate.low, estimate.low, decimals = 0, prefix = prefix)
     }
 }
 
@@ -1541,21 +1541,21 @@ fun PriceSlot(
 ) {
     // the household's own price wins; otherwise the branch data: chosen product, or the typical range
     val (main, sub) = when {
-        price != null -> "₪%.2f".format(price) to "ממוצע " + (average?.let { "₪%.2f".format(it) } ?: "—")
-        weighted != null -> app.necessityq.domain.PriceData.formatRange(weighted.low, weighted.high).replace("–₪", "–") to
+        price != null -> app.necessityq.domain.PriceData.formatPrice(price) to "ממוצע " + (average?.let { app.necessityq.domain.PriceData.formatPrice(it) } ?: "—")
+        weighted != null -> app.necessityq.domain.PriceData.formatRange(weighted.low, weighted.high) to
             listOfNotNull(quantity?.format(), weighted.estimatedWeight?.let { app.necessityq.domain.PieceWeights.label(it) })
                 .joinToString(" ").ifEmpty { "לפי משקל" }
         info?.preferred != null -> app.necessityq.domain.PriceData.formatPrice(info.preferred!!.price) to "המוצר שבחרת"
         // produce priced per kilo with no amount on the list: the price is per kilo
         info != null && info.candidates.isNotEmpty() && info.candidates.all { it.soldByWeight } ->
-            app.necessityq.domain.PriceData.formatRange(info.low, info.high).replace("–₪", "–") to "לק\"ג"
+            app.necessityq.domain.PriceData.formatRange(info.low, info.high) to "לק\"ג"
         info != null -> {
             // packaged goods: the price of the amount on the list ("2 יח'"), not a count of matching products
             val n = app.necessityq.domain.ListCost.packages(quantity, false) ?: 1.0
-            app.necessityq.domain.PriceData.formatRange(info.low * n, info.high * n).replace("–₪", "–") to
+            app.necessityq.domain.PriceData.formatRange(info.low * n, info.high * n) to
                 (quantity?.format() ?: if (info.candidates.size == 1) "מוצר אחד" else "${info.candidates.size} מוצרים")
         }
-        else -> "₪ —" to "ממוצע " + (average?.let { "₪%.2f".format(it) } ?: "—")
+        else -> "\u200E—\u00A0₪\u200E" to "ממוצע " + (average?.let { app.necessityq.domain.PriceData.formatPrice(it) } ?: "—")
     }
     Column(
         Modifier.widthIn(min = 68.dp).clip(NqShapes.Panel)
@@ -1624,11 +1624,14 @@ fun QuantityStepper(quantity: Quantity?, onMinus: () -> Unit, onPlus: () -> Unit
         IconButton(onClick = onPlus, modifier = Modifier.size(38.dp)) {
             Icon(Icons.Default.Add, contentDescription = "יותר", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
         }
-        Text(
-            quantity?.format() ?: "—", fontWeight = FontWeight.ExtraBold,
-            modifier = Modifier.widthIn(min = 36.dp).let { if (onSet != null) it.clickable { editing = true } else it },
-            textAlign = TextAlign.Center,
-        )
+        // the whole height of the pill between the buttons opens the keyboard, not just the glyphs
+        Box(
+            Modifier.heightIn(min = 38.dp).widthIn(min = 44.dp)
+                .let { if (onSet != null) it.clickable(onClickLabel = "הקלדת כמות") { editing = true } else it },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(quantity?.format() ?: "—", fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center)
+        }
         IconButton(onClick = onMinus, modifier = Modifier.size(38.dp)) { Icon(Icons.Default.Remove, contentDescription = "פחות", Modifier.size(20.dp)) }
     }
 }

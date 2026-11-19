@@ -57,8 +57,12 @@ class PricesTest {
 
     @Test
     fun formats() {
-        assertEquals("₪5.90", PriceData.formatRange(5.9, 5.9))
-        assertEquals("₪6.90–₪5.50", PriceData.formatRange(5.5, 6.9)) // right-to-left: cheap on the left
+        // one left-to-right unit (between LRM marks): cheap on the left, dear on the right, ₪ at the far right
+        assertEquals("\u200E5.90\u00A0₪\u200E", PriceData.formatRange(5.9, 5.9))
+        assertEquals("\u200E5.50–6.90\u00A0₪\u200E", PriceData.formatRange(5.5, 6.9))
+        assertEquals("\u200E5.50–6.90\u00A0₪\u200E", PriceData.formatRange(6.9, 5.5))
+        assertEquals("\u200E~150–184\u00A0₪\u200E", PriceData.formatRange(150.2, 184.0, decimals = 0, prefix = "~"))
+        assertEquals("\u200E3.50\u00A0₪\u200E", PriceData.formatPrice(3.5))
         assertEquals("1.2 ק\"מ", PriceData.formatDistance(1234.0))
         assertEquals("350 מ'", PriceData.formatDistance(351.0))
     }
