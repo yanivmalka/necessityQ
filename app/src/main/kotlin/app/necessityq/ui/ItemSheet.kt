@@ -1,5 +1,7 @@
 package app.necessityq.ui
 
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -791,6 +793,9 @@ private fun retentionText(days: Int?): String = when {
     else -> "שיחות שהסתיימו נשמרות $days ימים ואז נמחקות; נשארות רק סטטיסטיקות."
 }
 
+/** Past conversations shown at a time; "load more" adds as many again. */
+private const val PAST_PAGE = 50
+
 /**
  * All product conversations of the current shopping, newest first, with unread counts — and below them
  * the conversations of finished shoppings, which wait out the retention period before they are deleted.
@@ -813,6 +818,11 @@ fun MessagesScreen(vm: AppViewModel, modifier: Modifier = Modifier, onOpen: (ite
         .sortedByDescending { it.last().archivedAtMillis ?: 0L }
     var showRetention by remember { mutableStateOf(false) }
     var openArchived by remember { mutableStateOf<List<ItemMessage>?>(null) }
+    // past conversations stay folded under their title, and open fifty at a time
+    var pastOpen by rememberSaveable { mutableStateOf(false) }
+    var pastShown by rememberSaveable { androidx.compose.runtime.mutableIntStateOf(PAST_PAGE) }
+    val names by vm.memberNames.collectAsStateWithLifecycle()
+    fun who(m: ItemMessage) = if (m.authorId == vm.me) "אני" else names[m.authorId] ?: m.authorName
     var confirmDelete by remember { mutableStateOf<List<ItemMessage>?>(null) }
 
     Column(modifier.fillMaxSize()) {
@@ -848,7 +858,7 @@ fun MessagesScreen(vm: AppViewModel, modifier: Modifier = Modifier, onOpen: (ite
                             }
                         }
                         Text(
-                            "${if (last.authorId == vm.me) "אני" else last.authorName}: ${last.preview}",
+                            "${who(last)}: ${last.preview}",
                             maxLines = 2,
                             style = MaterialTheme.typography.bodyMedium,
                         )
@@ -860,12 +870,29 @@ fun MessagesScreen(vm: AppViewModel, modifier: Modifier = Modifier, onOpen: (ite
             }
             if (archivedThreads.isNotEmpty()) {
                 item(key = "archived_title") {
-                    Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 6.dp)) {
-                        Text("שיחות מקניות קודמות (${archivedThreads.size})", style = MaterialTheme.typography.titleSmall)
-                        Text(retentionText(retention), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val turn by androidx.compose.animation.core.animateFloatAsState(if (pastOpen) 180f else 0f, label = "pastArrow")
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .clickable(onClickLabel = if (pastOpen) "סגירה" else "פתיחה") { pastOpen = !pastOpen; if (!pastOpen) pastShown = PAST_PAGE }
+                            .padding(start = 16.dp, end = 12.dp, top = 16.dp, bottom = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("שיחות מקניות קודמות (${archivedThreads.size})", style = MaterialTheme.typography.titleSmall)
+                            Text(retentionText(retention), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Icon(
+                            Icons.Default.KeyboardArrowDown,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.graphicsLayer { rotationZ = turn },
+                        )
                     }
+                    HorizontalDivider()
                 }
-                items(archivedThreads, key = { "arch_${it.first().itemId}_${it.last().archivedAtMillis}" }) { thread ->
+            }
+            if (archivedThreads.isNotEmpty() && pastOpen) {
+                items(archivedThreads.take(pastShown), key = { "arch_${it.first().itemId}_${it.last().archivedAtMillis}" }) { thread ->
                     val last = thread.last()
                     Row(
                         Modifier.fillMaxWidth().clickable { openArchived = thread }.padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
@@ -873,7 +900,7 @@ fun MessagesScreen(vm: AppViewModel, modifier: Modifier = Modifier, onOpen: (ite
                     ) {
                         Column(Modifier.weight(1f)) {
                             Text(last.itemName, style = MaterialTheme.typography.titleMedium)
-                            Text("${last.authorName}: ${last.preview}", maxLines = 1, style = MaterialTheme.typography.bodyMedium)
+                            Text("${who(last)}: ${last.preview}", maxLines = 1, style = MaterialTheme.typography.bodyMedium)
                             val endedAt = last.archivedAtMillis ?: 0L
                             val deleteAt = retention?.let { ConversationRetention.deleteAt(endedAt, it) }
                             Text(
@@ -885,6 +912,15 @@ fun MessagesScreen(vm: AppViewModel, modifier: Modifier = Modifier, onOpen: (ite
                         IconButton(onClick = { confirmDelete = thread }) { Icon(Icons.Default.Delete, contentDescription = "מחיקת השיחה") }
                     }
                     HorizontalDivider()
+                }
+                val more = archivedThreads.size - pastShown
+                if (more > 0) {
+                    item(key = "archived_more") {
+                        androidx.compose.material3.TextButton(
+                            onClick = { pastShown += PAST_PAGE },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        ) { Text("טעינת עוד ${minOf(more, PAST_PAGE)} שיחות (נשארו $more)") }
+                    }
                 }
             }
         }
