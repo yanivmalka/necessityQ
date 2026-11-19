@@ -1598,8 +1598,11 @@ fun PriceSlot(
                 .joinToString(" ").ifEmpty { "לפי משקל" }
         info?.preferred != null -> app.necessityq.domain.PriceData.formatPrice(info.preferred!!.price) to "המוצר שבחרת"
         // produce priced per kilo with no amount on the list: the price is per kilo
-        info != null && info.candidates.isNotEmpty() && info.candidates.all { it.soldByWeight } ->
+        info != null && info.perKilo ->
             app.necessityq.domain.PriceData.formatRange(info.low, info.high) to "לק\"ג"
+        // sold by weight, but per what weight is not known: no price rather than a wrong one
+        info != null && app.necessityq.domain.ItemPrices.byWeight(info.candidates) ->
+            "\u200E—\u00A0₪\u200E" to "במשקל"
         info != null -> {
             // packaged goods: the price of the amount on the list ("2 יח'"), not a count of matching products
             val n = app.necessityq.domain.ListCost.packages(quantity, false) ?: 1.0

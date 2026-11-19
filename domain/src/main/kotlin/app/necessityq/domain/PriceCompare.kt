@@ -125,10 +125,13 @@ object PriceComparisons {
         return PriceComparison(here.branchId, median(ratios) - 1, basis, BranchPriceRange(here.branchId, here.low, here.high), quotes.sortedBy { (it.low + it.high) / 2 })
     }
 
-    /** Median price of the item's products, when there are enough of them to stand for the branch. */
+    /**
+     * Median price of the item's products, when there are enough of them to stand for the branch. Sold by weight:
+     * the median per kilo (one branch may price olives per 100 g, another per kg), unknown price units left out.
+     */
     private fun typical(info: ItemPriceInfo): Double? {
-        val prices = info.candidates.map { it.price }.filter { it > 0 }
-        val byKilo = info.candidates.isNotEmpty() && info.candidates.all { it.soldByWeight }
+        val byKilo = ItemPrices.byWeight(info.candidates)
+        val prices = (if (byKilo) info.candidates.mapNotNull { it.pricePerKilo } else info.candidates.map { it.price }).filter { it > 0 }
         if (prices.isEmpty() || (prices.size < MIN_TYPICAL && !byKilo)) return null
         return median(prices)
     }

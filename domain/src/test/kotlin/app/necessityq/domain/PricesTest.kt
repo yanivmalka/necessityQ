@@ -248,4 +248,57 @@ class WeightUnitTest {
             assertEquals(0.0, e.low, 1e-9)
         }
     }
+
+    private fun index(branch: String, vararg products: BranchProduct) = ProductIndex(branch, 0, products.toList())
+
+    @Test
+    fun theItemRangeIsPerKiloAndTheCheapestPerKiloComesFirst() {
+        val olives100g = weighed("o", 4.9, "גרם", "100 גרם").copy(name = "זיתים ירוקים")
+        val olivesKg = weighed("k", 39.0, "ק\"ג", "קילוגרם").copy(name = "זיתים שחורים")
+        val info = ItemPrices.info(index("b", olives100g, olivesKg), "זיתים", null, null)!!
+        assertEquals(true, info.perKilo)
+        assertEquals(39.0, info.low, 1e-9)
+        assertEquals(49.0, info.high, 1e-9)
+        // 4.90 per 100 g is 49 per kg: dearer than 39 per kg
+        assertEquals(listOf("k", "o"), info.candidates.map { it.code })
+        // a quantity-less line counts a kilo at the per-kilo range
+        val e = ListCost.of(listOf(line(null)), emptyMap(), mapOf("olives" to info))
+        assertEquals(39.0, e.low, 1e-9)
+        assertEquals(49.0, e.high, 1e-9)
+    }
+
+    @Test
+    fun anItemByWeightWithUnknownUnitsIsNotReadPerKilo() {
+        val known = weighed("k", 39.0, "ק\"ג", "קילוגרם").copy(name = "זיתים שחורים")
+        val odd = weighed("x", 4.9, "גרם", "").copy(name = "זיתים ירוקים") // older snapshot: "גרם" alone
+        // the unknown unit is left out of the range and listed last
+        val mixed = ItemPrices.info(index("b", odd, known), "זיתים", null, null)!!
+        assertEquals(true, mixed.perKilo)
+        assertEquals(39.0 to 39.0, mixed.low to mixed.high)
+        assertEquals(listOf("k", "x"), mixed.candidates.map { it.code })
+        // none known: the published prices, not marked per kilo, and not added to the list total
+        val unknown = ItemPrices.info(index("b", odd), "זיתים", null, null)!!
+        assertEquals(false, unknown.perKilo)
+        assertEquals(4.9, unknown.low, 1e-9)
+        assertEquals(0, ListCost.of(listOf(line(null)), emptyMap(), mapOf("olives" to unknown)).pricedLines)
+        // packaged goods are unchanged
+        val jar = BranchProduct("7290000000001", "זיתים בצנצנת", "", 500.0, "גרם", false, false, 12.9, null, "", 12.9, 12.9, measure = "100 גרם")
+        val packaged = ItemPrices.info(index("b", jar), "זיתים", null, null)!!
+        assertEquals(false, packaged.perKilo)
+        assertEquals(12.9, packaged.low, 1e-9)
+    }
+
+    @Test
+    fun branchesAreComparedPerKilo() {
+        // branch a prices olives per 100 g, branch b per kilo; internal codes, so only the typical prices compare
+        val here = ItemPriceInfo("a", 49.0, 49.0, listOf(weighed("a1", 4.9, "גרם", "100 גרם")), null, perKilo = true)
+        val other = ItemPriceInfo("b", 39.0, 39.0, listOf(weighed("b1", 39.0, "ק\"ג", "ק\"ג")), null, perKilo = true)
+        val c = PriceComparisons.item(here, mapOf("b" to other))!!
+        assertEquals(CompareBasis.TYPICAL, c.basis)
+        // 49 / 39 − 1 ≈ +26% (not 4.90 / 39 − 1 ≈ −87%)
+        assertEquals(49.0 / 39.0 - 1, c.diff, 1e-9)
+        // a branch whose unit is not known is not compared
+        val unknown = ItemPriceInfo("c", 4.9, 4.9, listOf(weighed("c1", 4.9, "גרם", "")), null)
+        assertNull(PriceComparisons.item(here, mapOf("c" to unknown)))
+    }
 }

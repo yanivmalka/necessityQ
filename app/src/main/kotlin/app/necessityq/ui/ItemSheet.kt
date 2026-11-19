@@ -1021,7 +1021,7 @@ private fun BranchPriceSection(
                     !loaded.containsKey(branch.id) -> "המחירים של הסניף נטענים…"
                     info == null -> "לא נמצאו מוצרים מתאימים בסניף"
                     info.preferred != null -> "${app.necessityq.domain.PriceData.formatPrice(info.preferred!!.price)} · ${info.preferred!!.name}"
-                    else -> "${app.necessityq.domain.PriceData.formatRange(info.low, info.high)} · ${info.candidates.size} מוצרים"
+                    else -> "${app.necessityq.domain.PriceData.formatRange(info.low, info.high)}${if (info.perKilo) " לק\"ג" else ""} · ${info.candidates.size} מוצרים"
                 },
                 style = MaterialTheme.typography.bodyMedium,
             )

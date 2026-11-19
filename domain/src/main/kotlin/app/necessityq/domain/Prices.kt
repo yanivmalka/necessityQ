@@ -250,13 +250,18 @@ class NoPriceRepository : PriceRepository {
 /** Price picture of a generic list item ("קוטג' 5%") at one branch. */
 data class ItemPriceInfo(
     val branchId: String,
-    /** typical range of the matching products (outliers trimmed) */
+    /** typical range of the matching products (outliers trimmed); per kilo when [perKilo] */
     val low: Double,
     val high: Double,
-    /** matching products, cheapest first */
+    /** matching products, cheapest first (per kilo for those sold by weight) */
     val candidates: List<BranchProduct>,
     /** the product the household chose for this item, when sold at this branch */
     val preferred: BranchProduct?,
+    /**
+     * [low]–[high] is a price per kilo: every candidate is sold by weight and at least one has a recognised
+     * price unit. False for packaged goods, and for products by weight whose price unit is not known.
+     */
+    val perKilo: Boolean = false,
 )
 
 /** Products of a branch with their search keys computed once (searching runs per list item). */
@@ -294,8 +299,12 @@ object ItemPrices {
         val found = leading.ifEmpty { matches }.map { index.entries[it].first }
         // produce: the fresh item sold by the kilo, not pickles or juice that share its name
         val fresh = if (PieceWeights.gramsPerPiece(name) != null) found.filter { it.soldByWeight } else emptyList()
-        return fresh.ifEmpty { found }.sortedBy { it.price }
+        // by weight, cheapest per kilo (4.90 per 100 g is dearer than 39 per kg); unknown price units last
+        return fresh.ifEmpty { found }.sortedWith(compareBy({ it.soldByWeight && it.pricePerKilo == null }, { it.pricePerKilo ?: it.price }))
     }
+
+    /** Every product is sold by weight: its price is per a weight, not per package. */
+    fun byWeight(products: List<BranchProduct>): Boolean = products.isNotEmpty() && products.all { it.soldByWeight }
 
     /** Typical range: the cheapest and dearest 10% are left out (from ten products on), otherwise min–max. */
     fun typicalRange(prices: List<Double>): Pair<Double, Double>? {
@@ -308,8 +317,11 @@ object ItemPrices {
     fun info(index: ProductIndex, name: String, variant: String?, preferredCode: String?): ItemPriceInfo? {
         val preferred = preferredCode?.let { index.byCode[it] }
         val candidates = candidates(index, name, variant)
-        val range = typicalRange(candidates.map { it.price }) ?: preferred?.let { it.price to it.price } ?: return null
-        return ItemPriceInfo(index.branchId, range.first, range.second, candidates, preferred)
+        // sold by weight: the range is per kilo (a price per 100 g counts ×10), leaving out unknown price units;
+        // when none is known, the prices as published (and perKilo = false, so nobody reads them per kilo)
+        val perKilo = if (byWeight(candidates)) candidates.mapNotNull { it.pricePerKilo } else emptyList()
+        val range = typicalRange(perKilo.ifEmpty { candidates.map { it.price } }) ?: preferred?.let { it.price to it.price } ?: return null
+        return ItemPriceInfo(index.branchId, range.first, range.second, candidates, preferred, perKilo = perKilo.isNotEmpty())
     }
 
     /** Distinct brands among the candidates (for the optional "choose exactly" filter). */
@@ -372,8 +384,10 @@ object ListCost {
                             low += byWeight.low
                             high += byWeight.high
                         }
-                        // sold by weight, but the unit of the price is not known: don't multiply it by a weight
+                        // sold by weight, but the unit of the price is not known: don't multiply it by a weight,
+                        // nor take the published price for a kilo
                         firstByWeight && line.quantity != null -> continue
+                        ItemPrices.byWeight(info.candidates) && !info.perKilo -> continue
                         else -> {
                             val n = packages(line.quantity, firstByWeight, grams) ?: continue
                             low += info.low * n
