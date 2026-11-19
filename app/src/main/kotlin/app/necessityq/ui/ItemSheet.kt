@@ -155,6 +155,8 @@ fun ItemSheet(
     /** Opens another item's conversation (someone is typing there); null = not offered. */
     onOpenItem: ((itemId: String, itemName: String) -> Unit)? = null,
 ) {
+    // the page slides in from the left and, on closing, slides back out before it is removed
+    val pageWindow = rememberSlidingPage(onClosed = onDismiss)
     val typing by vm.typingNow.collectAsStateWithLifecycle()
     val snapshot by vm.snapshot.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
@@ -231,10 +233,7 @@ fun ItemSheet(
     val scope = rememberCoroutineScope()
 
     // a full page (not a sheet): it closes only with the back arrow or the system back, never by scrolling
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = onDismiss,
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
-    ) {
+    SlidingPageDialog(pageWindow) {
       ItemPageWindow()
       Column(
           Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)
@@ -252,14 +251,14 @@ fun ItemSheet(
                     onDetails = { messageDetails = it },
                 )
             } else Row(Modifier.fillMaxWidth().padding(end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onDismiss) {
+                IconButton(onClick = pageWindow::close) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "חזרה")
                 }
                 if (line != null) {
                     // bought: the same round check as on the list
                     Box(
                         Modifier.size(36.dp).clip(androidx.compose.foundation.shape.CircleShape)
-                            .clickable { vm.checkOff(line); onDismiss() }
+                            .clickable { vm.checkOff(line); pageWindow.close() }
                             .semantics { contentDescription = "נקנה" },
                         contentAlignment = Alignment.Center,
                     ) {
@@ -310,7 +309,7 @@ fun ItemSheet(
                             androidx.compose.material3.DropdownMenuItem(
                                 text = { Text("הסרה מהרשימה") },
                                 leadingIcon = { Icon(Icons.Default.Delete, null) },
-                                onClick = { vm.delete(line); menu = false; onDismiss() },
+                                onClick = { vm.delete(line); menu = false; pageWindow.close() },
                             )
                         }
                     }
@@ -360,7 +359,7 @@ fun ItemSheet(
                     } else {
                         OutlinedButton(onClick = { vm.setMissing(line, true) }, content = missingContent)
                     }
-                    OutlinedButton(onClick = { vm.delete(line); onDismiss() }) {
+                    OutlinedButton(onClick = { vm.delete(line); pageWindow.close() }) {
                         Icon(Icons.Default.Delete, null, Modifier.padding(end = 4.dp).size(18.dp))
                         Text("הסרה")
                     }
@@ -584,7 +583,7 @@ fun ItemSheet(
                 if (note != line.note) vm.changeNote(line, note)
                 editing = false
             },
-            onDelete = { vm.delete(line); editing = false; onDismiss() },
+            onDelete = { vm.delete(line); editing = false; pageWindow.close() },
         )
     }
 }

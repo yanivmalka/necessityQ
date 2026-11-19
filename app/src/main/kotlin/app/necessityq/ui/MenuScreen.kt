@@ -1,5 +1,8 @@
 package app.necessityq.ui
 
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.animation.AnimatedContent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -102,23 +105,42 @@ private val shortDate = DateTimeFormatter.ofPattern("d.M")
  * bi-weekly cycle, "cooked" tracking, recipes (search, detail, servings), and menu → shopping list.
  */
 @Composable
-fun MenuScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
+fun MenuScreen(
+    vm: AppViewModel,
+    modifier: Modifier = Modifier,
+    /** Told whether a page (a recipe, the search…) is open over the menu, so swiping does not switch tabs there. */
+    onInnerPage: (Boolean) -> Unit = {},
+) {
     val stack = remember { mutableStateListOf<MenuPage>() }
     fun push(page: MenuPage) { stack.add(page) }
     fun pop() { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) }
     BackHandler(enabled = stack.isNotEmpty()) { pop() }
+    val inner = stack.isNotEmpty()
+    val latestOnInnerPage by rememberUpdatedState(onInnerPage)
+    LaunchedEffect(inner) { latestOnInnerPage(inner) }
+    DisposableEffect(Unit) { onDispose { latestOnInnerPage(false) } }
 
-    when (val page = stack.lastOrNull() ?: MenuPage.Home) {
-        MenuPage.Home -> MenuHome(vm, modifier, onOpen = { push(it) })
-        MenuPage.Search -> RecipeSearchScreen(vm, onBack = { pop() }, onOpen = { push(MenuPage.Recipe(it)) }, modifier = modifier)
-        is MenuPage.Recipe -> RecipeScreen(vm, page.dishId, onBack = { pop() }, onEdit = { push(MenuPage.EditRecipe(page.dishId)) }, modifier = modifier)
-        is MenuPage.EditRecipe -> RecipeEditScreen(
-            vm, page.dishId,
-            onBack = { pop() },
-            onSaved = { id -> pop(); if (page.dishId == null) push(MenuPage.Recipe(id)) },
-            modifier = modifier,
-        )
-        is MenuPage.Member -> MemberScreen(vm, page.memberId, onBack = { pop() }, modifier = modifier)
+    // each page opens sliding in from the left and closes sliding back out, as the app's other pages
+    AnimatedContent(
+        targetState = stack.toList(),
+        transitionSpec = { pageSlide(back = targetState.size < initialState.size) },
+        contentKey = { it.lastOrNull() ?: MenuPage.Home },
+        label = "menuPage",
+    ) { pages ->
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+            when (val page = pages.lastOrNull() ?: MenuPage.Home) {
+                MenuPage.Home -> MenuHome(vm, modifier, onOpen = { push(it) })
+                MenuPage.Search -> RecipeSearchScreen(vm, onBack = { pop() }, onOpen = { push(MenuPage.Recipe(it)) }, modifier = modifier)
+                is MenuPage.Recipe -> RecipeScreen(vm, page.dishId, onBack = { pop() }, onEdit = { push(MenuPage.EditRecipe(page.dishId)) }, modifier = modifier)
+                is MenuPage.EditRecipe -> RecipeEditScreen(
+                    vm, page.dishId,
+                    onBack = { pop() },
+                    onSaved = { id -> pop(); if (page.dishId == null) push(MenuPage.Recipe(id)) },
+                    modifier = modifier,
+                )
+                is MenuPage.Member -> MemberScreen(vm, page.memberId, onBack = { pop() }, modifier = modifier)
+            }
+        }
     }
 }
 

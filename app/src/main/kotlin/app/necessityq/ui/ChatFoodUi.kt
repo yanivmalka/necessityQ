@@ -1172,6 +1172,7 @@ private fun pastDay(millis: Long) = Instant.ofEpochMilli(millis).atZone(ZoneId.s
 @Composable
 internal fun ArchivedChatScreen(vm: AppViewModel, thread: List<ItemMessage>, onDelete: () -> Unit, onDismiss: () -> Unit) {
     if (thread.isEmpty()) return
+    val pageWindow = rememberSlidingPage(onClosed = onDismiss)
     val retention by vm.chatRetention.collectAsStateWithLifecycle()
     var selectedId by remember { mutableStateOf<String?>(null) }
     var details by remember { mutableStateOf<ItemMessage?>(null) }
@@ -1179,10 +1180,7 @@ internal fun ArchivedChatScreen(vm: AppViewModel, thread: List<ItemMessage>, onD
     val endedAt = last.archivedAtMillis ?: last.atMillis
     val scroll = rememberScrollState()
     LaunchedEffect(Unit) { scroll.scrollTo(scroll.maxValue) }
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = onDismiss,
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
-    ) {
+    SlidingPageDialog(pageWindow) {
         androidx.activity.compose.BackHandler(enabled = selectedId != null) { selectedId = null }
         Column(
             Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)
@@ -1198,7 +1196,7 @@ internal fun ArchivedChatScreen(vm: AppViewModel, thread: List<ItemMessage>, onD
                 )
             } else {
                 Row(Modifier.fillMaxWidth().padding(end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onDismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "חזרה") }
+                    IconButton(onClick = pageWindow::close) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "חזרה") }
                     Column(Modifier.weight(1f)) {
                         Text(last.itemName, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         val deleteAt = retention?.let { app.necessityq.domain.ConversationRetention.deleteAt(endedAt, it) }
