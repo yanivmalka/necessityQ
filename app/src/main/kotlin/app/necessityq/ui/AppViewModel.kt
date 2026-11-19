@@ -1098,6 +1098,31 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         .catch { emit(emptyMap()) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
+    /** צ'אט פוד: the household's members that can be tagged with "@". */
+    val chatMembers: StateFlow<List<app.necessityq.domain.ChatMember>> = memberNames
+        .map { names -> names.map { (id, name) -> app.necessityq.domain.ChatMember(id, name) }.sortedBy { it.name } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    private fun mentionsIn(text: String, author: String): List<String> =
+        app.necessityq.domain.Mentions.resolve(text, chatMembers.value, author)
+
+    /**
+     * After sending a message that tags someone or quotes their message: ask the server to push it to
+     * them (with sound even on silent). While the message has not reached the server (sent offline)
+     * the request fails, so it is retried for a few minutes.
+     */
+    private fun pushAlerts(hid: String, message: ItemMessage) {
+        val push = container.chatPush ?: return
+        val quoted = message.replyToId?.let { id -> allMessages.value.firstOrNull { it.id == id }?.authorId }
+        if (app.necessityq.domain.ChatAlerts.targets(message, quoted).isEmpty() && message.replyToId == null) return
+        viewModelScope.launch {
+            for (wait in listOf(0L, 4_000L, 15_000L, 45_000L, 120_000L, 300_000L)) {
+                kotlinx.coroutines.delay(wait)
+                if (runCatching { push.alert(hid, message.id) }.isSuccess) return@launch
+            }
+        }
+    }
+
     /** Bumped when a conversation is opened so unread counters recompute. */
     private val readTick = MutableStateFlow(0)
 
@@ -1195,14 +1220,13 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         val clean = text.trim()
         if (clean.isEmpty()) return
         stopTyping()
+        val message = ItemMessage(
+            java.util.UUID.randomUUID().toString(), itemId, itemName, uid, authorName(uid), clean,
+            System.currentTimeMillis(), replyToId = replyToId, mentions = mentionsIn(clean, uid),
+        )
         launchSafe {
-            container.collab.sendMessage(
-                hid,
-                ItemMessage(
-                    java.util.UUID.randomUUID().toString(), itemId, itemName, uid, authorName(uid), clean,
-                    System.currentTimeMillis(), replyToId = replyToId,
-                ),
-            )
+            container.collab.sendMessage(hid, message)
+            pushAlerts(hid, message)
         }
     }
 
@@ -1216,7 +1240,12 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         if (!app.necessityq.domain.MessageRules.canEdit(message, uid, now)) {
             _messages.tryEmit("אפשר לערוך הודעה רק עד 15 דקות מהכתיבה"); return
         }
-        launchSafe { container.collab.editMessage(hid, message.id, clean, now) }
+        val mentions = mentionsIn(clean, uid)
+        launchSafe {
+            container.collab.editMessage(hid, message.id, clean, now, mentions)
+            // a tag added by the edit is alerted too (the server skips whoever was alerted already)
+            if (!message.mentions.containsAll(mentions)) pushAlerts(hid, message.copy(text = clean, mentions = mentions))
+        }
     }
 
     fun deleteMessage(message: ItemMessage) {
@@ -1269,15 +1298,15 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         if (media.bytes.size > 900_000) { _messages.tryEmit("הקובץ גדול מדי לשליחה"); return }
         val mediaId = java.util.UUID.randomUUID().toString()
         mediaCache[mediaId] = media
+        val message = ItemMessage(
+            java.util.UUID.randomUUID().toString(), itemId, itemName, uid, authorName(uid), caption.trim(),
+            System.currentTimeMillis(), kind = kind, mediaId = mediaId, durationMs = durationMs, replyToId = replyToId, waveform = waveform,
+            mentions = mentionsIn(caption, uid),
+        )
         launchSafe {
             container.collab.saveMedia(hid, mediaId, uid, media)
-            container.collab.sendMessage(
-                hid,
-                ItemMessage(
-                    java.util.UUID.randomUUID().toString(), itemId, itemName, uid, authorName(uid), caption.trim(),
-                    System.currentTimeMillis(), kind = kind, mediaId = mediaId, durationMs = durationMs, replyToId = replyToId, waveform = waveform,
-                ),
-            )
+            container.collab.sendMessage(hid, message)
+            pushAlerts(hid, message)
         }
     }
 
@@ -1295,7 +1324,29 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     val recorder = app.necessityq.platform.VoiceRecorder(container.appContext)
-    val player = app.necessityq.platform.VoicePlayer(container.appContext)
+    val player = app.necessityq.platform.VoicePlayer(container.appContext).also { it.setSpeed(prefs.voiceSpeed) }
+
+    /** Speed of voice messages: 1× → 1.5× → 2×, remembered on the phone. */
+    val voiceSpeed = MutableStateFlow(prefs.voiceSpeed)
+    fun cycleVoiceSpeed() {
+        val next = app.necessityq.domain.VoiceSpeed.next(voiceSpeed.value)
+        prefs.voiceSpeed = next
+        voiceSpeed.value = next
+        player.setSpeed(next)
+    }
+
+    /** Who is told about new messages on this phone. */
+    val chatNotifyMode = MutableStateFlow(prefs.chatNotifyMode)
+    fun setChatNotifyMode(mode: app.necessityq.domain.ChatNotifyMode) { prefs.chatNotifyMode = mode; chatNotifyMode.value = mode }
+
+    /** A tag or quote is heard even on silent. */
+    val loudMentions = MutableStateFlow(prefs.loudMentions)
+    fun setLoudMentions(on: Boolean) { prefs.loudMentions = on; loudMentions.value = on }
+
+    /** A conversation to open (from a tapped notification). */
+    val openChatRequest = MutableStateFlow<Pair<String, String>?>(null)
+    fun requestOpenChat(itemId: String, itemName: String) { openChatRequest.value = itemId to itemName }
+    fun consumeOpenChatRequest() { openChatRequest.value = null }
 
     override fun onCleared() {
         clearTypingOnExit()
@@ -1313,6 +1364,15 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     init { checkStorePrompt() }
+
+    init {
+        // צ'אט פוד: this phone receives the signed-in member's tag / quote pushes
+        viewModelScope.launch {
+            session.map { (it as? Session.SignedIn)?.userId }.distinctUntilChanged().collect { uid ->
+                if (uid != null) runCatching { container.chatPush?.register(uid) }
+            }
+        }
+    }
 
     init {
         // Retention: ended conversations older than the household's setting are deleted; only counts stay.
@@ -1348,10 +1408,22 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                 if (seen == null) {
                     seenMessages = all.map { it.id }.toSet()
                 } else {
-                    all.filter { it.id !in seen && it.authorId != me }.forEach {
-                        container.notifier.notify(
-                            it.id.hashCode(), "הודעה על ${it.itemName}", "${it.authorName}: ${it.preview}", sound = chatSound.value,
-                        )
+                    val byId = all.associateBy { it.id }
+                    all.filter { it.id !in seen && it.authorId != me && !it.pending }.forEach {
+                        if (app.necessityq.domain.ChatAlerts.isForMe(it, me, byId)) {
+                            // aimed at me: heard even on silent (the push of the same message is ignored)
+                            app.necessityq.platform.MentionAlerter.alert(
+                                container.appContext, it.id, it.itemId, it.itemName,
+                                title = app.necessityq.domain.ChatAlerts.reason(it, me, byId) + " · " + it.itemName,
+                                text = it.preview,
+                                loud = loudMentions.value,
+                            )
+                        } else if (chatNotifyMode.value == app.necessityq.domain.ChatNotifyMode.ALL) {
+                            container.notifier.notify(
+                                it.id.hashCode(), "צ'אט פוד · ${it.itemName}", "${it.authorName}: ${it.preview}", sound = chatSound.value,
+                                openItemId = it.itemId, openItemName = it.itemName,
+                            )
+                        }
                     }
                     seenMessages = all.map { it.id }.toSet()
                 }
@@ -1368,7 +1440,10 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                     if (configured.isEmpty() || me in configured) {
                         flagged.values.filter { it.id !in previous && it.missingBy != me }.forEach {
                             val who = it.missingBy?.let { id -> memberNames.value[id] } ?: "מישהו"
-                            container.notifier.notify(it.id.hashCode(), "חסר: ${it.displayName}", "$who סימן/ה שהמוצר חסר")
+                            container.notifier.notify(
+                                it.id.hashCode(), "חסר: ${it.displayName}", "$who סימן/ה שהמוצר חסר",
+                                openItemId = it.itemId, openItemName = it.displayName,
+                            )
                         }
                     }
                 }
@@ -1390,7 +1465,11 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         _messages.tryEmit("התחברת עם חשבון Google")
     }
 
-    fun signOut() = launchSafe { container.household.signOut() }
+    fun signOut() = launchSafe {
+        val uid = me
+        if (uid.isNotEmpty()) runCatching { container.chatPush?.unregister(uid) }
+        container.household.signOut()
+    }
     fun updateDisplayName(name: String) = launchSafe { container.household.updateDisplayName(name) }
     /** [photo]: a small Base64 JPEG (AvatarCodec); null goes back to the Google account's picture. */
     fun updatePhoto(photo: String?) = launchSafe {

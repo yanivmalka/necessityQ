@@ -86,19 +86,39 @@ class MainActivity : ComponentActivity() {
             val bright by vm.brightTheme.collectAsStateWithLifecycle()
             NecessityTheme(bright) { Root(vm) }
         }
+        openChatFrom(intent)
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        openChatFrom(intent)
+    }
+
+    /** A tapped צ'אט פוד notification opens its conversation. */
+    private fun openChatFrom(intent: android.content.Intent?) {
+        val itemId = intent?.getStringExtra(app.necessityq.platform.MentionAlerter.EXTRA_ITEM_ID) ?: return
+        val itemName = intent.getStringExtra(app.necessityq.platform.MentionAlerter.EXTRA_ITEM_NAME).orEmpty()
+        intent.removeExtra(app.necessityq.platform.MentionAlerter.EXTRA_ITEM_ID)
+        vm.requestOpenChat(itemId, itemName)
     }
 
     override fun onStart() {
         super.onStart()
+        app.necessityq.platform.MentionAlerter.appVisible = true
         // Android often keeps the app in memory, so "opening" it is usually a return to the foreground
         vm.onForeground()
+    }
+
+    override fun onStop() {
+        app.necessityq.platform.MentionAlerter.appVisible = false
+        super.onStop()
     }
 }
 
 /** Screens of the app. The first four are the bottom-bar tabs; the rest open from the "הבית" hub. */
 private enum class Dest(val title: String) {
     LIST("רשימה"), MENU("תפריט"), PRICES("מחירים"), HOME("הבית"),
-    HOUSEHOLD("הבית ומשתתפים"), MESSAGES("הודעות"), HISTORY("היסטוריה"), ACCOUNT("חשבון"),
+    HOUSEHOLD("הבית ומשתתפים"), MESSAGES("צ'אט פוד"), HISTORY("היסטוריה"), ACCOUNT("חשבון"),
     SETTINGS("הגדרות תצוגה"), APPEARANCE("מראה"), UPDATES("עדכונים"), ABOUT("אודות"),
 }
 
@@ -155,6 +175,10 @@ private fun Root(vm: AppViewModel) {
             val unread by vm.unreadTotal.collectAsStateWithLifecycle()
             val update by vm.update.collectAsStateWithLifecycle()
             var openChat by remember { mutableStateOf<Pair<String, String>?>(null) }
+            val chatRequest by vm.openChatRequest.collectAsStateWithLifecycle()
+            LaunchedEffect(chatRequest) {
+                chatRequest?.let { openChat = it; vm.consumeOpenChatRequest() }
+            }
 
             fun go(d: Dest, from: Dest? = null) {
                 dest = d

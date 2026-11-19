@@ -141,8 +141,25 @@ fun DisplaySettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier) = Pag
         }
     }
 
-    Text("הודעות", style = MaterialTheme.typography.titleMedium)
-    OptionRow("צליל כשמגיעה הודעה חדשה", sound) { vm.setChatSound(it) }
+    Text("צ'אט פוד", style = MaterialTheme.typography.titleMedium)
+    Text(
+        "כדי שלא כל בני הבית יקבלו התראה על כל הודעה: התראה מגיעה רק למי שתויג ב-@ ולמי שההודעה שלו צוטטה.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    val notifyMode by vm.chatNotifyMode.collectAsStateWithLifecycle()
+    val loud by vm.loudMentions.collectAsStateWithLifecycle()
+    app.necessityq.domain.ChatNotifyMode.entries.forEach { mode ->
+        Row(
+            Modifier.fillMaxWidth().clickable { vm.setChatNotifyMode(mode) },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RadioButton(selected = notifyMode == mode, onClick = { vm.setChatNotifyMode(mode) })
+            Text("התראה: " + mode.label)
+        }
+    }
+    OptionRow("תיוג או ציטוט נשמעים גם כשהטלפון על שקט", loud) { vm.setLoudMentions(it) }
+    OptionRow("צליל להודעות שאינן תיוג (כשבחרתם \"כל הודעה\")", sound) { vm.setChatSound(it) }
 
     Text("פרטים בהמלצות", style = MaterialTheme.typography.titleMedium)
     OptionRow("סיבת ההמלצה", current.showReason) { vm.setDisplay(current.copy(showReason = it)) }

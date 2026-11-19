@@ -146,6 +146,23 @@ class AppPrefs(context: Context) {
         get() = p.getBoolean("chat_sound", true)
         set(v) = p.edit().putBoolean("chat_sound", v).apply()
 
+    /** צ'אט פוד: notify on every message, or only when I am tagged / quoted (the default). */
+    var chatNotifyMode: app.necessityq.domain.ChatNotifyMode
+        get() = p.getString("chat_notify_mode", null)
+            ?.let { runCatching { app.necessityq.domain.ChatNotifyMode.valueOf(it) }.getOrNull() }
+            ?: app.necessityq.domain.ChatNotifyMode.TAGGED_ONLY
+        set(v) = p.edit().putString("chat_notify_mode", v.name).apply()
+
+    /** A tag or a quote is heard even when the phone is on silent (played on the alarm stream). */
+    var loudMentions: Boolean
+        get() = p.getBoolean("loud_mentions", true)
+        set(v) = p.edit().putBoolean("loud_mentions", v).apply()
+
+    /** Playback speed of voice messages (1, 1.5 or 2). */
+    var voiceSpeed: Float
+        get() = p.getFloat("voice_speed", 1f)
+        set(v) = p.edit().putFloat("voice_speed", v).apply()
+
     /** Look for a new version every time the app opens. */
     var autoCheckUpdates: Boolean
         get() = p.getBoolean("upd_auto_check", true)
@@ -187,17 +204,31 @@ class Notifier(private val context: Context) {
         }
     }
 
+    /** [openItemId]: a tap opens that product's conversation (צ'אט פוד); null = a tap opens the app. */
     @SuppressLint("MissingPermission")
-    fun notify(id: Int, title: String, text: String, sound: Boolean = true) {
+    fun notify(id: Int, title: String, text: String, sound: Boolean = true, openItemId: String? = null, openItemName: String? = null) {
         if (!allowed()) {
             if (sound) chime()
             return
         }
+        val open = android.content.Intent(context, app.necessityq.ui.MainActivity::class.java).apply {
+            flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP
+            if (openItemId != null) {
+                putExtra(MentionAlerter.EXTRA_ITEM_ID, openItemId)
+                putExtra(MentionAlerter.EXTRA_ITEM_NAME, openItemName.orEmpty())
+            }
+        }
+        val tap = android.app.PendingIntent.getActivity(
+            context, openItemId?.hashCode() ?: 0, open,
+            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+        )
         val notification = NotificationCompat.Builder(context, if (sound) LOUD else QUIET)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setContentIntent(tap)
             .setAutoCancel(true)
             .build()
         runCatching { NotificationManagerCompat.from(context).notify(id, notification) }

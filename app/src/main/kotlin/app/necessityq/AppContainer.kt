@@ -33,6 +33,8 @@ class AppContainer(context: Context) {
     val meals: app.necessityq.domain.MealRepository
     val prices: app.necessityq.domain.PriceRepository
     val nutrition: app.necessityq.domain.NutritionRepository
+    /** צ'אט פוד push to tagged / quoted members; null in single-device mode. */
+    val chatPush: app.necessityq.data.firebase.ChatPush?
 
     init {
         val firebase = if (BuildConfig.FIREBASE_CONFIGURED) FirebaseApp.initializeApp(context) else null
@@ -42,6 +44,7 @@ class AppContainer(context: Context) {
                 .setLocalCacheSettings(PersistentCacheSettings.newBuilder().build()) // full offline support
                 .build()
             household = FirebaseHouseholdRepository(FirebaseAuth.getInstance(firebase), db)
+            chatPush = app.necessityq.data.firebase.ChatPush(db, com.google.firebase.functions.FirebaseFunctions.getInstance(firebase, "me-west1"))
             shopping = FirebaseShoppingRepository(db)
             collab = app.necessityq.data.firebase.FirebaseCollabRepository(db)
             meals = app.necessityq.data.firebase.FirebaseMealRepository(db)
@@ -64,6 +67,7 @@ class AppContainer(context: Context) {
             meals = app.necessityq.domain.InMemoryMealRepository()
             prices = app.necessityq.domain.NoPriceRepository()
             nutrition = app.necessityq.domain.NoNutritionRepository()
+            chatPush = null
         }
     }
 

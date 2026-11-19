@@ -98,6 +98,26 @@ class NqColors(private val dark: Boolean) {
     /** Double tick of a message that was read; lighter on dark so it shows on the dark bubbles. */
     val readBlue: Color = if (dark) Color(0xFF4DABF7) else Color(0xFF1570EF)
 
+    /** צ'אט פוד: my bubbles (soft green, as in WhatsApp) and everyone else's (plain card). */
+    val myBubble: Color = if (dark) Color(0xFF1E4A38) else Color(0xFFDCF5E3)
+    val theirBubble: Color = if (dark) Color(0xFF262B28) else Color.White
+
+    /** Behind a "@name" tag inside a bubble or the message box. */
+    val mentionBackground: Color = if (dark) Color(0xFF2F4A6B) else Color(0xFFDCE9FF)
+
+    /** Day line between messages ("היום", "אתמול"). */
+    val dayChip: Color = if (dark) Color(0xFF2E3430) else Color(0xFFEDEAE2)
+
+    /**
+     * Name colour per writer in a conversation, so it is clear at a glance who wrote what. Saturated on
+     * light, lighter on dark, each readable on its bubble.
+     */
+    val senderColors: List<Color> = if (dark) {
+        listOf(Color(0xFF74C0FC), Color(0xFFFFA94D), Color(0xFFB197FC), Color(0xFF63E6BE), Color(0xFFFF8787), Color(0xFFFFD43B))
+    } else {
+        listOf(Color(0xFF1C64C9), Color(0xFFC2410C), Color(0xFF7048E8), Color(0xFF0F7B6C), Color(0xFFC92A2A), Color(0xFF946200))
+    }
+
     /** Hairline border around cards and fields. */
     val hairline: Color = if (dark) Color(0xFF2E3430) else Color(0xFFECE9E1)
 

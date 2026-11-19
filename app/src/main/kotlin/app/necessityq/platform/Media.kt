@@ -196,26 +196,64 @@ class VoiceRecorder(private val context: Context) {
     }
 }
 
-/** Plays one recording at a time. */
+/**
+ * Plays one recording at a time, with pause / resume, seeking and speed (1×, 1.5×, 2×).
+ * A paused recording stays loaded, so play continues where it stopped.
+ */
 class VoicePlayer(private val context: Context) {
     private var player: MediaPlayer? = null
+    private var onDone: (() -> Unit)? = null
+
+    /** The recording that is loaded (playing or paused), or null. */
     var playingId: String? = null
         private set
 
-    fun play(id: String, bytes: ByteArray, onDone: () -> Unit) {
+    /** Playback speed for every recording; applied at once to the one that plays. */
+    var speed: Float = 1f
+        private set
+
+    val isPlaying: Boolean get() = runCatching { player?.isPlaying }.getOrNull() == true
+
+    fun play(id: String, bytes: ByteArray, startMs: Long = 0L, onDone: () -> Unit) {
         stop()
         val f = File(context.cacheDir, "play_$id.m4a")
         if (!f.exists() || f.length() != bytes.size.toLong()) f.writeBytes(bytes)
-        player = MediaPlayer().apply {
+        val p = MediaPlayer().apply {
             setDataSource(f.absolutePath)
-            setOnCompletionListener { stop(); onDone() }
+            setOnCompletionListener {
+                val done = this@VoicePlayer.onDone
+                this@VoicePlayer.stop()
+                done?.invoke()
+            }
             prepare()
+            if (startMs > 0) seekTo(startMs.toInt())
             start()
         }
+        player = p
         playingId = id
+        this.onDone = onDone
+        applySpeed(p)
     }
 
-    /** Playback position in ms (0 when nothing plays). */
+    fun pause() { runCatching { player?.pause() } }
+
+    /** Continues a paused recording; false when nothing is loaded. */
+    fun resume(): Boolean {
+        val p = player ?: return false
+        return runCatching { p.start(); applySpeed(p) }.isSuccess
+    }
+
+    fun setSpeed(value: Float) {
+        speed = value
+        // changing the speed of a paused player would start it, so only a playing one is touched
+        player?.takeIf { isPlaying }?.let { applySpeed(it) }
+    }
+
+    private fun applySpeed(p: MediaPlayer) {
+        runCatching { p.playbackParams = p.playbackParams.setSpeed(speed) }
+    }
+
+    /** Playback position in ms (0 when nothing is loaded). */
     fun position(): Long = runCatching { player?.currentPosition?.toLong() }.getOrNull() ?: 0L
 
     fun seekTo(ms: Int) { runCatching { player?.seekTo(ms) } }
@@ -224,5 +262,6 @@ class VoicePlayer(private val context: Context) {
         player?.let { runCatching { it.stop() }; it.release() }
         player = null
         playingId = null
+        onDone = null
     }
 }

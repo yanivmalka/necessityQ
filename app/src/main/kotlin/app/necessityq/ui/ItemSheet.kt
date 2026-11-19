@@ -183,6 +183,11 @@ fun ItemSheet(
     val lastStore = purchases.firstOrNull { it.itemId == itemId && it.storeId != null }
         ?.storeId?.let { id -> stores.firstOrNull { it.id == id }?.name }
 
+    // צ'אט פוד: no alert sound for the conversation that is open on screen
+    DisposableEffect(itemId) {
+        app.necessityq.platform.MentionAlerter.openItemId = itemId
+        onDispose { if (app.necessityq.platform.MentionAlerter.openItemId == itemId) app.necessityq.platform.MentionAlerter.openItemId = null }
+    }
     // reading the sheet marks the conversation as read, also for messages that arrive while it is open
     LaunchedEffect(itemId, thread.size) { vm.markRead(itemId) }
 
@@ -445,7 +450,7 @@ fun ItemSheet(
                 Modifier.onGloballyPositioned { chatTop = it.positionInRoot().y },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("שיחה על המוצר", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text("צ'אט פוד · שיחה על המוצר", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 if (thread.isNotEmpty()) {
                     IconButton(onClick = { confirmDeleteChat = true }) {
                         Icon(Icons.Default.DeleteSweep, contentDescription = "מחיקת כל השיחה")
@@ -476,7 +481,7 @@ fun ItemSheet(
                     }
                 }
             }
-            ChatThread(
+            ChatFoodThread(
                 thread, vm = vm,
                 onReply = { replyTo = it; editingMessage = null },
                 onEdit = { editingMessage = it; replyTo = null },
@@ -509,7 +514,7 @@ fun ItemSheet(
                 .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            ChatComposer(
+            ChatFoodComposer(
                 vm, itemId, line?.displayName ?: itemName,
                 replyTo = replyTo, onReplyDone = { replyTo = null },
                 editing = editingMessage, onEditDone = { editingMessage = null },
@@ -579,7 +584,7 @@ private fun DockedChatPeek(vm: AppViewModel, thread: List<ItemMessage>, typingHe
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "שיחה על המוצר · ${thread.size} הודעות",
+                    "צ'אט פוד · ${thread.size} הודעות",
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f),
@@ -636,110 +641,6 @@ fun ChatSoundToggle(vm: AppViewModel) {
 private val fullFormat = DateTimeFormatter.ofPattern("d.M.yyyy HH:mm")
 private fun fullFmt(millis: Long) = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).format(fullFormat)
 
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
-@Composable
-private fun ChatThread(
-    thread: List<ItemMessage>,
-    vm: AppViewModel,
-    onReply: (ItemMessage) -> Unit,
-    onEdit: (ItemMessage) -> Unit,
-    onDelete: (ItemMessage) -> Unit,
-    onDetails: (ItemMessage) -> Unit,
-) {
-    if (thread.isEmpty()) {
-        Text(
-            "אין עדיין הודעות. כתבו שאלה, צלמו תמונה או הקליטו הודעה — וכל בני הבית יראו.",
-            style = MaterialTheme.typography.bodySmall,
-        )
-        return
-    }
-    val byId = thread.associateBy { it.id }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        thread.forEach { m ->
-            androidx.compose.runtime.key(m.id) {
-                val mine = m.authorId == vm.me
-                var menu by remember { mutableStateOf(false) }
-                Column(
-                    Modifier.fillMaxWidth(0.85f)
-                        .align(if (mine) Alignment.Start else Alignment.End)
-                        .background(
-                            if (mine) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                            NqShapes.Panel,
-                        )
-                        .combinedClickable(onClick = {}, onLongClick = { menu = true })
-                        .padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 6.dp),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            buildString {
-                                append(if (mine) "אני" else m.authorName)
-                                append(" · ").append(fmt(m.atMillis))
-                                m.editedAtMillis?.let { append(" · נערכה ").append(fmt(it)) }
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.weight(1f),
-                        )
-                        IconButton(onClick = { onReply(m) }, modifier = Modifier.size(32.dp)) {
-                            Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = "תגובה להודעה", Modifier.size(18.dp))
-                        }
-                        Box {
-                            IconButton(onClick = { menu = true }, modifier = Modifier.size(32.dp)) {
-                                Icon(Icons.Default.MoreVert, contentDescription = "פעולות על ההודעה", Modifier.size(18.dp))
-                            }
-                            androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                                androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text("פרטי הודעה") },
-                                    leadingIcon = { Icon(Icons.Default.Info, null) },
-                                    onClick = { menu = false; onDetails(m) },
-                                )
-                                val now = System.currentTimeMillis()
-                                if (MessageRules.canEdit(m, vm.me, now)) {
-                                    androidx.compose.material3.DropdownMenuItem(
-                                        text = { Text("עריכה (עוד ${MessageRules.minutesLeft(m, now)} דק')") },
-                                        leadingIcon = { Icon(Icons.Default.Edit, null) },
-                                        onClick = { menu = false; onEdit(m) },
-                                    )
-                                }
-                                if (MessageRules.canDelete(m, vm.me)) {
-                                    androidx.compose.material3.DropdownMenuItem(
-                                        text = { Text("מחיקה") },
-                                        leadingIcon = { Icon(Icons.Default.Delete, null) },
-                                        onClick = { menu = false; onDelete(m) },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    m.replyToId?.let { id ->
-                        val quoted = byId[id]
-                        Column(
-                            Modifier.padding(end = 6.dp, bottom = 4.dp).fillMaxWidth()
-                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f), NqShapes.Inset)
-                                .padding(horizontal = 8.dp, vertical = 3.dp),
-                        ) {
-                            Text(
-                                quoted?.let { if (it.authorId == vm.me) "אני" else it.authorName } ?: "הודעה",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Bold,
-                            )
-                            Text(quoted?.preview ?: "ההודעה המקורית אינה זמינה", style = MaterialTheme.typography.bodySmall, maxLines = 2)
-                        }
-                    }
-                    when (m.kind) {
-                        MessageKind.IMAGE -> m.mediaId?.let { ImageAttachment(vm, it) }
-                        MessageKind.AUDIO -> m.mediaId?.let { AudioAttachment(vm, it, m.durationMs, m.waveform) }
-                        MessageKind.TEXT -> Unit
-                    }
-                    if (m.text.isNotBlank()) Text(m.text, Modifier.padding(end = 6.dp))
-                    if (mine) Box(Modifier.align(Alignment.End).padding(end = 6.dp)) { DeliveryTicks(vm.deliveryStatus(m)) }
-                }
-            }
-        }
-    }
-}
-
 /** Who wrote the message, when it was sent / edited, and who received and read it. */
 @Composable
 private fun MessageDetailsDialog(vm: AppViewModel, m: ItemMessage, onDismiss: () -> Unit) {
@@ -785,7 +686,7 @@ private fun MessageDetailsDialog(vm: AppViewModel, m: ItemMessage, onDismiss: ()
 }
 
 @Composable
-private fun ImageAttachment(vm: AppViewModel, mediaId: String) {
+internal fun ImageAttachment(vm: AppViewModel, mediaId: String) {
     var full by remember { mutableStateOf(false) }
     val image by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, mediaId) {
         value = vm.loadMedia(mediaId)?.bytes?.let { ImageCodec.decode(it) }?.asImageBitmap()
@@ -863,311 +764,6 @@ private fun ImageViewer(bmp: androidx.compose.ui.graphics.ImageBitmap, onClose: 
     }
 }
 
-/** Play / stop, loudness bars with a dot at the running time (tap the bars to jump), and the time. */
-@Composable
-private fun AudioAttachment(vm: AppViewModel, mediaId: String, durationMs: Long?, waveform: List<Int>?) {
-    val scope = rememberCoroutineScope()
-    var playing by remember { mutableStateOf(false) }
-    var loading by remember { mutableStateOf(false) }
-    var position by remember { mutableLongStateOf(0L) }
-    val total = durationMs ?: 0L
-    val progress = if (playing && total > 0) (position.toFloat() / total).coerceIn(0f, 1f) else 0f
-    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
-    val played = MaterialTheme.colorScheme.primary
-    val rest = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
-    // recordings from before the waveform existed get a neutral shape
-    val bars = waveform ?: remember { List(Waveform.BARS) { 25 + (it * 7 % 5) * 8 } }
-
-    LaunchedEffect(playing) {
-        while (playing) {
-            position = vm.player.position()
-            kotlinx.coroutines.delay(60)
-        }
-        position = 0L
-    }
-    DisposableEffect(mediaId) { onDispose { if (vm.player.playingId == mediaId) vm.player.stop() } }
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 6.dp)) {
-        IconButton(onClick = {
-            if (playing) {
-                vm.player.stop(); playing = false
-            } else {
-                loading = true
-                scope.launch {
-                    val media = vm.loadMedia(mediaId)
-                    loading = false
-                    if (media == null) {
-                        vm.reportError("לא ניתן לטעון את ההקלטה")
-                    } else {
-                        runCatching { vm.player.play(mediaId, media.bytes) { playing = false } }
-                            .onSuccess { playing = true }
-                            .onFailure { vm.reportError("ההשמעה נכשלה") }
-                    }
-                }
-            }
-        }) {
-            when {
-                loading -> CircularProgressIndicator(Modifier.size(20.dp))
-                playing -> Icon(Icons.Default.Stop, contentDescription = "עצירה")
-                else -> Icon(Icons.Default.PlayArrow, contentDescription = "השמעה")
-            }
-        }
-        Canvas(
-            Modifier.weight(1f).height(36.dp).pointerInput(playing, total, rtl) {
-                detectTapGestures { offset ->
-                    if (playing && total > 0) {
-                        val f = (offset.x / size.width).coerceIn(0f, 1f).let { if (rtl) 1f - it else it }
-                        vm.player.seekTo((f * total).toInt())
-                    }
-                }
-            },
-        ) {
-            val n = bars.size
-            val slot = size.width / n
-            val barW = slot * 0.55f
-            fun xOf(t: Float) = (if (rtl) 1f - t else t) * size.width
-            bars.forEachIndexed { i, level ->
-                val t = (i + 0.5f) / n
-                val h = (size.height * level / 100f).coerceAtLeast(4.dp.toPx())
-                drawRoundRect(
-                    color = if (t <= progress) played else rest,
-                    topLeft = Offset(xOf(t) - barW / 2, (size.height - h) / 2),
-                    size = Size(barW, h),
-                    cornerRadius = CornerRadius(barW / 2),
-                )
-            }
-            val r = 6.dp.toPx()
-            drawCircle(played, radius = r, center = Offset(xOf(progress).coerceIn(r, size.width - r), size.height / 2))
-        }
-        Text(
-            if (playing) ItemMessage.formatDuration(position) + " / " + ItemMessage.formatDuration(total) else ItemMessage.formatDuration(total),
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(start = 6.dp),
-        )
-    }
-}
-
-/** Text box with picture, camera and voice; shows the message being answered or edited above it. */
-@Composable
-private fun ChatComposer(
-    vm: AppViewModel,
-    itemId: String,
-    itemName: String,
-    replyTo: ItemMessage?,
-    onReplyDone: () -> Unit,
-    editing: ItemMessage?,
-    onEditDone: () -> Unit,
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var draft by remember(itemId) { mutableStateOf("") }
-    // leaving the conversation (or switching product) ends our "typing…"
-    androidx.compose.runtime.DisposableEffect(itemId) { onDispose { vm.stopTyping() } }
-    var recording by remember { mutableStateOf(false) }
-    var elapsed by remember { mutableStateOf(0L) }
-
-    // starting an edit puts the message text in the box
-    LaunchedEffect(editing?.id) { if (editing != null) draft = editing.text }
-
-    fun sendImage(bitmap: android.graphics.Bitmap?) {
-        if (bitmap == null) return
-        scope.launch {
-            val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { ImageCodec.compress(bitmap) }
-            vm.sendMedia(itemId, itemName, MessageKind.IMAGE, MediaBlob("image/jpeg", bytes), caption = draft, replyToId = replyTo?.id)
-            draft = ""
-            onReplyDone()
-        }
-    }
-
-    fun sendRecording(r: app.necessityq.platform.VoiceRecorder.Recording) {
-        vm.sendMedia(
-            itemId, itemName, MessageKind.AUDIO, MediaBlob("audio/mp4", r.bytes),
-            durationMs = r.durationMs, replyToId = replyTo?.id, waveform = r.waveform,
-        )
-        onReplyDone()
-    }
-
-    val gallery = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) scope.launch {
-            sendImage(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ImageCodec.fromUri(context, uri) })
-        }
-    }
-    // the camera writes the full-size photo into a file of ours; kept across the activity being recreated
-    // while the camera app is open
-    var cameraPath by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
-    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { taken ->
-        val path = cameraPath
-        cameraPath = null
-        if (taken && path != null) scope.launch {
-            val file = java.io.File(path)
-            val bitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                ImageCodec.fromUri(context, android.net.Uri.fromFile(file)).also { file.delete() }
-            }
-            if (bitmap == null) vm.reportError("לא ניתן לקרוא את התמונה") else sendImage(bitmap)
-        }
-    }
-    fun openCamera() {
-        runCatching {
-            val (file, uri) = ImageCodec.newCameraFile(context)
-            cameraPath = file.absolutePath
-            camera.launch(uri)
-        }.onFailure { cameraPath = null; vm.reportError("לא ניתן לפתוח את המצלמה") }
-    }
-
-    fun startRecording() {
-        runCatching { vm.recorder.start() }
-            .onSuccess { recording = true; elapsed = 0L }
-            .onFailure { vm.reportError("ההקלטה לא הצליחה להתחיל") }
-    }
-    val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) startRecording() else vm.reportError("כדי להקליט צריך הרשאת מיקרופון")
-    }
-    LaunchedEffect(recording) {
-        while (recording) {
-            kotlinx.coroutines.delay(app.necessityq.platform.VoiceRecorder.SAMPLE_MS)
-            vm.recorder.sample()
-            elapsed += app.necessityq.platform.VoiceRecorder.SAMPLE_MS
-            if (elapsed >= app.necessityq.platform.VoiceRecorder.MAX_MS) {
-                recording = false
-                vm.recorder.stop()?.let { sendRecording(it) }
-            }
-        }
-    }
-    DisposableEffect(Unit) { onDispose { if (vm.recorder.isRecording) vm.recorder.stopQuietly() } }
-
-    replyTo?.let { m ->
-        Row(
-            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, NqShapes.Strip)
-                .padding(start = 10.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.AutoMirrored.Filled.Reply, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-            Column(Modifier.weight(1f).padding(horizontal = 6.dp)) {
-                Text("תגובה ל" + (if (m.authorId == vm.me) "הודעה שלי" else m.authorName), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                Text(m.preview, style = MaterialTheme.typography.bodySmall, maxLines = 1)
-            }
-            IconButton(onClick = onReplyDone) { Icon(Icons.Default.Close, contentDescription = "ביטול התגובה") }
-        }
-    }
-    editing?.let { m ->
-        Row(
-            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.tertiaryContainer, NqShapes.Strip)
-                .padding(start = 10.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Default.Edit, null, Modifier.size(18.dp))
-            Column(Modifier.weight(1f).padding(horizontal = 6.dp)) {
-                Text("עריכת הודעה", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                Text(
-                    "אפשר לערוך עוד ${MessageRules.minutesLeft(m, System.currentTimeMillis())} דק'",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            IconButton(onClick = { draft = ""; onEditDone() }) { Icon(Icons.Default.Close, contentDescription = "ביטול העריכה") }
-        }
-    }
-
-    if (recording) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            androidx.compose.material3.Surface(
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 4.dp)) {
-                    IconButton(onClick = { vm.recorder.stopQuietly(); recording = false }) {
-                        Icon(Icons.Default.Delete, contentDescription = "ביטול ההקלטה", tint = MaterialTheme.colorScheme.error)
-                    }
-                    Box(Modifier.size(10.dp).background(MaterialTheme.colorScheme.error, androidx.compose.foundation.shape.CircleShape))
-                    Text(
-                        "  " + ItemMessage.formatDuration(elapsed) + " / " + ItemMessage.formatDuration(app.necessityq.platform.VoiceRecorder.MAX_MS),
-                        Modifier.weight(1f),
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-            }
-            androidx.compose.foundation.layout.Spacer(Modifier.size(6.dp))
-            ComposerAction(Icons.AutoMirrored.Filled.Send, "שליחת ההקלטה") {
-                recording = false
-                val result = vm.recorder.stop()
-                if (result == null) vm.reportError("ההקלטה קצרה מדי") else sendRecording(result)
-            }
-        }
-        return
-    }
-
-    // WhatsApp-style bar: a rounded box with the text and the picture buttons, and beside it one
-    // round button that records when the box is empty and sends once something is typed
-    Row(verticalAlignment = Alignment.Bottom) {
-        androidx.compose.material3.Surface(
-            shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHighest,
-            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-        ) {
-            Row(verticalAlignment = Alignment.Bottom) {
-                androidx.compose.material3.TextField(
-                    draft, { draft = it; vm.onDraftChanged(itemId, itemName, it) },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text(if (editing != null) "עריכה…" else if (replyTo != null) "תגובה…" else "הודעה") },
-                    maxLines = 5,
-                    colors = androidx.compose.material3.TextFieldDefaults.colors(
-                        focusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
-                        unfocusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
-                        disabledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
-                        focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                        unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                        disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                    ),
-                )
-                if (editing == null) {
-                    IconButton(onClick = { gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
-                        Icon(Icons.Default.AttachFile, contentDescription = "שליחת תמונה מהגלריה", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    // as in WhatsApp, the camera makes room once typing starts
-                    if (draft.isBlank()) {
-                        IconButton(onClick = { openCamera() }) {
-                            Icon(Icons.Default.PhotoCamera, contentDescription = "צילום תמונה", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
-            }
-        }
-        androidx.compose.foundation.layout.Spacer(Modifier.size(6.dp))
-        when {
-            editing != null -> ComposerAction(
-                Icons.Default.Check, "שמירת העריכה",
-                enabled = draft.isNotBlank() || editing.kind != MessageKind.TEXT,
-            ) { vm.editMessage(editing, draft); draft = ""; onEditDone() }
-            draft.isBlank() -> ComposerAction(Icons.Default.Mic, "הקלטת הודעה") {
-                val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-                if (granted) startRecording() else micPermission.launch(Manifest.permission.RECORD_AUDIO)
-            }
-            else -> ComposerAction(Icons.AutoMirrored.Filled.Send, "שליחה") {
-                vm.sendMessage(itemId, itemName, draft, replyTo?.id)
-                draft = ""
-                onReplyDone()
-            }
-        }
-    }
-}
-
-/** The round button beside the message box (record / send / save), as in WhatsApp. */
-@Composable
-private fun ComposerAction(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    description: String,
-    enabled: Boolean = true,
-    onClick: () -> Unit,
-) {
-    androidx.compose.material3.FilledIconButton(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = Modifier.size(48.dp),
-        shape = androidx.compose.foundation.shape.CircleShape,
-    ) {
-        Icon(icon, contentDescription = description)
-    }
-}
-
 // ---------- messages hub ----------
 
 private val dayFormat = DateTimeFormatter.ofPattern("d.M")
@@ -1207,7 +803,7 @@ fun MessagesScreen(vm: AppViewModel, modifier: Modifier = Modifier, onOpen: (ite
     Column(modifier.fillMaxSize()) {
         TopAppBar(
             navigationIcon = { BackNavButton() },
-            title = { Text("הודעות על מוצרים", fontWeight = FontWeight.ExtraBold) },
+            title = { Text("צ'אט פוד", fontWeight = FontWeight.ExtraBold) },
             actions = {
                 IconButton(onClick = { showRetention = true }) { Icon(Icons.Default.Schedule, contentDescription = "משך שמירת שיחות שהסתיימו") }
                 ChatSoundToggle(vm)

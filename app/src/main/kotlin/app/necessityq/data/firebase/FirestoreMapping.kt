@@ -158,6 +158,7 @@ internal object FirestoreMapping {
             editedAtMillis = doc.getLong("editedAt"),
             waveform = (doc.get("wave") as? List<*>)?.mapNotNull { (it as? Number)?.toInt() }?.takeIf { it.isNotEmpty() },
             archivedAtMillis = doc.getLong("archivedAt"),
+            mentions = (doc.get("mentions") as? List<*>)?.filterIsInstance<String>().orEmpty(),
         )
     }
 
@@ -169,6 +170,7 @@ internal object FirestoreMapping {
         m.durationMs?.let { put("durationMs", it) }
         m.replyToId?.let { put("replyTo", it) }
         m.waveform?.let { put("wave", it) }
+        if (m.mentions.isNotEmpty()) put("mentions", m.mentions)
     }
 
     fun suppressionFrom(doc: DocumentSnapshot): SuggestionSuppression? {
