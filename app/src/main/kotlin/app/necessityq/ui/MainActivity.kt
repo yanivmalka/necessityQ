@@ -2,7 +2,14 @@ package app.necessityq.ui
 
 import android.Manifest
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.launch
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -84,7 +91,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             val bright by vm.brightTheme.collectAsStateWithLifecycle()
-            NecessityTheme(bright) { Root(vm) }
+            NecessityTheme(bright) {
+                // a themed ground for the whole app, so text everywhere (also in full-page dialogs such as a
+                // צ'אט פוד conversation) takes the theme's ink: light on the dark theme, dark on the light one
+                Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) { Root(vm) }
+            }
         }
         openChatFrom(intent)
     }
@@ -120,7 +131,11 @@ private enum class Dest(val title: String) {
     LIST("רשימה"), MENU("תפריט"), PRICES("מחירים"), HOME("הבית"),
     HOUSEHOLD("הבית ומשתתפים"), MESSAGES("צ'אט פוד"), HISTORY("היסטוריה"), ACCOUNT("חשבון"),
     SETTINGS("הגדרות תצוגה"), APPEARANCE("מראה"), UPDATES("עדכונים"), ABOUT("אודות"),
+    FAMILY_MEMBER("בן/בת משפחה"),
 }
+
+/** The bottom-bar tabs, in order (the first is on the right). */
+private val TABS = listOf(Dest.LIST, Dest.MENU, Dest.PRICES, Dest.HOME)
 
 /** The tab that is lit while a screen is open. */
 private val Dest.tab: Dest
@@ -172,6 +187,8 @@ private fun Root(vm: AppViewModel) {
             var dest by rememberSaveable { mutableStateOf(Dest.LIST) }
             /** Where the back arrow of a secondary page leads; null on the tabs. */
             var backTo by rememberSaveable { mutableStateOf<Dest?>(null) }
+            /** The family member whose profile is open ("" = a new member). */
+            var familyMember by rememberSaveable { mutableStateOf("") }
             val unread by vm.unreadTotal.collectAsStateWithLifecycle()
             val update by vm.update.collectAsStateWithLifecycle()
             var openChat by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -180,7 +197,19 @@ private fun Root(vm: AppViewModel) {
                 chatRequest?.let { openChat = it; vm.consumeOpenChatRequest() }
             }
 
+            val tabs = TABS
+            val pager = rememberPagerState(initialPage = tabs.indexOf(dest.tab)) { tabs.size }
+            val scope = rememberCoroutineScope()
+            /** A recipe or other page is open inside the menu tab: swiping there belongs to that page, not to the tabs. */
+            var menuInnerPage by remember { mutableStateOf(false) }
+
             fun go(d: Dest, from: Dest? = null) {
+                val page = tabs.indexOf(d)
+                if (page >= 0 && pager.currentPage != page) {
+                    // on the tabs the pager glides to the tab; from another page it is already in place when that page slides away
+                    val onTabs = dest in tabs
+                    scope.launch { if (onTabs) pager.animateScrollToPage(page) else pager.scrollToPage(page) }
+                }
                 dest = d
                 backTo = from
             }
@@ -189,10 +218,43 @@ private fun Root(vm: AppViewModel) {
                 go(backTo ?: Dest.LIST)
             }
 
+            // a swipe between the tabs (as between WhatsApp's chats, updates, communities and calls) selects the tab it lands on
+            LaunchedEffect(pager) {
+                snapshotFlow { pager.settledPage }.collect { page ->
+                    if (dest in tabs && dest != tabs[page]) go(tabs[page])
+                }
+            }
+
             val shoppingOnList = dest == Dest.LIST && mode == ListMode.SHOP
             BackHandler(enabled = dest != Dest.LIST || shoppingOnList) {
                 if (shoppingOnList) vm.setMode(ListMode.PLAN) else back()
             }
+
+            val hubEntries = listOf(
+                listOf(
+                    HubEntry(Dest.HOUSEHOLD.title, Icons.Default.Group) { go(Dest.HOUSEHOLD, from = Dest.HOME) },
+                    HubEntry(Dest.MESSAGES.title, Icons.AutoMirrored.Filled.Chat, badge = unread.takeIf { it > 0 }?.toString()) {
+                        go(Dest.MESSAGES, from = Dest.HOME)
+                    },
+                    HubEntry(Dest.HISTORY.title, Icons.Default.History) { go(Dest.HISTORY, from = Dest.HOME) },
+                ),
+                listOf(
+                    HubEntry(Dest.ACCOUNT.title, Icons.Default.AccountCircle) { go(Dest.ACCOUNT, from = Dest.HOME) },
+                    HubEntry(Dest.SETTINGS.title, Icons.Default.Tune) { go(Dest.SETTINGS, from = Dest.HOME) },
+                    HubEntry(Dest.APPEARANCE.title, Icons.Default.Palette) { go(Dest.APPEARANCE, from = Dest.HOME) },
+                ),
+                listOf(
+                    HubEntry(
+                        Dest.UPDATES.title, Icons.Default.SystemUpdate,
+                        badge = when (update) {
+                            is UpdateState.Available, is UpdateState.Ready -> "חדש"
+                            is UpdateState.Downloading -> "${((update as UpdateState.Downloading).progress * 100).toInt()}%"
+                            else -> null
+                        },
+                    ) { go(Dest.UPDATES, from = Dest.HOME) },
+                    HubEntry(Dest.ABOUT.title, Icons.Default.Info) { go(Dest.ABOUT, from = Dest.HOME) },
+                ),
+            )
 
             CompositionLocalProvider(
                 LocalNavBack provides (if (backTo != null) ({ back() }) else null),
@@ -218,7 +280,8 @@ private fun Root(vm: AppViewModel) {
                                     }
                                 }
                                 BottomBar(
-                                    current = dest.tab,
+                                    // while swiping, the tab lights up as soon as the swipe would land on it
+                                    current = if (dest in tabs) tabs[pager.targetPage] else dest.tab,
                                     homeBadge = when {
                                         unread > 0 -> "$unread"
                                         update is UpdateState.Available || update is UpdateState.Ready -> "חדש"
@@ -231,50 +294,48 @@ private fun Root(vm: AppViewModel) {
                     },
                 ) { padding ->
                     val modifier = Modifier.padding(padding)
-                    when (dest) {
-                        Dest.LIST -> ListScreen(
-                            vm, household.name, modifier,
-                            onOpenMessages = { go(Dest.MESSAGES, from = Dest.LIST) },
-                            onOpenDisplaySettings = { go(Dest.SETTINGS, from = Dest.LIST) },
-                        )
-                        Dest.MENU -> MenuScreen(vm, modifier)
-                        Dest.PRICES -> PricesScreen(vm, modifier)
-                        Dest.HOME -> HomeHubScreen(
-                            vm, household.name, modifier,
-                            entries = listOf(
-                                listOf(
-                                    HubEntry(Dest.HOUSEHOLD.title, Icons.Default.Group) { go(Dest.HOUSEHOLD, from = Dest.HOME) },
-                                    HubEntry(Dest.MESSAGES.title, Icons.AutoMirrored.Filled.Chat, badge = unread.takeIf { it > 0 }?.toString()) {
-                                        go(Dest.MESSAGES, from = Dest.HOME)
-                                    },
-                                    HubEntry(Dest.HISTORY.title, Icons.Default.History) { go(Dest.HISTORY, from = Dest.HOME) },
-                                ),
-                                listOf(
-                                    HubEntry(Dest.ACCOUNT.title, Icons.Default.AccountCircle) { go(Dest.ACCOUNT, from = Dest.HOME) },
-                                    HubEntry(Dest.SETTINGS.title, Icons.Default.Tune) { go(Dest.SETTINGS, from = Dest.HOME) },
-                                    HubEntry(Dest.APPEARANCE.title, Icons.Default.Palette) { go(Dest.APPEARANCE, from = Dest.HOME) },
-                                ),
-                                listOf(
-                                    HubEntry(
-                                        Dest.UPDATES.title, Icons.Default.SystemUpdate,
-                                        badge = when (update) {
-                                            is UpdateState.Available, is UpdateState.Ready -> "חדש"
-                                            is UpdateState.Downloading -> "${((update as UpdateState.Downloading).progress * 100).toInt()}%"
-                                            else -> null
-                                        },
-                                    ) { go(Dest.UPDATES, from = Dest.HOME) },
-                                    HubEntry(Dest.ABOUT.title, Icons.Default.Info) { go(Dest.ABOUT, from = Dest.HOME) },
-                                ),
-                            ),
-                        )
-                        Dest.MESSAGES -> MessagesScreen(vm, modifier, onOpen = { itemId, name -> openChat = itemId to name })
-                        Dest.HISTORY -> HistoryScreen(vm, modifier)
-                        Dest.HOUSEHOLD -> HouseholdScreen(vm, household, s.account, s.userId, modifier)
-                        Dest.ACCOUNT -> AccountScreen(vm, s.account, modifier)
-                        Dest.SETTINGS -> DisplaySettingsScreen(vm, modifier)
-                        Dest.APPEARANCE -> AppearanceScreen(vm, modifier)
-                        Dest.UPDATES -> UpdatesScreen(vm, modifier)
-                        Dest.ABOUT -> AboutScreen(modifier)
+                    // null = the four tabs; any other page opens over them
+                    AnimatedContent(
+                        targetState = dest.takeIf { it !in tabs },
+                        transitionSpec = { pageSlide(back = targetState == null) },
+                        label = "page",
+                    ) { page ->
+                        // opaque, so the page sliding over another hides it
+                        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+                            when (page) {
+                                null -> HorizontalPager(
+                                    state = pager,
+                                    key = { tabs[it] },
+                                    userScrollEnabled = !shoppingOnList && !(menuInnerPage && tabs[pager.currentPage] == Dest.MENU),
+                                    modifier = Modifier.fillMaxSize(),
+                                ) { index ->
+                                    when (tabs[index]) {
+                                        Dest.LIST -> ListScreen(
+                                            vm, household.name, modifier,
+                                            onOpenMessages = { go(Dest.MESSAGES, from = Dest.LIST) },
+                                            onOpenDisplaySettings = { go(Dest.SETTINGS, from = Dest.LIST) },
+                                        )
+                                        Dest.MENU -> MenuScreen(vm, modifier, onInnerPage = { menuInnerPage = it })
+                                        Dest.PRICES -> PricesScreen(vm, modifier)
+                                        else -> HomeHubScreen(
+                                            vm, household.name, modifier, entries = hubEntries,
+                                            onOpenFamilyMember = { id -> familyMember = id.orEmpty(); go(Dest.FAMILY_MEMBER, from = Dest.HOME) },
+                                        )
+                                    }
+                                }
+                                Dest.MESSAGES -> MessagesScreen(vm, modifier, onOpen = { itemId, name -> openChat = itemId to name })
+                                Dest.HISTORY -> HistoryScreen(vm, modifier)
+                                Dest.HOUSEHOLD -> HouseholdScreen(vm, household, s.account, s.userId, modifier)
+                                Dest.ACCOUNT -> AccountScreen(vm, s.account, modifier)
+                                Dest.SETTINGS -> DisplaySettingsScreen(vm, modifier)
+                                Dest.APPEARANCE -> AppearanceScreen(vm, modifier)
+                                Dest.UPDATES -> UpdatesScreen(vm, modifier)
+                                Dest.ABOUT -> AboutScreen(modifier)
+                                Dest.FAMILY_MEMBER -> MemberScreen(vm, familyMember.ifEmpty { null }, onBack = { back() }, modifier = modifier)
+                                // the tabs are never a page of their own (they live in the pager)
+                                Dest.LIST, Dest.MENU, Dest.PRICES, Dest.HOME -> Unit
+                            }
+                        }
                     }
                 }
             }

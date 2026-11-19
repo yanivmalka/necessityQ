@@ -45,7 +45,14 @@ class HubEntry(val title: String, val icon: ImageVector, val badge: String? = nu
 
 /** The "הבית" tab: the household, then the pages that used to live in the side drawer, in grouped cards. */
 @Composable
-fun HomeHubScreen(vm: AppViewModel, householdName: String, modifier: Modifier = Modifier, entries: List<List<HubEntry>>) {
+fun HomeHubScreen(
+    vm: AppViewModel,
+    householdName: String,
+    modifier: Modifier = Modifier,
+    entries: List<List<HubEntry>>,
+    /** Opens a family member's profile (null = a new member). */
+    onOpenFamilyMember: (memberId: String?) -> Unit = {},
+) {
     val names by vm.memberNames.collectAsStateWithLifecycle()
     val members by vm.members.collectAsStateWithLifecycle()
     Column(
@@ -76,6 +83,8 @@ fun HomeHubScreen(vm: AppViewModel, householdName: String, modifier: Modifier = 
                 )
             }
         }
+        // the family's profiles live here, with the household, and not in the menu
+        FamilyCard(vm, onOpenMember = onOpenFamilyMember)
         entries.forEach { group ->
             Column(
                 Modifier.fillMaxWidth().clip(NqShapes.Tile).background(MaterialTheme.colorScheme.surface)

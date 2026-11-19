@@ -1093,8 +1093,16 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         .catch { emit(NotifySettings()) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, NotifySettings())
 
+    /**
+     * The household's accounts, each named as the family calls them: an account linked to a family profile
+     * takes the profile's name, so a rename shows at once for everyone, in the family and in צ'אט פוד.
+     */
+    private val namedMembers: kotlinx.coroutines.flow.Flow<List<Member>> =
+        combine(container.household.members, meals) { list, data -> app.necessityq.domain.Members.withFamilyNames(list, data.members) }
+            .distinctUntilChanged()
+
     /** uid → display name, for "added by" and chat. */
-    val memberNames: StateFlow<Map<String, String>> = container.household.members
+    val memberNames: StateFlow<Map<String, String>> = namedMembers
         .map { list -> list.associate { it.userId to it.displayName } }
         .catch { emit(emptyMap()) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
@@ -1479,7 +1487,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     val supportsAccounts: Boolean = container.household.supportsAccounts
 
-    val members: StateFlow<List<Member>> = container.household.members
+    val members: StateFlow<List<Member>> = namedMembers
         .catch { emit(emptyList()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -1493,7 +1501,20 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         if (uid.isNotEmpty()) runCatching { container.chatPush?.unregister(uid) }
         container.household.signOut()
     }
-    fun updateDisplayName(name: String) = launchSafe { container.household.updateDisplayName(name) }
+    /** Only my account's name: my family profile was just saved with this name (see MemberScreen). */
+    fun syncAccountName(name: String) {
+        val clean = name.trim()
+        val current = (session.value as? Session.SignedIn)?.account?.displayName
+        if (clean.isNotEmpty() && clean != current) launchSafe { container.household.updateDisplayName(clean) }
+    }
+
+    /** My account's name; my family profile (when linked) takes the same name, so I am called one thing everywhere. */
+    fun updateDisplayName(name: String) {
+        launchSafe { container.household.updateDisplayName(name) }
+        val clean = name.trim()
+        val mine = meals.value.memberFor(me)
+        if (clean.isNotEmpty() && mine != null && mine.name != clean) updateMeals { it.withMember(mine.copy(name = clean)) }
+    }
     /** [photo]: a small Base64 JPEG (AvatarCodec); null goes back to the Google account's picture. */
     fun updatePhoto(photo: String?) = launchSafe {
         container.household.updatePhoto(photo)

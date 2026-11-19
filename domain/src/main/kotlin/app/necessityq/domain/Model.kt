@@ -180,4 +180,16 @@ object Members {
             )
         }.sortedWith(compareBy({ it.role != MemberRole.OWNER }, { it.displayName }))
     }
+
+    /**
+     * One person, one name: an account linked to a family profile is shown everywhere (צ'אט פוד, "added by",
+     * the household list) by the profile's name, so the family and the chat always agree. Accounts without a
+     * profile keep their own name.
+     */
+    fun withFamilyNames(members: List<Member>, family: List<FamilyMember>): List<Member> {
+        val byAccount = family.mapNotNull { f -> f.linkedUserId?.let { it to f.name.trim() } }
+            .filter { it.second.isNotEmpty() }
+            .toMap()
+        return members.map { m -> byAccount[m.userId]?.let { m.copy(displayName = it) } ?: m }
+    }
 }

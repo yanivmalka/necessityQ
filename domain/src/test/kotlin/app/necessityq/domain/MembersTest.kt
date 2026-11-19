@@ -25,4 +25,20 @@ class MembersTest {
         assertEquals("משתתף 1", members[2].displayName)
         assertEquals("y@x.com", members[0].email)
     }
+
+    @Test fun `a family profile linked to an account gives the account its name`() {
+        val h = Household("h", "בית", "ABC234", listOf("a", "b", "c"), ownerId = "a")
+        val members = Members.resolve(h, mapOf("a" to ("Yochai Cohen" to null), "b" to ("Adel" to null)))
+        val family = listOf(
+            FamilyMember("f1", "יוחאי", linkedUserId = "a"),
+            FamilyMember("f2", "אבא"),
+            FamilyMember("f3", "  ", linkedUserId = "b"),
+        )
+        val named = Members.withFamilyNames(members, family).associate { it.userId to it.displayName }
+        assertEquals("יוחאי", named["a"])
+        // a blank profile name does not hide the account's own name
+        assertEquals("Adel", named["b"])
+        // no profile: the account's name (here the placeholder) stays
+        assertEquals("משתתף 3", named["c"])
+    }
 }
