@@ -898,8 +898,12 @@ fun RecipeSearchScreen(vm: AppViewModel, onBack: () -> Unit, onOpen: (String) ->
             words.all { w -> hay.any { it.startsWith(w) } }
         }.sortedBy { it.name.length }
     }
-    val foods = remember(index, debounced, allFoods, shown) {
-        if (debounced.length < 2) emptyList() else index?.search(debounced, limit = shown + 1, compositeOnly = !allFoods).orEmpty()
+    // "dishes only" relies on Tzameret's composition table; a snapshot without it would leave the
+    // filter with nothing to show, so then every food is searched and the chip is hidden
+    val hasComposite = remember(index) { index?.foods?.any { it.isComposite } == true }
+    val foods = remember(index, debounced, allFoods, shown, hasComposite) {
+        if (debounced.length < 2) emptyList()
+        else index?.search(debounced, limit = shown + 1, compositeOnly = hasComposite && !allFoods).orEmpty()
     }
     val savedCodes = data.dishes.mapNotNull { it.nutritionCode }.toSet()
     val hits: List<RecipeHit> = buildList {
@@ -930,7 +934,7 @@ fun RecipeSearchScreen(vm: AppViewModel, onBack: () -> Unit, onOpen: (String) ->
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             SearchScope.entries.forEach { s -> FilterChip(selected = scope == s, onClick = { scope = s }, label = { Text(s.label) }) }
-            if (scope != SearchScope.MINE) {
+            if (scope != SearchScope.MINE && hasComposite) {
                 FilterChip(selected = allFoods, onClick = { allFoods = !allFoods }, label = { Text("גם מזונות בודדים") })
             }
         }

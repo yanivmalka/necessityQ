@@ -847,6 +847,32 @@ private fun StoreChooser(vm: AppViewModel, allowNone: Boolean, onChosen: (String
                 leadingIcon = { Icon(Icons.Default.LocationOn, null, Modifier.size(18.dp)) },
             )
         }
+        // the branches followed on the prices screen, nearest first: one tap saves it as a household store
+        val followedIds by vm.selectedPriceBranches.collectAsStateWithLifecycle()
+        val allBranches by vm.priceBranches.collectAsStateWithLifecycle()
+        val position by vm.userPosition.collectAsStateWithLifecycle()
+        val storeKeys = stores.map { app.necessityq.domain.HebrewText.matchKey(it.name) }.toSet()
+        val followed = followedIds.mapNotNull { id -> allBranches.firstOrNull { it.id == id } }
+            .filter { it.id != branchHere?.id && app.necessityq.domain.HebrewText.matchKey(app.necessityq.domain.BranchLocator.storeName(it)) !in storeKeys }
+            .map { b ->
+                val lat = b.latitude
+                val lon = b.longitude
+                b to position?.let { (la, lo) -> if (lat != null && lon != null) app.necessityq.domain.Stores.distanceMeters(la, lo, lat, lon) else null }
+            }
+            .sortedBy { it.second ?: Double.MAX_VALUE }
+        followed.forEachIndexed { i, (b, meters) ->
+            val close = i == 0 && meters != null && meters <= 500
+            AssistChip(
+                onClick = { vm.addStoreFromBranch(b)?.let(onChosen) },
+                label = {
+                    Text(
+                        app.necessityq.domain.BranchLocator.storeName(b) + (meters?.let { " · " + distanceLabel(it) } ?: ""),
+                        fontWeight = if (close) FontWeight.Bold else null,
+                    )
+                },
+                leadingIcon = { Icon(Icons.Default.Storefront, null, Modifier.size(18.dp)) },
+            )
+        }
         stores.filter { it.id != nearby?.id }.forEach { store ->
             FilterChip(selected = store.id == currentId, onClick = { onChosen(store.id) }, label = { Text(store.name) })
         }
@@ -889,6 +915,11 @@ private fun StoreChooser(vm: AppViewModel, allowNone: Boolean, onChosen: (String
         )
     }
 }
+
+/** "350 מ'" / "1.4 ק"מ" */
+private fun distanceLabel(meters: Double): String =
+    if (meters < 1000) "${(meters / 10).toInt() * 10} מ'"
+    else String.format(java.util.Locale.US, "%.1f ק\"מ", meters / 1000)
 
 // ---------- recycle bin ----------
 

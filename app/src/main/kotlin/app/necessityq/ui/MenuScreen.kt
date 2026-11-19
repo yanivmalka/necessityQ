@@ -2,11 +2,13 @@ package app.necessityq.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +33,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Search
@@ -39,7 +42,9 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -131,6 +136,10 @@ private fun MenuHome(vm: AppViewModel, modifier: Modifier, onOpen: (MenuPage) ->
     var picking by remember { mutableStateOf<Pair<Long, MealSlot>?>(null) }
     var claimMe by remember { mutableStateOf(false) }
     var showAllRecipes by remember { mutableStateOf(false) }
+    /** Recipes ticked for deletion; null = not in selection mode. */
+    var picked by remember { mutableStateOf<Set<String>?>(null) }
+    var confirmBulkDelete by remember { mutableStateOf(false) }
+    BackHandler(enabled = picked != null) { picked = null }
     LaunchedEffect(horizon) { if (selected < todayDay || selected >= todayDay + horizon) selected = todayDay }
     val dishes = data.dishes.associateBy { it.id }
 
@@ -283,15 +292,52 @@ private fun MenuHome(vm: AppViewModel, modifier: Modifier, onOpen: (MenuPage) ->
                     OutlinedButton(onClick = { vm.updateMeals { it.copy(dishes = MealPlanner.sampleDishes) } }) { Text("טעינת מתכונים לדוגמה") }
                 }
                 val sorted = data.dishes.sortedBy { it.name }
-                (if (showAllRecipes) sorted else sorted.take(6)).forEach { dish ->
-                    RecipeRow(dish, data) { onOpen(MenuPage.Recipe(dish.id)) }
+                // selection mode: long-press a recipe (or "בחירה") to tick several and delete them together
+                val selecting = picked != null
+                if (selecting) {
+                    val chosen = picked.orEmpty()
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("נבחרו ${chosen.size}", fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.weight(1f))
+                        TextButton(onClick = {
+                            picked = if (chosen.size == sorted.size) emptySet() else sorted.map { it.id }.toSet()
+                        }) { Text(if (chosen.size == sorted.size) "ניקוי" else "בחירת הכל") }
+                        TextButton(onClick = { picked = null }) { Text("ביטול") }
+                    }
+                }
+                (if (showAllRecipes || selecting) sorted else sorted.take(6)).forEach { dish ->
+                    RecipeRow(
+                        dish, data,
+                        checked = picked?.contains(dish.id),
+                        onLongClick = { picked = picked.orEmpty() + dish.id },
+                    ) {
+                        val chosen = picked
+                        if (chosen == null) onOpen(MenuPage.Recipe(dish.id))
+                        else picked = if (dish.id in chosen) chosen - dish.id else chosen + dish.id
+                    }
                 }
                 Row {
-                    if (sorted.size > 6) {
-                        TextButton(onClick = { showAllRecipes = !showAllRecipes }) { Text(if (showAllRecipes) "פחות" else "כל המתכונים (${sorted.size})") }
+                    if (selecting) {
+                        Button(
+                            onClick = { confirmBulkDelete = true },
+                            enabled = !picked.isNullOrEmpty(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.error,
+                                contentColor = MaterialTheme.colorScheme.onError,
+                            ),
+                        ) {
+                            Icon(Icons.Default.Delete, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("מחיקה (${picked.orEmpty().size})")
+                        }
+                    } else {
+                        if (sorted.size > 6) {
+                            TextButton(onClick = { showAllRecipes = !showAllRecipes }) { Text(if (showAllRecipes) "פחות" else "כל המתכונים (${sorted.size})") }
+                        }
+                        Spacer(Modifier.weight(1f))
+                        if (sorted.isNotEmpty()) TextButton(onClick = { picked = emptySet() }) { Text("בחירה") }
+                        TextButton(onClick = { onOpen(MenuPage.EditRecipe(null)) }) { Text("+ מתכון חדש") }
                     }
-                    Spacer(Modifier.weight(1f))
-                    TextButton(onClick = { onOpen(MenuPage.EditRecipe(null)) }) { Text("+ מתכון חדש") }
                 }
             }
 
@@ -314,6 +360,22 @@ private fun MenuHome(vm: AppViewModel, modifier: Modifier, onOpen: (MenuPage) ->
 
     picking?.let { (day, slot) ->
         PickDishDialog(vm, data, day, slot, onDismiss = { picking = null }, onSearch = { picking = null; onOpen(MenuPage.Search) })
+    }
+    if (confirmBulkDelete) {
+        val ids = picked.orEmpty()
+        AlertDialog(
+            onDismissRequest = { confirmBulkDelete = false },
+            title = { Text(if (ids.size == 1) "למחוק מתכון אחד?" else "למחוק ${ids.size} מתכונים?") },
+            text = { Text("המתכונים יוסרו גם מהתפריט ומהדירוגים. מה שכבר ברשימת הקניות נשאר.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmBulkDelete = false
+                    picked = null
+                    vm.updateMeals { d -> ids.fold(d) { acc, id -> acc.withoutDish(id) } }
+                }) { Text("מחיקה") }
+            },
+            dismissButton = { TextButton(onClick = { confirmBulkDelete = false }) { Text("ביטול") } },
+        )
     }
     if (claimMe) {
         AlertDialog(
@@ -444,9 +506,20 @@ private fun SlotRow(
     }
 }
 
+/** A recipe in "המתכונים שלי"; [checked] non-null shows a selection checkbox. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun RecipeRow(dish: Dish, data: MealData, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+private fun RecipeRow(dish: Dish, data: MealData, checked: Boolean? = null, onLongClick: () -> Unit = {}, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (checked != null) {
+            Checkbox(checked = checked, onCheckedChange = { onClick() })
+            Spacer(Modifier.width(4.dp))
+        }
         DishTile(dish.name, dish.id, size = 40)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {

@@ -33,7 +33,7 @@ import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PlayArrow
@@ -161,9 +161,21 @@ fun ItemSheet(
     // reading the sheet marks the conversation as read, also for messages that arrive while it is open
     LaunchedEffect(itemId, thread.size) { vm.markRead(itemId) }
 
+    var replyTo by remember(itemId) { mutableStateOf<ItemMessage?>(null) }
+    var editingMessage by remember(itemId) { mutableStateOf<ItemMessage?>(null) }
+    val scroll = rememberScrollState()
+    // a new message (sent or received) brings the end of the conversation into view, as in a chat app
+    var seenMessages by remember(itemId) { androidx.compose.runtime.mutableIntStateOf(thread.size) }
+    LaunchedEffect(thread.size) {
+        if (thread.size > seenMessages) scroll.animateScrollTo(scroll.maxValue)
+        seenMessages = thread.size
+    }
+
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet) {
+      // details and conversation scroll; the message bar stays pinned at the bottom of the sheet
+      Column(Modifier.fillMaxWidth()) {
         Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp),
+            Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(scroll).padding(horizontal = 16.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -335,8 +347,6 @@ fun ItemSheet(
                 ChatSoundToggle(vm)
             }
             vm.receipts.collectAsStateWithLifecycle()
-            var replyTo by remember(itemId) { mutableStateOf<ItemMessage?>(null) }
-            var editingMessage by remember(itemId) { mutableStateOf<ItemMessage?>(null) }
             // typing about another product: shown here too, one tap away
             val elsewhere = typing.filter { it.itemId != itemId }.groupBy { it.itemId }
             elsewhere.values.forEach { group ->
@@ -372,18 +382,25 @@ fun ItemSheet(
                     Text("  " + app.necessityq.domain.Typing.label(here.map { it.name }), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            ChatComposer(
-                vm, itemId, line?.displayName ?: itemName,
-                replyTo = replyTo, onReplyDone = { replyTo = null },
-                editing = editingMessage, onEditDone = { editingMessage = null },
-            )
             Text(
                 "השיחה שייכת לקנייה הנוכחית: כשהפריט נוקה מהרשימה היא עוברת ל\"שיחות מקניות קודמות\" בהודעות.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            androidx.compose.foundation.layout.Spacer(Modifier.padding(bottom = 24.dp))
+            androidx.compose.foundation.layout.Spacer(Modifier.padding(bottom = 8.dp))
         }
+        Column(
+            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerLow)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            ChatComposer(
+                vm, itemId, line?.displayName ?: itemName,
+                replyTo = replyTo, onReplyDone = { replyTo = null },
+                editing = editingMessage, onEditDone = { editingMessage = null },
+            )
+        }
+      }
     }
 
     confirmDeleteMessage?.let { m ->
@@ -869,53 +886,104 @@ private fun ChatComposer(
     }
 
     if (recording) {
-        Row(
-            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.errorContainer, NqShapes.Field).padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = { vm.recorder.stopQuietly(); recording = false }) { Icon(Icons.Default.Delete, contentDescription = "ביטול ההקלטה") }
-            Text(
-                "מקליט… " + ItemMessage.formatDuration(elapsed) + " / " + ItemMessage.formatDuration(app.necessityq.platform.VoiceRecorder.MAX_MS),
-                Modifier.weight(1f),
-                fontWeight = FontWeight.Bold,
-            )
-            IconButton(onClick = {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.material3.Surface(
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 4.dp)) {
+                    IconButton(onClick = { vm.recorder.stopQuietly(); recording = false }) {
+                        Icon(Icons.Default.Delete, contentDescription = "ביטול ההקלטה", tint = MaterialTheme.colorScheme.error)
+                    }
+                    Box(Modifier.size(10.dp).background(MaterialTheme.colorScheme.error, androidx.compose.foundation.shape.CircleShape))
+                    Text(
+                        "  " + ItemMessage.formatDuration(elapsed) + " / " + ItemMessage.formatDuration(app.necessityq.platform.VoiceRecorder.MAX_MS),
+                        Modifier.weight(1f),
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+            androidx.compose.foundation.layout.Spacer(Modifier.size(6.dp))
+            ComposerAction(Icons.AutoMirrored.Filled.Send, "שליחת ההקלטה") {
                 recording = false
                 val result = vm.recorder.stop()
                 if (result == null) vm.reportError("ההקלטה קצרה מדי") else sendRecording(result)
-            }) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "שליחת ההקלטה") }
+            }
         }
         return
     }
 
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        if (editing == null) {
-            IconButton(onClick = { gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
-                Icon(Icons.Default.PhotoLibrary, contentDescription = "שליחת תמונה מהגלריה")
+    // WhatsApp-style bar: a rounded box with the text and the picture buttons, and beside it one
+    // round button that records when the box is empty and sends once something is typed
+    Row(verticalAlignment = Alignment.Bottom) {
+        androidx.compose.material3.Surface(
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+        ) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                androidx.compose.material3.TextField(
+                    draft, { draft = it; vm.onDraftChanged(itemId, itemName, it) },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text(if (editing != null) "עריכה…" else if (replyTo != null) "תגובה…" else "הודעה") },
+                    maxLines = 5,
+                    colors = androidx.compose.material3.TextFieldDefaults.colors(
+                        focusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                        unfocusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                        disabledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                        focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                        unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                        disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                    ),
+                )
+                if (editing == null) {
+                    IconButton(onClick = { gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
+                        Icon(Icons.Default.AttachFile, contentDescription = "שליחת תמונה מהגלריה", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    // as in WhatsApp, the camera makes room once typing starts
+                    if (draft.isBlank()) {
+                        IconButton(onClick = { camera.launch(null) }) {
+                            Icon(Icons.Default.PhotoCamera, contentDescription = "צילום תמונה", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
             }
-            IconButton(onClick = { camera.launch(null) }) { Icon(Icons.Default.PhotoCamera, contentDescription = "צילום תמונה") }
         }
-        OutlinedTextField(
-            draft, { draft = it; vm.onDraftChanged(itemId, itemName, it) },
-            modifier = Modifier.weight(1f),
-            placeholder = { Text(if (editing != null) "עריכה…" else if (replyTo != null) "תגובה…" else "למשל: לקנות את הגדול?") },
-            maxLines = 4,
-        )
+        androidx.compose.foundation.layout.Spacer(Modifier.size(6.dp))
         when {
-            editing != null -> IconButton(
+            editing != null -> ComposerAction(
+                Icons.Default.Check, "שמירת העריכה",
                 enabled = draft.isNotBlank() || editing.kind != MessageKind.TEXT,
-                onClick = { vm.editMessage(editing, draft); draft = ""; onEditDone() },
-            ) { Icon(Icons.Default.Check, contentDescription = "שמירת העריכה") }
-            draft.isBlank() -> IconButton(onClick = {
+            ) { vm.editMessage(editing, draft); draft = ""; onEditDone() }
+            draft.isBlank() -> ComposerAction(Icons.Default.Mic, "הקלטת הודעה") {
                 val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
                 if (granted) startRecording() else micPermission.launch(Manifest.permission.RECORD_AUDIO)
-            }) { Icon(Icons.Default.Mic, contentDescription = "הקלטת הודעה") }
-            else -> IconButton(onClick = {
+            }
+            else -> ComposerAction(Icons.AutoMirrored.Filled.Send, "שליחה") {
                 vm.sendMessage(itemId, itemName, draft, replyTo?.id)
                 draft = ""
                 onReplyDone()
-            }) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "שליחה") }
+            }
         }
+    }
+}
+
+/** The round button beside the message box (record / send / save), as in WhatsApp. */
+@Composable
+private fun ComposerAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    description: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    androidx.compose.material3.FilledIconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.size(48.dp),
+        shape = androidx.compose.foundation.shape.CircleShape,
+    ) {
+        Icon(icon, contentDescription = description)
     }
 }
 

@@ -732,13 +732,21 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
      */
     fun addStoreFromBranch(branch: app.necessityq.domain.PriceBranch): String? {
         val (hid, _, _) = ctx() ?: return null
-        val location = lastLocation
+        // an exactly geocoded branch keeps its own coordinates (it may be chosen from afar, from the
+        // followed list); one known only by its city centre takes where the user is shopping now
+        val exact = !branch.approximate && branch.latitude != null && branch.longitude != null
+        val bLat = branch.latitude
+        val bLon = branch.longitude
+        // the current position only when it is plausibly in the branch's city (within 10 km of its centre)
+        val location = lastLocation?.takeIf { l ->
+            bLat == null || bLon == null || Stores.distanceMeters(l.latitude, l.longitude, bLat, bLon) <= 10_000
+        }
         val store = Store(
             id = java.util.UUID.randomUUID().toString(),
             name = app.necessityq.domain.BranchLocator.storeName(branch),
             type = StoreType.SUPERMARKET,
-            latitude = location?.latitude ?: branch.latitude,
-            longitude = location?.longitude ?: branch.longitude,
+            latitude = if (exact) bLat else location?.latitude ?: bLat,
+            longitude = if (exact) bLon else location?.longitude ?: bLon,
         )
         launchSafe { container.collab.saveStore(hid, store) }
         return store.id
