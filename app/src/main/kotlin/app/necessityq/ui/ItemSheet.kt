@@ -205,6 +205,11 @@ fun ItemSheet(
         if (thread.size > seenMessages) scroll.animateScrollTo(scroll.maxValue)
         seenMessages = thread.size
     }
+    // someone starts typing here: their typing bubble comes into view when I am at the end of the conversation
+    val typingHereCount = typing.count { it.itemId == itemId }
+    LaunchedEffect(typingHereCount) {
+        if (typingHereCount > 0 && scroll.maxValue - scroll.value < 600) scroll.animateScrollTo(scroll.maxValue)
+    }
 
     // the branch price list opens part-way; a tap on it or scrolling the page opens it fully
     var pricesOpen by remember(itemId) { mutableStateOf(false) }
@@ -497,16 +502,11 @@ fun ItemSheet(
             }
             ChatFoodThread(
                 thread, vm = vm,
+                typing = typing.filter { it.itemId == itemId },
                 selectedId = selectedMessageId,
                 onSelect = { selectedMessageId = it?.id },
                 onReply = { replyTo = it; editingMessage = null },
             )
-            typing.filter { it.itemId == itemId }.takeIf { it.isNotEmpty() }?.let { here ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TypingDots()
-                    Text("  " + app.necessityq.domain.Typing.label(here.map { it.name }), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
             Text(
                 "השיחה שייכת לקנייה הנוכחית: כשהפריט נוקה מהרשימה היא עוברת ל\"שיחות מקניות קודמות\" בהודעות.",
                 style = MaterialTheme.typography.bodySmall,
@@ -1227,7 +1227,7 @@ private fun UnitChooser(
 @Composable
 fun TypingDots(color: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.primary) {
     val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "typing")
-    Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.height(12.dp), horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.Bottom) {
         repeat(3) { i ->
             val phase by transition.animateFloat(
                 initialValue = 0f,
@@ -1243,9 +1243,10 @@ fun TypingDots(color: androidx.compose.ui.graphics.Color = MaterialTheme.colorSc
                 ),
                 label = "dot$i",
             )
+            // a wave: each dot rises and falls a little after the previous one (as in WhatsApp)
             androidx.compose.foundation.layout.Box(
                 Modifier
-                    .padding(bottom = (phase * 4).dp)
+                    .graphicsLayer { translationY = -phase * 4.dp.toPx() }
                     .size(6.dp)
                     .alpha(0.35f + 0.65f * phase)
                     .background(color, androidx.compose.foundation.shape.CircleShape),

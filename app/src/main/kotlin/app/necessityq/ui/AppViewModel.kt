@@ -1,5 +1,6 @@
 package app.necessityq.ui
 
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -1095,6 +1096,20 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     /** uid → display name, for "added by" and chat. */
     val memberNames: StateFlow<Map<String, String>> = container.household.members
         .map { list -> list.associate { it.userId to it.displayName } }
+        .catch { emit(emptyMap()) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
+    /** Profile pictures of the members (decoded once), for the avatars in צ'אט פוד. */
+    val memberPhotos: StateFlow<Map<String, androidx.compose.ui.graphics.ImageBitmap>> = container.household.members
+        .map { list -> list.mapNotNull { m -> m.photo }.joinToString() to list }
+        .distinctUntilChanged { a, b -> a.first == b.first }
+        .map { (_, list) ->
+            list.mapNotNull { m ->
+                val bmp = m.photo?.let { app.necessityq.platform.AvatarCodec.decode(it) } ?: return@mapNotNull null
+                m.userId to bmp.asImageBitmap()
+            }.toMap()
+        }
+        .flowOn(kotlinx.coroutines.Dispatchers.Default)
         .catch { emit(emptyMap()) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 

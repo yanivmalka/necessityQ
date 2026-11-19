@@ -173,8 +173,19 @@ internal fun ChatFoodThread(
     onSelect: (ItemMessage?) -> Unit,
     onReply: (ItemMessage) -> Unit,
     readOnly: Boolean = false,
+    /** Others typing in this conversation right now: shown at its end as WhatsApp does. */
+    typing: List<app.necessityq.domain.TypingState> = emptyList(),
 ) {
+    val names by vm.memberNames.collectAsStateWithLifecycle()
+    val photos by vm.memberPhotos.collectAsStateWithLifecycle()
+    val colors = NqTheme.colors
+    val memberIds = names.keys.toList()
+    fun colorOf(uid: String) = colors.senderColors[ChatLayout.colorSlot(uid, memberIds, colors.senderColors.size)]
     if (thread.isEmpty()) {
+        if (typing.isNotEmpty()) {
+            TypingBubble(typing, photos, ::colorOf)
+            return
+        }
         Text(
             "אין עדיין הודעות. כתבו שאלה, צלמו תמונה או הקליטו הודעה, וכל בני הבית יראו. " +
                 "כדי שמישהו יקבל התראה, תייגו אותו עם @ או החליקו את ההודעה שלו כדי לצטט אותה.",
@@ -182,17 +193,13 @@ internal fun ChatFoodThread(
         )
         return
     }
-    val names by vm.memberNames.collectAsStateWithLifecycle()
     val members by vm.chatMembers.collectAsStateWithLifecycle()
-    val colors = NqTheme.colors
-    val memberIds = names.keys.toList()
     val slots = remember(thread) { ChatLayout.slots(thread, System.currentTimeMillis()) }
     val byId = remember(thread) { thread.associateBy { it.id } }
     val requesters = remember { HashMap<String, BringIntoViewRequester>() }
     val scope = rememberCoroutineScope()
     var flashId by remember { mutableStateOf<String?>(null) }
     fun nameOf(uid: String, fallback: String) = if (uid == vm.me) "אני" else names[uid] ?: fallback
-    fun colorOf(uid: String) = colors.senderColors[ChatLayout.colorSlot(uid, memberIds, colors.senderColors.size)]
     fun jumpTo(id: String) {
         val target = requesters[id] ?: return
         scope.launch {
@@ -225,9 +232,53 @@ internal fun ChatFoodThread(
                         onSelect = onSelect,
                         onReply = onReply,
                         onJump = ::jumpTo,
+                        photo = photos[slot.message.authorId],
                     )
                 }
             }
+            if (typing.isNotEmpty()) TypingBubble(typing, photos, ::colorOf)
+        }
+    }
+}
+
+/**
+ * Someone is typing here: their round picture (several overlap) and a bubble with three dots moving in
+ * a wave, on the others' side — as in WhatsApp.
+ */
+@Composable
+private fun TypingBubble(
+    typing: List<app.necessityq.domain.TypingState>,
+    photos: Map<String, androidx.compose.ui.graphics.ImageBitmap>,
+    colorOf: (String) -> Color,
+) {
+    val label = app.necessityq.domain.Typing.label(typing.map { it.name })
+    Row(
+        Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp).semantics { contentDescription = label },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // overlapping circles, up to three
+        Box {
+            typing.take(3).forEachIndexed { i, t ->
+                Box(Modifier.padding(start = (i * 16).dp)) {
+                    Box(Modifier.background(MaterialTheme.colorScheme.surface, CircleShape).padding(1.5.dp)) {
+                        Avatar(t.name, colorOf(t.userId), photo = photos[t.userId])
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.width(6.dp))
+        Surface(
+            shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
+            color = NqTheme.colors.theirBubble,
+            border = BorderStroke(1.dp, NqTheme.colors.hairline),
+        ) {
+            Box(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+                TypingDots(color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        if (typing.size > 1) {
+            Spacer(Modifier.width(8.dp))
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -244,9 +295,17 @@ private fun ChatDayChip(label: String) {
     }
 }
 
-/** Initials in the writer's colour. */
+/** The member's profile picture, or their initials in their colour when they have none. */
 @Composable
-private fun Avatar(name: String, color: Color, size: Dp = 28.dp) {
+private fun Avatar(name: String, color: Color, size: Dp = 28.dp, photo: androidx.compose.ui.graphics.ImageBitmap? = null) {
+    if (photo != null) {
+        androidx.compose.foundation.Image(
+            photo, contentDescription = name,
+            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            modifier = Modifier.size(size).clip(CircleShape),
+        )
+        return
+    }
     Box(
         Modifier.size(size).background(color.copy(alpha = 0.18f), CircleShape),
         contentAlignment = Alignment.Center,
@@ -273,6 +332,7 @@ private fun BubbleRow(
     onSelect: (ItemMessage?) -> Unit,
     onReply: (ItemMessage) -> Unit,
     onJump: (String) -> Unit,
+    photo: androidx.compose.ui.graphics.ImageBitmap? = null,
 ) {
     val m = slot.message
     val mine = m.authorId == vm.me
@@ -341,7 +401,7 @@ private fun BubbleRow(
             verticalAlignment = Alignment.Top,
         ) {
             if (!mine) {
-                if (slot.firstInRun) Avatar(authorName, authorColor) else Spacer(Modifier.width(28.dp))
+                if (slot.firstInRun) Avatar(authorName, authorColor, photo = photo) else Spacer(Modifier.width(28.dp))
                 Spacer(Modifier.width(6.dp))
             }
             Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
@@ -953,7 +1013,8 @@ internal fun ChatFoodComposer(
     val suggestions = remember(query, members) { query?.let { Mentions.suggest(it, members, vm.me) }.orEmpty() }
     if (suggestions.isNotEmpty()) {
         val palette = NqTheme.colors.senderColors
-        MentionSuggestions(suggestions, colorOf = { uid -> palette[ChatLayout.colorSlot(uid, names.keys.toList(), palette.size)] }) { member ->
+        val photos by vm.memberPhotos.collectAsStateWithLifecycle()
+        MentionSuggestions(suggestions, colorOf = { uid -> palette[ChatLayout.colorSlot(uid, names.keys.toList(), palette.size)] }, photos = photos) { member ->
             val (text, cursor) = Mentions.complete(draft.text, draft.selection.start, member.name)
             setDraft(TextFieldValue(text, TextRange(cursor)))
         }
@@ -1038,7 +1099,12 @@ internal fun ChatFoodComposer(
 
 /** Members offered while typing "@": tap one to put the tag in the text. */
 @Composable
-private fun MentionSuggestions(members: List<ChatMember>, colorOf: (String) -> Color, onPick: (ChatMember) -> Unit) {
+private fun MentionSuggestions(
+    members: List<ChatMember>,
+    colorOf: (String) -> Color,
+    photos: Map<String, androidx.compose.ui.graphics.ImageBitmap>,
+    onPick: (ChatMember) -> Unit,
+) {
     Surface(
         shape = NqShapes.Panel,
         color = MaterialTheme.colorScheme.surface,
@@ -1060,7 +1126,7 @@ private fun MentionSuggestions(members: List<ChatMember>, colorOf: (String) -> C
                             contentAlignment = Alignment.Center,
                         ) { Icon(Icons.Default.AlternateEmail, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary) }
                     } else {
-                        Avatar(member.name, colorOf(member.userId))
+                        Avatar(member.name, colorOf(member.userId), photo = photos[member.userId])
                     }
                     Spacer(Modifier.width(10.dp))
                     Column {
