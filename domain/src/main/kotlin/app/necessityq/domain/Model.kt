@@ -67,6 +67,11 @@ data class ListLine(
     val removedReason: RemoveReason? = null,
     /** Status before removal, so a cleared bought line can be put back as bought. */
     val removedFrom: LineStatus? = null,
+    /**
+     * An unusually large amount someone confirmed ("כן, זו הכמות"): up to it the list does not flag the
+     * line (see [QuantityNorms.warningFor]).
+     */
+    val approvedQuantity: Quantity? = null,
 ) {
     val identity: ItemIdentity get() = ItemIdentity(name, variant, category)
     val displayName: String get() = identity.displayName

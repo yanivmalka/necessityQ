@@ -56,6 +56,8 @@ interface ShoppingRepository {
 
     suspend fun addLine(householdId: String, line: ListLine)
     suspend fun updateLineQuantity(householdId: String, lineId: String, quantity: Quantity?, atMillis: Long)
+    /** Someone confirmed an unusually large amount: the line is no longer flagged up to [quantity]. */
+    suspend fun approveLineQuantity(householdId: String, lineId: String, quantity: Quantity, atMillis: Long)
     suspend fun updateLineNote(householdId: String, lineId: String, note: String?, atMillis: Long)
     /** Which dishes the line is for, and how much each needs. */
     suspend fun updateLineRecipes(householdId: String, lineId: String, recipe: String?, parts: List<RecipePart>, atMillis: Long)

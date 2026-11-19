@@ -148,14 +148,25 @@ object PriceData {
     fun previousPrice(p: BranchProduct): Double? =
         p.history.map { it.second }.dropLastWhile { kotlin.math.abs(it - p.price) < 0.005 }.lastOrNull()
 
-    fun formatPrice(price: Double): String = String.format(java.util.Locale.US, "₪%.2f", price)
+    /**
+     * "5.90 ₪": the amount, then the shekel sign on its right. Wrapped in left-to-right marks so that inside
+     * Hebrew (right-to-left) text the whole price stays one left-to-right unit and the sign is never moved.
+     */
+    fun formatPrice(price: Double, decimals: Int = 2): String = ltr(amount(price, decimals) + NBSP + SHEKEL)
 
     /**
-     * "₪5.90" when the range is a single price, otherwise "₪6.90–₪5.50". The dearest comes first in the
-     * string because the text is right-to-left: on screen the cheap price is then on the left, the dear on the right.
+     * "5.90 ₪" when the range is a single price, otherwise "5.50–6.90 ₪": cheap on the left, dear on the right,
+     * one shekel sign at the far right. [prefix] (e.g. "~") goes on the left, inside the same unit.
      */
-    fun formatRange(low: Double, high: Double): String =
-        if (kotlin.math.abs(high - low) < 0.005) formatPrice(low) else "${formatPrice(high)}–${formatPrice(low)}"
+    fun formatRange(low: Double, high: Double, decimals: Int = 2, prefix: String = ""): String =
+        if (kotlin.math.abs(high - low) < 0.5 * Math.pow(10.0, -decimals.toDouble())) ltr(prefix + amount(low, decimals) + NBSP + SHEKEL)
+        else ltr(prefix + amount(minOf(low, high), decimals) + "–" + amount(maxOf(low, high), decimals) + NBSP + SHEKEL)
+
+    private const val SHEKEL = "₪"
+    private const val NBSP = "\u00A0"
+    private const val LRM = "\u200E"
+    private fun ltr(text: String) = LRM + text + LRM
+    private fun amount(value: Double, decimals: Int) = String.format(java.util.Locale.US, "%.${decimals}f", value)
 }
 
 /** Port to the price data (Firestore index + per-branch snapshots in the backend). */

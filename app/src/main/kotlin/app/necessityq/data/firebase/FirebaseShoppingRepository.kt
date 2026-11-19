@@ -61,6 +61,12 @@ class FirebaseShoppingRepository(
         )
     }
 
+    override suspend fun approveLineQuantity(householdId: String, lineId: String, quantity: Quantity, atMillis: Long) {
+        linesRef(householdId).document(lineId).update(
+            mapOf("approvedQuantity" to FirestoreMapping.quantityToMap(quantity), "updatedAt" to atMillis),
+        )
+    }
+
     override suspend fun updateLineRecipes(
         householdId: String,
         lineId: String,

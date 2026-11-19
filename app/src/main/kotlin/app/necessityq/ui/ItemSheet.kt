@@ -295,7 +295,9 @@ fun ItemSheet(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    QuantityStepper(line.quantity, onMinus = { vm.adjustQuantity(line, -1) }, onPlus = { vm.adjustQuantity(line, +1) }, onSet = { vm.changeQuantity(line, it) })
+                    QuantityStepper(line.quantity, onMinus = { vm.adjustQuantity(line, -1) }, onPlus = { vm.adjustQuantity(line, +1) }, onSet = { q, approved -> vm.changeQuantity(line, q, approved) },
+                        itemName = line.displayName, check = { vm.quantityCheck(line, it) },
+                    )
                     UnitChooser(line.quantity?.unit, Modifier.weight(1f)) { vm.setQuantityUnit(line, it) }
                 }
             }
@@ -311,6 +313,9 @@ fun ItemSheet(
             if (line != null) {
                 androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     app.necessityq.domain.ItemTags.of(line, stats, favorite).forEach { TagBadge(it) }
+                }
+                app.necessityq.domain.QuantityNorms.warningFor(line, stats?.typicalQuantity)?.let { warning ->
+                    LargeAmountNotice(warning.message(line.displayName)) { vm.changeQuantity(line, line.quantity, approved = true) }
                 }
                 // one row: missing (a toggle — filled while marked), remove
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1512,5 +1517,18 @@ fun TypingDots(color: androidx.compose.ui.graphics.Color = MaterialTheme.colorSc
                     .background(color, androidx.compose.foundation.shape.CircleShape),
             )
         }
+    }
+}
+
+/** "More than usual" on the item page: change the amount above, or confirm it is meant (the list tag then goes). */
+@Composable
+private fun LargeAmountNotice(message: String, onConfirm: () -> Unit) {
+    val (bg, fg) = NqTheme.colors.tag(app.necessityq.domain.TagKind.LARGE_AMOUNT)
+    Row(
+        Modifier.fillMaxWidth().clip(NqShapes.Panel).background(bg).padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(message, color = fg, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        androidx.compose.material3.TextButton(onClick = onConfirm) { Text("כן, זו הכמות", color = fg, fontWeight = FontWeight.Bold) }
     }
 }

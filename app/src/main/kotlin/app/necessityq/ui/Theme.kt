@@ -79,6 +79,7 @@ private fun tagPair(kind: TagKind): Pair<Color, Color> = when (kind) {
     TagKind.MISSING -> Color(0xFFFFE2D6) to Color(0xFF9A3412)
     TagKind.RECIPE -> Color(0xFFD5F5F0) to Color(0xFF0F5F55)
     TagKind.AUTO -> Color(0xFFE9ECEF) to Color(0xFF343A40)
+    TagKind.LARGE_AMOUNT -> Color(0xFFFFE8CC) to Color(0xFF9C3D00)
 }
 
 /**

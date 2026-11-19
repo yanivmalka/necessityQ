@@ -67,7 +67,7 @@ class StatsAndSuggestionsTest {
             purchase("גבינה לבנה", start.plusDays(21), Quantity.pieces(2)),
         )
         val stats = engine.compute(purchases, start.plusDays(21)).values.single()
-        assertEquals(Quantity.pieces(1.5), stats.typicalQuantity)
+        assertEquals(Quantity.pieces(1), stats.typicalQuantity) // median of 1, 1, 2 — the 750 g trip is left out
         // the latest purchase decides the dimension
         val grams = purchases.dropLast(1) + purchase("גבינה לבנה", start.plusDays(21), Quantity(500.0, QuantityUnit.GRAM))
         assertEquals(Quantity(625.0, QuantityUnit.GRAM), engine.compute(grams, start.plusDays(21)).values.single().typicalQuantity)

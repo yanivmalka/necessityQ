@@ -19,6 +19,7 @@ import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -723,7 +724,8 @@ fun ListScreen(
                                 onRightSwipe = { if (shopping) vm.setMissing(line, !line.missing) else vm.delete(line) },
                                 onPlus = { vm.adjustQuantity(line, +1) },
                                 onMinus = { vm.adjustQuantity(line, -1) },
-                                onSetQuantity = { vm.changeQuantity(line, it) },
+                                onSetQuantity = { q, approved -> vm.changeQuantity(line, q, approved) },
+                                quantityCheck = { vm.quantityCheck(line, it) },
                                 onTap = {
                                     if (display.tapMode == TapMode.INFO) openItem = line
                                     else expanded = if (line.id in expanded) expanded - line.id else expanded + line.id
@@ -1182,7 +1184,8 @@ private fun ProductTile(
     onRightSwipe: () -> Unit,
     onPlus: () -> Unit,
     onMinus: () -> Unit,
-    onSetQuantity: ((Quantity?) -> Unit)? = null,
+    onSetQuantity: ((Quantity?, Boolean) -> Unit)? = null,
+    quantityCheck: (Quantity) -> app.necessityq.domain.QuantityCheck? = { null },
     onTap: () -> Unit,
     onInfo: () -> Unit,
 ) {
@@ -1282,7 +1285,7 @@ private fun ProductTile(
                                         modifier = Modifier.padding(end = 6.dp),
                                     )
                                 }
-                                if (showStepper) QuantityStepper(line.quantity, onMinus, onPlus, onSetQuantity)
+                                if (showStepper) QuantityStepper(line.quantity, onMinus, onPlus, onSetQuantity, line.displayName, quantityCheck)
                                 if (controlsMode && controlsOpen) {
                                     IconButton(onClick = onInfo) { Icon(Icons.Outlined.Info, contentDescription = "דף מידע") }
                                 }
@@ -1297,14 +1300,13 @@ private fun ProductTile(
     }
 }
 
-/** The estimated cost as one short text: "₪184", "~₪184" when not every line has a price, or a range. */
+/** The estimated cost as one short text: "184 ₪", "~184 ₪" when not every line has a price, or "~150–184 ₪". */
 private fun costText(estimate: app.necessityq.domain.ListCostEstimate): String {
     val prefix = if (estimate.complete) "" else "~"
     return when {
-        estimate.pricedLines == 0 -> "₪ —"
-        // right-to-left: the dear price first, so the cheap one ends up on the left
-        estimate.isRange -> prefix + "₪%.0f–%.0f".format(estimate.high, estimate.low)
-        else -> prefix + "₪%.0f".format(estimate.low)
+        estimate.pricedLines == 0 -> "\u200E—\u00A0₪\u200E"
+        estimate.isRange -> app.necessityq.domain.PriceData.formatRange(estimate.low, estimate.high, decimals = 0, prefix = prefix)
+        else -> app.necessityq.domain.PriceData.formatRange(estimate.low, estimate.low, decimals = 0, prefix = prefix)
     }
 }
 
@@ -1541,21 +1543,21 @@ fun PriceSlot(
 ) {
     // the household's own price wins; otherwise the branch data: chosen product, or the typical range
     val (main, sub) = when {
-        price != null -> "₪%.2f".format(price) to "ממוצע " + (average?.let { "₪%.2f".format(it) } ?: "—")
-        weighted != null -> app.necessityq.domain.PriceData.formatRange(weighted.low, weighted.high).replace("–₪", "–") to
+        price != null -> app.necessityq.domain.PriceData.formatPrice(price) to "ממוצע " + (average?.let { app.necessityq.domain.PriceData.formatPrice(it) } ?: "—")
+        weighted != null -> app.necessityq.domain.PriceData.formatRange(weighted.low, weighted.high) to
             listOfNotNull(quantity?.format(), weighted.estimatedWeight?.let { app.necessityq.domain.PieceWeights.label(it) })
                 .joinToString(" ").ifEmpty { "לפי משקל" }
         info?.preferred != null -> app.necessityq.domain.PriceData.formatPrice(info.preferred!!.price) to "המוצר שבחרת"
         // produce priced per kilo with no amount on the list: the price is per kilo
         info != null && info.candidates.isNotEmpty() && info.candidates.all { it.soldByWeight } ->
-            app.necessityq.domain.PriceData.formatRange(info.low, info.high).replace("–₪", "–") to "לק\"ג"
+            app.necessityq.domain.PriceData.formatRange(info.low, info.high) to "לק\"ג"
         info != null -> {
             // packaged goods: the price of the amount on the list ("2 יח'"), not a count of matching products
             val n = app.necessityq.domain.ListCost.packages(quantity, false) ?: 1.0
-            app.necessityq.domain.PriceData.formatRange(info.low * n, info.high * n).replace("–₪", "–") to
+            app.necessityq.domain.PriceData.formatRange(info.low * n, info.high * n) to
                 (quantity?.format() ?: if (info.candidates.size == 1) "מוצר אחד" else "${info.candidates.size} מוצרים")
         }
-        else -> "₪ —" to "ממוצע " + (average?.let { "₪%.2f".format(it) } ?: "—")
+        else -> "\u200E—\u00A0₪\u200E" to "ממוצע " + (average?.let { app.necessityq.domain.PriceData.formatPrice(it) } ?: "—")
     }
     Column(
         Modifier.widthIn(min = 68.dp).clip(NqShapes.Panel)
@@ -1581,14 +1583,25 @@ fun PromoStrip(promo: String?) {
     )
 }
 
-/** Tapping the amount opens a field to type it, so a child's thousand taps on "+" is one edit, not a thousand on "−". */
+/**
+ * Tapping the amount opens a field to type it, so a child's thousand taps on "+" is one edit, not a thousand on "−".
+ * An amount above what the item is usually bought in is allowed, but only after saying so: the warning shows
+ * under the field and the button becomes "כן, זו הכמות" (the line is then not flagged as "כמות חריגה").
+ */
 @Composable
-private fun QuantityEditDialog(quantity: Quantity?, onSet: (Quantity?) -> Unit, onDismiss: () -> Unit) {
+private fun QuantityEditDialog(
+    quantity: Quantity?,
+    itemName: String,
+    check: (Quantity) -> app.necessityq.domain.QuantityCheck?,
+    onSet: (Quantity?, Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
     val unit = quantity?.unit ?: app.necessityq.domain.QuantityUnit.PIECE
     var text by remember { mutableStateOf(quantity?.let { Quantity.formatNumber(it.amount) } ?: "") }
     val amount = text.trim().replace(',', '.').toDoubleOrNull()
     val blank = text.isBlank()
-    val valid = blank || (amount != null && amount > 0.0 && Quantity(amount, unit).isHomePlausible)
+    val valid = blank || (amount != null && amount > 0.0)
+    val verdict = if (!blank && valid) check(Quantity(amount!!, unit))?.takeIf { it.isUnusual } else null
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("כמות (${unit.label})") },
@@ -1597,25 +1610,38 @@ private fun QuantityEditDialog(quantity: Quantity?, onSet: (Quantity?) -> Unit, 
                 value = text,
                 onValueChange = { text = it },
                 singleLine = true,
-                isError = !valid,
-                supportingText = { if (!valid) Text("כמות לא הגיונית לקנייה ביתית") },
+                isError = !valid || verdict?.level == app.necessityq.domain.QuantityLevel.ABSURD,
+                supportingText = {
+                    when {
+                        !valid -> Text("צריך מספר גדול מאפס")
+                        verdict != null -> Text(verdict.message(itemName), color = NqTheme.colors.tag(TagKind.LARGE_AMOUNT).second)
+                    }
+                },
                 keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal, imeAction = ImeAction.Done),
             )
         },
         confirmButton = {
             TextButton(
                 enabled = valid,
-                onClick = { onSet(if (blank) null else Quantity(amount!!, unit)); onDismiss() },
-            ) { Text("אישור") }
+                onClick = { onSet(if (blank) null else Quantity(amount!!, unit), verdict != null); onDismiss() },
+            ) { Text(if (verdict != null) "כן, זו הכמות" else "אישור") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("ביטול") } },
     )
 }
 
 @Composable
-fun QuantityStepper(quantity: Quantity?, onMinus: () -> Unit, onPlus: () -> Unit, onSet: ((Quantity?) -> Unit)? = null) {
+fun QuantityStepper(
+    quantity: Quantity?,
+    onMinus: () -> Unit,
+    onPlus: () -> Unit,
+    /** (amount, confirmed as more than usual) */
+    onSet: ((Quantity?, Boolean) -> Unit)? = null,
+    itemName: String = "",
+    check: (Quantity) -> app.necessityq.domain.QuantityCheck? = { null },
+) {
     var editing by remember { mutableStateOf(false) }
-    if (editing && onSet != null) QuantityEditDialog(quantity, onSet) { editing = false }
+    if (editing && onSet != null) QuantityEditDialog(quantity, itemName, check, onSet) { editing = false }
     Row(
         Modifier.clip(NqShapes.Pill).background(MaterialTheme.colorScheme.surfaceVariant),
         verticalAlignment = Alignment.CenterVertically,
@@ -1624,11 +1650,14 @@ fun QuantityStepper(quantity: Quantity?, onMinus: () -> Unit, onPlus: () -> Unit
         IconButton(onClick = onPlus, modifier = Modifier.size(38.dp)) {
             Icon(Icons.Default.Add, contentDescription = "יותר", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
         }
-        Text(
-            quantity?.format() ?: "—", fontWeight = FontWeight.ExtraBold,
-            modifier = Modifier.widthIn(min = 36.dp).let { if (onSet != null) it.clickable { editing = true } else it },
-            textAlign = TextAlign.Center,
-        )
+        // the whole height of the pill between the buttons opens the keyboard, not just the glyphs
+        Box(
+            Modifier.heightIn(min = 38.dp).widthIn(min = 44.dp)
+                .let { if (onSet != null) it.clickable(onClickLabel = "הקלדת כמות") { editing = true } else it },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(quantity?.format() ?: "—", fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center)
+        }
         IconButton(onClick = onMinus, modifier = Modifier.size(38.dp)) { Icon(Icons.Default.Remove, contentDescription = "פחות", Modifier.size(20.dp)) }
     }
 }

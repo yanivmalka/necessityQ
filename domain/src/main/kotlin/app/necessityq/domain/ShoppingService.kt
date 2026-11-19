@@ -70,8 +70,9 @@ class ShoppingService(
         current: List<ListLine>,
         recipe: String? = null,
     ) {
-        // an absurd amount for a home (750 יח') is read as a slip: add one
-        val quantity = Quantity.homeSized(requestedQuantity)
+        // far beyond any home purchase of this item (750 יח' of cheese) is a slip: made usual. A merely large
+        // amount is kept and flagged on the list until someone confirms it (QuantityNorms.warningFor).
+        val quantity = QuantityNorms.homeSized(item.name, item.category, requestedQuantity)
         val now = clock.nowMillis()
         val part = recipe?.let { RecipePart(it, quantity, fromMenu = source == LineSource.MENU) }
         when (val decision = ListRules.decideAdd(current, item.id, quantity)) {
@@ -132,6 +133,13 @@ class ShoppingService(
 
     suspend fun changeQuantity(householdId: String, line: ListLine, quantity: Quantity?) =
         repository.updateLineQuantity(householdId, line.id, quantity, clock.nowMillis())
+
+    /** Sets the amount and confirms it is meant, even though it is more than usual for the item. */
+    suspend fun changeQuantityApproved(householdId: String, line: ListLine, quantity: Quantity) {
+        val now = clock.nowMillis()
+        repository.updateLineQuantity(householdId, line.id, quantity, now)
+        repository.approveLineQuantity(householdId, line.id, quantity, now)
+    }
 
     /**
      * Renames a line from free text ("חלב 3%"). Returns the new identity, or null when the text is empty
@@ -221,7 +229,7 @@ class ShoppingService(
                     name = item.identity.name,
                     variant = item.identity.variant,
                     category = item.identity.category,
-                    quantity = item.quantity,
+                    quantity = QuantityNorms.homeSized(item.identity.name, item.identity.category, item.quantity),
                     note = null,
                     status = LineStatus.NEEDED,
                     source = LineSource.AUTO,
