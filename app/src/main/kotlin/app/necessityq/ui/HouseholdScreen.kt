@@ -1,6 +1,20 @@
 package app.necessityq.ui
 
 import android.content.Intent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -275,9 +289,11 @@ fun AccountCard(vm: AppViewModel, account: Account) {
 fun UpdateCard(vm: AppViewModel) {
     val context = LocalContext.current
     val state by vm.update.collectAsStateWithLifecycle()
+    val autoCheck by vm.autoCheckUpdates.collectAsStateWithLifecycle()
+    val autoInstall by vm.autoInstallUpdates.collectAsStateWithLifecycle()
 
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(16.dp).animateContentSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SectionTitle("עדכוני אפליקציה")
             Text("גרסה מותקנת: ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall)
             when (val s = state) {
@@ -292,34 +308,113 @@ fun UpdateCard(vm: AppViewModel) {
                 }
                 is UpdateState.Available -> {
                     Text("גרסה חדשה זמינה: ${s.release.versionName}", fontWeight = FontWeight.Bold)
-                    if (s.release.sizeBytes > 0) Text("גודל: ${(s.release.sizeBytes / 1_000_000.0 * 10).roundToInt() / 10.0} MB", style = MaterialTheme.typography.bodySmall)
-                    Button(onClick = vm::downloadUpdate) { Text("הורדה") }
+                    if (s.release.sizeBytes > 0) Text("גודל: ${megabytes(s.release.sizeBytes)} MB", style = MaterialTheme.typography.bodySmall)
+                    Button(onClick = vm::downloadUpdate) {
+                        Icon(Icons.Default.Download, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("הורדה ברקע")
+                    }
                 }
                 is UpdateState.Downloading -> {
-                    Text("מוריד… ${(s.progress * 100).roundToInt()}%")
-                    LinearProgressIndicator(progress = { s.progress }, modifier = Modifier.fillMaxWidth())
+                    val shown by animateFloatAsState(s.progress, label = "updateProgress")
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        DownloadingIcon()
+                        Column(Modifier.weight(1f)) {
+                            Text("מוריד את ${s.release.versionName}… ${(s.progress * 100).roundToInt()}%", fontWeight = FontWeight.Bold)
+                            if (s.release.sizeBytes > 0) {
+                                Text(
+                                    "${megabytes((s.release.sizeBytes * s.progress).toLong())} / ${megabytes(s.release.sizeBytes)} MB",
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                        OutlinedButton(onClick = vm::stopDownload) {
+                            Icon(Icons.Default.Stop, contentDescription = null)
+                            Spacer(Modifier.width(4.dp))
+                            Text("עצירה")
+                        }
+                    }
+                    LinearProgressIndicator(progress = { shown }, modifier = Modifier.fillMaxWidth())
+                    Text(
+                        "ההורדה ממשיכה ברקע — אפשר להמשיך להשתמש באפליקציה או לצאת ממנה.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                is UpdateState.Stopped -> {
+                    Text("ההורדה של ${s.release.versionName} נעצרה.")
+                    Button(onClick = vm::downloadUpdate) {
+                        Icon(Icons.Default.Download, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("הורדה מחדש")
+                    }
                 }
                 is UpdateState.Ready -> {
                     Text("הגרסה ${s.release.versionName} הורדה ומוכנה להתקנה.")
-                    Button(onClick = {
-                        val updater = vm.updater
-                        if (updater.canInstall()) {
-                            context.startActivity(updater.installIntent(s.file))
-                        } else {
-                            vm.reportError("יש לאשר לאפליקציה להתקין עדכונים, ואז ללחוץ שוב על \"התקנה\"")
-                            context.startActivity(updater.permissionIntent())
-                        }
-                    }) { Text("התקנה") }
+                    Button(onClick = { startInstall(vm, context, s.file) }) { Text("התקנה") }
                 }
                 is UpdateState.Failed -> {
                     Text(s.message, color = MaterialTheme.colorScheme.error)
                     OutlinedButton(onClick = { vm.checkForUpdates(manual = true) }) { Text("ניסיון חוזר") }
                 }
             }
+            HorizontalDivider()
+            UpdateOption("בדיקת עדכונים אוטומטית בפתיחת האפליקציה", autoCheck, vm::setAutoCheckUpdates)
+            UpdateOption("התקנה אוטומטית בסיום ההורדה", autoInstall, vm::setAutoInstallUpdates)
             Text("העדכונים נלקחים מגרסאות האפליקציה ב-GitHub.", style = MaterialTheme.typography.bodySmall)
         }
     }
 }
+
+@Composable
+private fun UpdateOption(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }, verticalAlignment = Alignment.CenterVertically) {
+        androidx.compose.material3.Checkbox(checked = checked, onCheckedChange = onChange)
+        Text(label)
+    }
+}
+
+/** A download arrow that keeps dropping into its tray while the update downloads. */
+@Composable
+fun DownloadingIcon(modifier: Modifier = Modifier, size: androidx.compose.ui.unit.Dp = 28.dp) {
+    val transition = rememberInfiniteTransition(label = "downloading")
+    val drop by transition.animateFloat(
+        initialValue = -0.25f, targetValue = 0.2f,
+        animationSpec = infiniteRepeatable(tween(700, easing = FastOutSlowInEasing), RepeatMode.Restart),
+        label = "drop",
+    )
+    val fade by transition.animateFloat(
+        initialValue = 1f, targetValue = 0.35f,
+        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Restart),
+        label = "fade",
+    )
+    Box(
+        modifier.size(size + 12.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Default.Download, contentDescription = "מוריד",
+            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+            modifier = Modifier.size(size).graphicsLayer {
+                translationY = drop * this.size.height
+                alpha = fade
+            },
+        )
+    }
+}
+
+/** Hands a downloaded update to the system installer, or first asks for the install permission. */
+fun startInstall(vm: AppViewModel, context: android.content.Context, file: java.io.File) {
+    val updater = vm.updater
+    if (updater.canInstall()) {
+        context.startActivity(updater.installIntent(file))
+    } else {
+        vm.reportError("יש לאשר לאפליקציה להתקין עדכונים, ואז ללחוץ שוב על \"התקנה\"")
+        context.startActivity(updater.permissionIntent())
+    }
+}
+
+private fun megabytes(bytes: Long): String = "${(bytes / 1_000_000.0 * 10).roundToInt() / 10.0}"
 
 // ---------- display ----------
 

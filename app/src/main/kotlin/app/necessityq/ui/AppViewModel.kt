@@ -1272,8 +1272,26 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     val updater get() = container.updater
 
+    /** Look for a new version on every launch. */
+    val autoCheckUpdates = MutableStateFlow(prefs.autoCheckUpdates)
+    fun setAutoCheckUpdates(on: Boolean) { prefs.autoCheckUpdates = on; autoCheckUpdates.value = on }
+
+    /** Open the installer by itself once the download finishes. */
+    val autoInstallUpdates = MutableStateFlow(prefs.autoInstallUpdates)
+    fun setAutoInstallUpdates(on: Boolean) { prefs.autoInstallUpdates = on; autoInstallUpdates.value = on }
+
+    /**
+     * A finished download the screen should hand to the installer (auto-install). The activity takes it
+     * while it is in the foreground, because Android does not let a backgrounded app open the installer.
+     */
+    private val _pendingInstall = MutableStateFlow<File?>(null)
+    val pendingInstall: StateFlow<File?> = _pendingInstall
+    fun consumePendingInstall() { _pendingInstall.value = null }
+
+    private var downloadJob: kotlinx.coroutines.Job? = null
+
     init {
-        checkForUpdates(manual = false)
+        if (prefs.autoCheckUpdates) checkForUpdates(manual = false)
     }
 
     fun checkForUpdates(manual: Boolean) {
@@ -1285,7 +1303,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                     _update.value = when {
                         release == null -> UpdateState.UpToDate
                         Releases.isNewer(release.versionCode, BuildConfig.VERSION_CODE) -> {
-                            if (!manual) _messages.tryEmit("יצאה גרסה חדשה ${release.versionName} — ב\"הבית\" אפשר לעדכן")
+                            if (!manual) _messages.tryEmit("יצאה גרסה חדשה ${release.versionName} — ב\"הבית\" ← \"עדכונים\" אפשר לעדכן")
                             UpdateState.Available(release)
                         }
                         else -> UpdateState.UpToDate
@@ -1298,17 +1316,49 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /**
+     * Downloads the update in the background: it keeps going while the user moves around the app or
+     * leaves it, with an ongoing notification showing the progress. [stopDownload] cancels it.
+     */
     fun downloadUpdate() {
-        val available = _update.value as? UpdateState.Available ?: return
-        _update.value = UpdateState.Downloading(available.release, 0f)
-        viewModelScope.launch {
-            runCatching {
-                container.updater.download(available.release) { p ->
-                    _update.value = UpdateState.Downloading(available.release, p)
-                }
-            }.onSuccess { file -> _update.value = UpdateState.Ready(available.release, file) }
-                .onFailure { _update.value = UpdateState.Failed(it.message ?: "ההורדה נכשלה") }
+        val release = when (val s = _update.value) {
+            is UpdateState.Available -> s.release
+            is UpdateState.Stopped -> s.release
+            else -> return
         }
+        _update.value = UpdateState.Downloading(release, 0f)
+        container.notifier.updateProgress(release.versionName, null)
+        downloadJob = viewModelScope.launch {
+            var shownPercent = -1
+            try {
+                val file = container.updater.download(release) { p ->
+                    _update.value = UpdateState.Downloading(release, p)
+                    val percent = (p * 100).toInt()
+                    if (percent != shownPercent) { // one notification update per percent, not per chunk
+                        shownPercent = percent
+                        container.notifier.updateProgress(release.versionName, percent)
+                    }
+                }
+                _update.value = UpdateState.Ready(release, file)
+                container.notifier.updateReady(release.versionName, container.updater.installIntent(file))
+                if (prefs.autoInstallUpdates) _pendingInstall.value = file
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                container.notifier.cancelUpdate()
+                throw e
+            } catch (e: Exception) {
+                container.notifier.cancelUpdate()
+                _update.value = UpdateState.Failed(e.message ?: "ההורדה נכשלה")
+            }
+        }
+    }
+
+    /** Stops a running download; the partial file is deleted and the update can be downloaded again. */
+    fun stopDownload() {
+        val downloading = _update.value as? UpdateState.Downloading ?: return
+        downloadJob?.cancel()
+        downloadJob = null
+        container.notifier.cancelUpdate()
+        _update.value = UpdateState.Stopped(downloading.release)
     }
 
     fun createHousehold(name: String) = launchSafe { container.household.createHousehold(name) }
@@ -1331,6 +1381,8 @@ sealed interface UpdateState {
     data object UpToDate : UpdateState
     data class Available(val release: app.necessityq.domain.ReleaseInfo) : UpdateState
     data class Downloading(val release: app.necessityq.domain.ReleaseInfo, val progress: Float) : UpdateState
+    /** The user stopped the download; it can be started again. */
+    data class Stopped(val release: app.necessityq.domain.ReleaseInfo) : UpdateState
     data class Ready(val release: app.necessityq.domain.ReleaseInfo, val file: File) : UpdateState
     data class Failed(val message: String) : UpdateState
 }

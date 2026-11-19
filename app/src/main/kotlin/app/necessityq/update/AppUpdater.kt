@@ -8,6 +8,7 @@ import androidx.core.content.FileProvider
 import app.necessityq.domain.ReleaseInfo
 import app.necessityq.domain.Releases
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
@@ -47,7 +48,10 @@ class AppUpdater(private val context: Context, private val repo: String = "yaniv
         }
     }
 
-    /** Downloads the APK, reporting progress in 0..1, and returns the file. */
+    /**
+     * Downloads the APK, reporting progress in 0..1, and returns the file. Cancelling the calling
+     * coroutine stops the download between chunks and deletes the partial file.
+     */
     suspend fun download(info: ReleaseInfo, onProgress: (Float) -> Unit): File = withContext(Dispatchers.IO) {
         updatesDir.mkdirs()
         updatesDir.listFiles()?.forEach { it.delete() }
@@ -61,6 +65,7 @@ class AppUpdater(private val context: Context, private val repo: String = "yaniv
                 target.outputStream().use { output ->
                     val buffer = ByteArray(64 * 1024)
                     while (true) {
+                        ensureActive()
                         val read = input.read(buffer)
                         if (read < 0) break
                         output.write(buffer, 0, read)
