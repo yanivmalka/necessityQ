@@ -218,6 +218,8 @@ fun ListScreen(
 ) {
     val snapshot by vm.snapshot.collectAsStateWithLifecycle()
     val query by vm.query.collectAsStateWithLifecycle()
+    // the list is narrowed only once typing pauses, not on every letter typed or deleted
+    val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
     val completions by vm.completions.collectAsStateWithLifecycle()
     val onlineCompletions by vm.onlineCompletions.collectAsStateWithLifecycle()
     val mode by vm.mode.collectAsStateWithLifecycle()
@@ -237,6 +239,7 @@ fun ListScreen(
     val filter by vm.filter.collectAsStateWithLifecycle()
     val prices by vm.prices.collectAsStateWithLifecycle()
     val itemPrices by vm.itemPriceInfo.collectAsStateWithLifecycle()
+    val comparisons by vm.itemComparisons.collectAsStateWithLifecycle()
     val unreadTotal by vm.unreadTotal.collectAsStateWithLifecycle()
     var openItem by remember { mutableStateOf<ListLine?>(null) }
     var showSortMenu by remember { mutableStateOf(false) }
@@ -259,7 +262,7 @@ fun ListScreen(
     var dragging by remember { mutableStateOf(false) }
     val chatItemIds = remember(messages) { messages.map { it.itemId }.toSet() }
     // the quick-add box also searches the list: what is typed narrows the open lines (on top of the filter)
-    val searchText = remember(query) { if (query.isBlank()) "" else QuickEntryParser.parse(query)?.item?.displayName ?: query.trim() }
+    val searchText = remember(searchQuery) { if (searchQuery.isBlank()) "" else QuickEntryParser.parse(searchQuery)?.item?.displayName ?: searchQuery.trim() }
     val listFilter = remember(filter, searchText) { if (searchText.isBlank() || filter.text.isNotBlank()) filter else filter.copy(text = searchText) }
     val sections = remember(snapshot?.lines, sort, pickRanks, descending, display.chilledLast, listFilter, chatItemIds) {
         buildSections(snapshot?.lines.orEmpty(), sort, pickRanks, descending, display.chilledLast, listFilter, chatItemIds)
@@ -677,6 +680,7 @@ fun ListScreen(
                                 display = display,
                                 price = prices[line.itemId],
                                 priceInfo = itemPrices[line.itemId],
+                                comparison = comparisons[line.itemId]?.takeIf { it.notable },
                                 controlsOpen = line.id in expanded,
                                 lifted = isDragging,
                                 dragHandle = if (sort == ListSort.GROUPS && !descending && !filter.isActive) {
@@ -1148,6 +1152,8 @@ private fun ProductTile(
     display: DisplayOptions,
     price: Double?,
     priceInfo: app.necessityq.domain.ItemPriceInfo? = null,
+    /** significantly dearer / cheaper here than at the household's other branches */
+    comparison: app.necessityq.domain.PriceComparison? = null,
     controlsOpen: Boolean,
     lifted: Boolean,
     dragHandle: (@Composable () -> Unit)?,
@@ -1233,7 +1239,7 @@ private fun ProductTile(
                                 }
                             }
                             if (display.showPrices) {
-                                PriceSlot(price = price?.let { it * PriceEstimate.units(line.quantity) }, average = null, info = priceInfo, weighted = weightedCost, quantity = line.quantity)
+                                PriceSlot(price = price?.let { it * PriceEstimate.units(line.quantity) }, average = null, info = priceInfo, weighted = weightedCost, quantity = line.quantity, comparison = comparison)
                             }
                         }
                         if (subline.isNotBlank() || showStepper || (controlsMode && controlsOpen)) {
@@ -1509,6 +1515,8 @@ fun PriceSlot(
     weighted: app.necessityq.domain.LineCost? = null,
     /** the amount on the list, shown instead of the number of matching products */
     quantity: app.necessityq.domain.Quantity? = null,
+    /** a notable gap with the household's other branches: "▲ 12%" (dearer) or "▼ 12%" (cheaper) under the price */
+    comparison: app.necessityq.domain.PriceComparison? = null,
 ) {
     // the household's own price wins; otherwise the branch data: chosen product, or the typical range
     val (main, sub) = when {
@@ -1535,7 +1543,42 @@ fun PriceSlot(
     ) {
         Text(main, fontWeight = FontWeight.SemiBold)
         Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        comparison?.takeIf { it.notable }?.let { c ->
+            Text(
+                c.shortLabel,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = comparisonInk(c.level),
+                modifier = Modifier.padding(top = 1.dp).semantics { contentDescription = c.label },
+            )
+        }
     }
+}
+
+/** Text colour of a price comparison: green for cheaper, amber for dearer (as on the scan sheet). */
+@Composable
+fun comparisonInk(level: app.necessityq.domain.PriceLevel): androidx.compose.ui.graphics.Color = when (level) {
+    app.necessityq.domain.PriceLevel.CHEAP -> MaterialTheme.colorScheme.primary
+    app.necessityq.domain.PriceLevel.EXPENSIVE -> MaterialTheme.colorScheme.secondary
+    app.necessityq.domain.PriceLevel.FAIR -> MaterialTheme.colorScheme.onSurfaceVariant
+}
+
+/** "יקר ב-12% מהסניפים שלך" as a filled pill (cheaper green, dearer amber, about the same muted). */
+@Composable
+fun PriceComparisonPill(c: app.necessityq.domain.PriceComparison, modifier: Modifier = Modifier) {
+    val fill = comparisonInk(c.level)
+    val ink = when (c.level) {
+        app.necessityq.domain.PriceLevel.CHEAP -> MaterialTheme.colorScheme.onPrimary
+        app.necessityq.domain.PriceLevel.EXPENSIVE -> MaterialTheme.colorScheme.onSecondary
+        app.necessityq.domain.PriceLevel.FAIR -> MaterialTheme.colorScheme.surface
+    }
+    Text(
+        c.label,
+        modifier.clip(NqShapes.Pill).background(fill).padding(horizontal = 8.dp, vertical = 2.dp),
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.Bold,
+        color = ink,
+    )
 }
 
 /** Promotion line right under a product tile; renders nothing until there is a promotion. */

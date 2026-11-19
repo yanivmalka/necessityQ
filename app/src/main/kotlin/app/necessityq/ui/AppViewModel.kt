@@ -50,6 +50,8 @@ import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -58,7 +60,7 @@ import kotlinx.coroutines.launch
  * made by any household member flows through [snapshot] and recomposes the UI — there is no
  * manual refresh and no local copy to get out of sync.
  */
-@OptIn(ExperimentalCoroutinesApi::class)
+@OptIn(ExperimentalCoroutinesApi::class, kotlinx.coroutines.FlowPreview::class)
 class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     val isShared: Boolean = container.household.isShared
@@ -85,10 +87,22 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     /** Quick-add text box. */
     val query = MutableStateFlow("")
 
-    val completions: StateFlow<List<ItemIdentity>> = combine(query, snapshot) { q, snap ->
-        val name = QuickEntryParser.parse(q)?.item?.displayName ?: q
-        if (q.isBlank()) emptyList() else Autocomplete.complete(name, snap?.stats?.values.orEmpty())
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    /**
+     * [query] once typing pauses ([SEARCH_DELAY_MS]); cleared at once. The searches (list filter, completions,
+     * branch products) run on this, so typing or deleting letter by letter does not search on every letter.
+     */
+    val searchQuery: StateFlow<String> = query
+        .debounce { if (it.isBlank()) 0L else SEARCH_DELAY_MS }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
+
+    val completions: StateFlow<List<ItemIdentity>> = combine(searchQuery, snapshot) { q, snap -> q to snap }
+        .mapLatest { (q, snap) ->
+            val name = QuickEntryParser.parse(q)?.item?.displayName ?: q
+            if (q.isBlank()) emptyList() else Autocomplete.complete(name, snap?.stats?.values.orEmpty())
+        }
+        .flowOn(kotlinx.coroutines.Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private fun ctx(): Triple<String, String, List<ListLine>>? {
         val s = session.value as? Session.SignedIn ?: return null
@@ -605,7 +619,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     /** Downloads (or reads from cache) the products of a branch. */
     fun loadPrices(branchId: String, force: Boolean = false) {
-        if (!force && branchPrices.value.containsKey(branchId)) return
+        if (!force && (branchPrices.value.containsKey(branchId) || branchId in pricesLoading.value)) return
         pricesLoading.update { it + branchId }
         viewModelScope.launch {
             runCatching { container.prices.prices(branchId) }
@@ -650,17 +664,19 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
      * Quick-add suggestions from the products of the branch (online data), as generic items
      * ("קוטג' 5%"), beyond what the household already buys. Empty without price data.
      */
-    val onlineCompletions: StateFlow<List<ItemIdentity>> = combine(query, completions, branchPrices, primaryBranch) { q, mine, loaded, branch ->
-        val name = QuickEntryParser.parse(q)?.item?.displayName ?: q
-        val products = branch?.let { loaded[it.id] }?.products
-        if (name.trim().length < 2 || products == null) return@combine emptyList<ItemIdentity>()
-        val known = mine.map { it.id }.toSet()
-        app.necessityq.domain.PriceData.search(products, name, limit = 60)
-            .map { app.necessityq.domain.Scan.genericIdentity(it) }
-            .filter { it.id !in known && it.name.isNotBlank() }
-            .distinctBy { it.id }
-            .take(8)
+    val onlineCompletions: StateFlow<List<ItemIdentity>> = combine(searchQuery, completions, branchPrices, primaryBranch) { q, mine, loaded, branch ->
+        OnlineSearch(q, mine, branch?.let { loaded[it.id] }?.products)
     }
+        .mapLatest { (q, mine, products) ->
+            val name = QuickEntryParser.parse(q)?.item?.displayName ?: q
+            if (name.trim().length < 2 || products == null) return@mapLatest emptyList<ItemIdentity>()
+            val known = mine.map { it.id }.toSet()
+            app.necessityq.domain.PriceData.search(products, name, limit = 60)
+                .map { app.necessityq.domain.Scan.genericIdentity(it) }
+                .filter { it.id !in known && it.name.isNotBlank() }
+                .distinctBy { it.id }
+                .take(8)
+        }
         .flowOn(kotlinx.coroutines.Dispatchers.Default)
         .catch { emit(emptyList()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -680,28 +696,117 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
      * ("קוטג'" → ₪5.90–₪7.80), or the household's chosen product. Computed off the main thread.
      */
     val itemPriceInfo: StateFlow<Map<String, app.necessityq.domain.ItemPriceInfo>> =
-        combine(snapshot, branchPrices, primaryBranch, preferredProducts) { snap, loaded, primary, preferred ->
-            val prices = primary?.let { loaded[it.id] } ?: return@combine emptyMap()
-            val index = indexFor(prices)
-            snap?.lines.orEmpty().distinctBy { it.itemId }.mapNotNull { line ->
-                app.necessityq.domain.ItemPrices.info(index, line.name, line.variant, preferred[line.itemId])?.let { line.itemId to it }
-            }.toMap()
-        }
+        combine(snapshot, branchPrices, primaryBranch, preferredProducts) { snap, loaded, primary, preferred -> PriceInputs(snap, loaded, primary, preferred) }
+            .mapLatest { (snap, loaded, primary, preferred) ->
+                val prices = primary?.let { loaded.at(it.id) } ?: return@mapLatest emptyMap()
+                val index = indexFor(prices)
+                snap?.lines.orEmpty().distinctBy { it.itemId }.mapNotNull { line ->
+                    app.necessityq.domain.ItemPrices.info(index, line.name, line.variant, preferred[line.itemId])?.let { line.itemId to it }
+                }.toMap()
+            }
             .flowOn(kotlinx.coroutines.Dispatchers.Default)
             .catch { emit(emptyMap()) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
-    /** Price picture of any item (also one not on the list right now, e.g. from history). */
-    fun priceInfoFor(itemId: String, name: String, variant: String?): app.necessityq.domain.ItemPriceInfo? {
+    /** Price picture of any item (also one not on the list right now, e.g. from history). Computed off the main thread. */
+    suspend fun priceInfoFor(itemId: String, name: String, variant: String?): app.necessityq.domain.ItemPriceInfo? {
         itemPriceInfo.value[itemId]?.let { return it }
         val primary = primaryBranch.value ?: return null
-        val prices = branchPrices.value[primary.id] ?: return null
-        return app.necessityq.domain.ItemPrices.info(indexFor(prices), name, variant, preferredProducts.value[itemId])
+        val prices = branchPrices.value.at(primary.id) ?: return null
+        val preferred = preferredProducts.value[itemId]
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            app.necessityq.domain.ItemPrices.info(indexFor(prices), name, variant, preferred)
+        }
+    }
+
+    private val codesCache = mutableMapOf<String, Pair<Long, Map<String, app.necessityq.domain.BranchProduct>>>()
+
+    /** Products of a branch by barcode (cached per data version), for comparing the same product across branches. */
+    private fun codesFor(p: app.necessityq.domain.BranchPrices): Map<String, app.necessityq.domain.BranchProduct> =
+        synchronized(codesCache) {
+            codesCache[p.branchId]?.takeIf { it.first == p.updatedAtMillis }?.second
+                ?: app.necessityq.domain.PriceComparisons.byCode(p.products).also { codesCache[p.branchId] = p.updatedAtMillis to it }
+        }
+
+    /** The other followed branches whose prices are loaded (all but [branchId]). */
+    private fun otherLoaded(branchId: String, loaded: Map<String, app.necessityq.domain.BranchPrices>, followed: List<String>) =
+        followed.filter { it != branchId }.mapNotNull { id -> loaded.at(id) }
+
+    /** A loaded branch, keyed by the id it was loaded under (the comparisons key branches by it). */
+    private fun Map<String, app.necessityq.domain.BranchPrices>.at(id: String) =
+        get(id)?.let { if (it.branchId == id) it else it.copy(branchId = id) }
+
+    private fun compare(
+        here: app.necessityq.domain.ItemPriceInfo,
+        name: String,
+        variant: String?,
+        preferredCode: String?,
+        others: List<app.necessityq.domain.BranchPrices>,
+    ): app.necessityq.domain.PriceComparison? {
+        if (others.isEmpty()) return null
+        val infos = others.associate { bp -> bp.branchId to app.necessityq.domain.ItemPrices.info(indexFor(bp), name, variant, preferredCode) }
+        return app.necessityq.domain.PriceComparisons.item(here, infos, others.associate { it.branchId to codesFor(it) })
+    }
+
+    /**
+     * Each list item at the primary branch compared with the household's other followed branches ("the stores we
+     * usually buy in"): significantly dearer or cheaper is marked on the tile. Computed off the main thread.
+     */
+    val itemComparisons: StateFlow<Map<String, app.necessityq.domain.PriceComparison>> =
+        combine(itemPriceInfo, branchPrices, selectedPriceBranches, preferredProducts) { infos, loaded, followed, preferred ->
+            CompareInputs(infos, loaded, followed, preferred)
+        }
+            .mapLatest { (infos, loaded, followed, preferred) ->
+                val lines = snapshot.value?.lines.orEmpty().distinctBy { it.itemId }.associateBy { it.itemId }
+                infos.mapNotNull { (itemId, here) ->
+                    val line = lines[itemId] ?: return@mapNotNull null
+                    compare(here, line.name, line.variant, preferred[itemId], otherLoaded(here.branchId, loaded, followed))?.let { itemId to it }
+                }.toMap()
+            }
+            .flowOn(kotlinx.coroutines.Dispatchers.Default)
+            .catch { emit(emptyMap()) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    /** An item (also one not on the list) compared with the household's other followed branches. Off the main thread. */
+    suspend fun comparisonFor(itemId: String, name: String, variant: String?): app.necessityq.domain.PriceComparison? {
+        itemComparisons.value[itemId]?.let { return it }
+        val here = priceInfoFor(itemId, name, variant) ?: return null
+        val others = otherLoaded(here.branchId, branchPrices.value, selectedPriceBranches.value)
+        val preferred = preferredProducts.value[itemId]
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { compare(here, name, variant, preferred, others) }
+    }
+
+    /**
+     * Product search over several followed branches at once, merged by barcode with the price at each branch
+     * (the products tab of "סניפים ומחירים"). Off the main thread.
+     */
+    suspend fun searchProducts(branchIds: List<String>, query: String): List<app.necessityq.domain.ProductAcross> {
+        val loaded = branchPrices.value
+        val chosen = branchIds.mapNotNull { id -> loaded.at(id) }
+        if (chosen.isEmpty() || query.isBlank()) return emptyList()
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            app.necessityq.domain.ProductSearch.across(chosen.map { it.branchId to it.products }, chosen.associate { it.branchId to codesFor(it) }, query)
+        }
+    }
+
+    /** One product at [branchId] against the same barcode at the household's other followed branches. Off the main thread. */
+    suspend fun compareProducts(
+        products: List<app.necessityq.domain.BranchProduct>,
+        branchId: String,
+    ): Map<String, app.necessityq.domain.PriceComparison> {
+        val others = otherLoaded(branchId, branchPrices.value, selectedPriceBranches.value)
+        if (others.isEmpty()) return emptyMap()
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            val codes = others.associate { it.branchId to codesFor(it) }
+            products.mapNotNull { p -> app.necessityq.domain.PriceComparisons.product(p, branchId, codes)?.let { p.code to it } }.toMap()
+        }
     }
 
     init {
         // the list shows ranges of the primary branch: load its prices as soon as it is known
         viewModelScope.launch { primaryBranch.collect { b -> b?.let { loadPrices(it.id) } } }
+        // the other followed branches too (in the background), so items can be compared with them
+        viewModelScope.launch { selectedPriceBranches.collect { ids -> ids.forEach { loadPrices(it) } } }
     }
 
     /** Shopping day: branches whose prices are older than 12 hours are refreshed in the background. */
@@ -1317,12 +1422,28 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     companion object {
         const val MAX_BRANCHES = 5
+        /** Pause in typing before a search runs. */
+        const val SEARCH_DELAY_MS = 350L
 
         fun factory(container: AppContainer): ViewModelProvider.Factory = viewModelFactory {
             initializer { AppViewModel(container) }
         }
     }
 }
+
+private data class OnlineSearch(val query: String, val mine: List<ItemIdentity>, val products: List<app.necessityq.domain.BranchProduct>?)
+private data class PriceInputs(
+    val snapshot: ListSnapshot?,
+    val loaded: Map<String, app.necessityq.domain.BranchPrices>,
+    val primary: app.necessityq.domain.PriceBranch?,
+    val preferred: Map<String, String>,
+)
+private data class CompareInputs(
+    val infos: Map<String, app.necessityq.domain.ItemPriceInfo>,
+    val loaded: Map<String, app.necessityq.domain.BranchPrices>,
+    val followed: List<String>,
+    val preferred: Map<String, String>,
+)
 
 /** State of the in-app update flow. */
 sealed interface UpdateState {

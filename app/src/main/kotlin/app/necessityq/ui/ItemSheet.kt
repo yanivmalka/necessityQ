@@ -1177,8 +1177,18 @@ private fun BranchPriceSection(vm: AppViewModel, itemId: String, name: String, v
     val infos by vm.itemPriceInfo.collectAsStateWithLifecycle()
     val loaded by vm.branchPrices.collectAsStateWithLifecycle()
     val branch = primary ?: return
-    val fallback = remember(loaded, infos, branch.id, itemId) { vm.priceInfoFor(itemId, name, variant) }
+    val comparisons by vm.itemComparisons.collectAsStateWithLifecycle()
+    val followed by vm.selectedPriceBranches.collectAsStateWithLifecycle()
+    val allBranches by vm.priceBranches.collectAsStateWithLifecycle()
+    // an item not on the list is matched in the background (searching a branch's products takes a moment)
+    val fallback by produceState<app.necessityq.domain.ItemPriceInfo?>(null, loaded, infos, branch.id, itemId) {
+        value = if (infos[itemId] != null) null else vm.priceInfoFor(itemId, name, variant)
+    }
     val info = infos[itemId] ?: fallback
+    val comparedFallback by produceState<app.necessityq.domain.PriceComparison?>(null, loaded, info, comparisons, itemId) {
+        value = if (comparisons[itemId] != null || info == null) null else vm.comparisonFor(itemId, name, variant)
+    }
+    val comparison = comparisons[itemId] ?: comparedFallback
     var open by remember(itemId) { mutableStateOf(false) }
     var brand by remember(itemId) { mutableStateOf<String?>(null) }
     var pct by remember(itemId) { mutableStateOf<String?>(null) }
@@ -1199,6 +1209,11 @@ private fun BranchPriceSection(vm: AppViewModel, itemId: String, name: String, v
             )
         }
         if (info != null) Icon(if (open) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = if (open) "כיווץ" else "דיוק לפי מוצר")
+    }
+    if (comparison != null) {
+        BranchComparison(comparison, allBranches)
+    } else if (info != null && followed.size > 1 && followed.any { it != branch.id && !loaded.containsKey(it) }) {
+        Text("טוען את המחירים של הסניפים האחרים שלך להשוואה…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     if (!open || info == null) return
 
@@ -1239,6 +1254,51 @@ private fun BranchPriceSection(vm: AppViewModel, itemId: String, name: String, v
     }
     if (info.preferred != null) {
         androidx.compose.material3.TextButton(onClick = { vm.setPreferredProduct(itemId, null) }) { Text("ביטול הבחירה — הצגת טווח בלבד") }
+    }
+}
+
+/**
+ * The item here against the household's other followed branches: a verdict pill (significantly dearer / cheaper,
+ * or about the same), then each branch's price with the cheapest marked.
+ */
+@Composable
+private fun BranchComparison(c: app.necessityq.domain.PriceComparison, branches: List<app.necessityq.domain.PriceBranch>) {
+    fun title(id: String) = branches.firstOrNull { it.id == id }?.title ?: id
+    fun price(q: app.necessityq.domain.BranchQuote) = app.necessityq.domain.PriceData.formatRange(q.low, q.high)
+    val cheapest = c.cheapestBranchId
+    Column(
+        Modifier.fillMaxWidth().clip(NqShapes.Panel).background(MaterialTheme.colorScheme.surfaceVariant).padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("השוואה לסניפים שלך", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            PriceComparisonPill(c)
+        }
+        (listOf(c.here) + c.others).forEach { q ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    title(q.branchId),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = if (q.branchId == c.branchId) FontWeight.Bold else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (q.branchId == cheapest && c.others.isNotEmpty()) {
+                    Text("הזול  ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                }
+                Text(price(q), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        Text(
+            when (c.basis) {
+                app.necessityq.domain.CompareBasis.SAME_PRODUCT -> "לפי אותו מוצר (ברקוד) בכל סניף"
+                app.necessityq.domain.CompareBasis.SHARED_PRODUCTS -> "לפי המוצרים שנמכרים גם כאן וגם בסניפים האחרים"
+                app.necessityq.domain.CompareBasis.TYPICAL -> "לפי המחיר הטיפוסי של המוצרים המתאימים בכל סניף"
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
