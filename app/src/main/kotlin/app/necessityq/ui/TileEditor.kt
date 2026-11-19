@@ -15,19 +15,22 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DragIndicator
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,8 +44,14 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withLink
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import app.necessityq.domain.ItemTag
 import app.necessityq.domain.ListMode
@@ -57,12 +66,15 @@ import app.necessityq.domain.TileLayout
 private const val HIDDEN_ALPHA = 0.22f
 
 /**
- * Popup to choose what the product tiles of one stage of use show. A sample tile carries every part;
- * tapping a part fades it (hidden) or brings it back to full colour (shown). Nothing changes until "שמירה",
+ * Sheet from the bottom to choose what the product tiles of one stage of use show. The sample tile is laid
+ * out exactly like a tile on the list (same width, same rows, same truncation), so it is as tall as a real
+ * one; tapping a part fades it (hidden) or brings it back to full colour (shown). Parts that a real tile
+ * would cut off are listed under the sample so they can still be toggled. Nothing changes until "שמירה",
  * which updates every tile of [mode].
  */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun TileEditorDialog(
+fun TileEditorSheet(
     mode: ListMode,
     layout: TileLayout,
     onSave: (TileLayout) -> Unit,
@@ -70,39 +82,78 @@ fun TileEditorDialog(
     onMoreSettings: (() -> Unit)? = null,
 ) {
     var draft by remember(mode, layout) { mutableStateOf(layout) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("תצוגת האריח · ${mode.label}") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    var cutOff by remember { mutableStateOf(emptyList<TileElement>()) }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("תצוגת האריח · ${mode.label}", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { draft = TileLayout.defaultFor(mode) }) { Text("ברירת מחדל") }
+                }
                 Text(
                     "נגיעה ברכיב מסתירה אותו (דהוי) או מחזירה אותו (צבע מלא).",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                SampleTile(draft, shopping = mode == ListMode.SHOP) { draft = draft.toggle(it) }
-                Row(verticalAlignment = Alignment.CenterVertically) {
+            }
+            // same side margins as the list, so the sample is exactly as wide as a real tile
+            Box(Modifier.padding(horizontal = 12.dp)) {
+                SampleTile(
+                    layout = draft,
+                    shopping = mode == ListMode.SHOP,
+                    onToggle = { draft = draft.toggle(it) },
+                    onCutOff = { if (it != cutOff) cutOff = it },
+                )
+            }
+            if (cutOff.isNotEmpty()) {
+                Column(Modifier.padding(horizontal = 16.dp)) {
                     Text(
-                        "מוצגים ${draft.shown.size} מתוך ${TileElement.entries.size}",
+                        "לא נכנסו באריח (כמו ברשימה):",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
                     )
-                    TextButton(onClick = { draft = TileLayout.defaultFor(mode) }) { Text("ברירת מחדל") }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        cutOff.forEach { element ->
+                            FilterChip(
+                                selected = element in draft,
+                                onClick = { draft = draft.toggle(element) },
+                                label = { Text(element.label) },
+                            )
+                        }
+                    }
                 }
-                onMoreSettings?.let { TextButton(onClick = it) { Text("הגדרות תצוגה נוספות") } }
             }
-        },
-        confirmButton = { TextButton(onClick = { onSave(draft) }) { Text("שמירה") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("ביטול") } },
-    )
+            Text(
+                "מוצגים ${draft.shown.size} מתוך ${TileElement.entries.size}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                onMoreSettings?.let { TextButton(onClick = it) { Text("הגדרות נוספות") } }
+                Spacer(Modifier.weight(1f))
+                OutlinedButton(onClick = onDismiss) { Text("ביטול") }
+                Button(onClick = { onSave(draft) }) { Text("שמירה") }
+            }
+        }
+    }
 }
 
 /** One part of the sample tile: full colour when shown, faded when hidden; a tap toggles it. */
 @Composable
-private fun Part(element: TileElement, layout: TileLayout, onToggle: (TileElement) -> Unit, content: @Composable () -> Unit) {
+private fun Part(
+    element: TileElement,
+    layout: TileLayout,
+    onToggle: (TileElement) -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
     val shown = element in layout
-    Box(Modifier.alpha(if (shown) 1f else HIDDEN_ALPHA)) {
+    Box(modifier.alpha(if (shown) 1f else HIDDEN_ALPHA)) {
         content()
         // on top of the part, so its own buttons (the stepper) don't take the tap
         Box(
@@ -116,22 +167,40 @@ private fun Part(element: TileElement, layout: TileLayout, onToggle: (TileElemen
     }
 }
 
-/** A made-up product with every part a tile can have, laid out like the real tile on the list. */
+/** The texts under the product name, joined with " · " like the real tile's line. */
+private val SUBLINE = listOf(
+    TileElement.NOTE to "שרי אם יש",
+    TileElement.LAST_BOUGHT to "נקנה לפני 5 ימים",
+    TileElement.FREQUENCY to "בערך כל 7 ימים",
+    TileElement.ADDED_BY to "הוסיף/ה: אבא",
+)
+
+/**
+ * A made-up product with every part a tile can have, built with the same structure, paddings and limits as
+ * ProductTile on the list: the name and the line under it are cut with "…" where a real tile would cut them.
+ * [onCutOff] gets the parts of that line that did not fit at all.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SampleTile(layout: TileLayout, shopping: Boolean, onToggle: (TileElement) -> Unit) {
+private fun SampleTile(
+    layout: TileLayout,
+    shopping: Boolean,
+    onToggle: (TileElement) -> Unit,
+    onCutOff: (List<TileElement>) -> Unit,
+) {
     val quantity = Quantity(6.0, QuantityUnit.PIECE)
     val weight = PieceWeights.estimate("עגבניות", quantity)?.let { PieceWeights.label(it) } ?: "≈0.9 ק\"ג"
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Card(
+        modifier = Modifier.fillMaxWidth(),
         shape = NqShapes.Tile,
         border = BorderStroke(1.dp, NqTheme.colors.hairline),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
-        Column(Modifier.padding(start = 6.dp, end = 10.dp, top = 8.dp, bottom = 8.dp)) {
+        Column(Modifier.fillMaxWidth().padding(start = 6.dp, end = 12.dp, top = 8.dp, bottom = 6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Part(TileElement.DRAG, layout, onToggle) {
-                    Icon(Icons.Default.DragIndicator, null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(2.dp))
+                    Icon(Icons.Default.DragIndicator, null, tint = MaterialTheme.colorScheme.outline)
                 }
                 Part(TileElement.CHECK, layout, onToggle) {
                     val size = if (shopping) 48.dp else 40.dp
@@ -139,25 +208,32 @@ private fun SampleTile(layout: TileLayout, shopping: Boolean, onToggle: (TileEle
                         Box(Modifier.size(size - 18.dp).border(2.dp, MaterialTheme.colorScheme.outline, CircleShape))
                     }
                 }
-                Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.width(6.dp))
                 Column(Modifier.weight(1f)) {
-                    FlowRow(verticalArrangement = Arrangement.Center, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("עגבניות", style = ProductNameStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "עגבניות",
+                            style = ProductNameStyle,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        Spacer(Modifier.width(8.dp))
                         Part(TileElement.QUANTITY, layout, onToggle) {
                             Text(
                                 quantity.format(),
                                 fontWeight = FontWeight.SemiBold,
                                 color = muted,
-                                modifier = Modifier.padding(top = 2.dp).clip(NqShapes.Pill)
+                                modifier = Modifier.clip(NqShapes.Pill)
                                     .background(MaterialTheme.colorScheme.surfaceVariant)
                                     .padding(horizontal = 8.dp, vertical = 1.dp),
                             )
                         }
                     }
                     FlowRow(
-                        Modifier.padding(top = 4.dp),
+                        Modifier.padding(top = 3.dp),
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
                     ) {
                         Part(TileElement.ALERTS, layout, onToggle) { TagBadge(ItemTag(TagKind.LARGE_AMOUNT, "כמות חריגה")) }
                         Part(TileElement.SOURCE, layout, onToggle) { TagBadge(ItemTag(TagKind.RECIPE, "מתכון")) }
@@ -166,35 +242,60 @@ private fun SampleTile(layout: TileLayout, shopping: Boolean, onToggle: (TileEle
                         Part(TileElement.CHAT, layout, onToggle) { ChatIndicator(ChatState(unread = 2, lastIsMine = false, status = null)) }
                     }
                 }
-                Spacer(Modifier.width(4.dp))
                 Part(TileElement.PRICE, layout, onToggle) { PriceSlot(price = 8.9, average = 9.5) }
             }
-            FlowRow(
-                Modifier.fillMaxWidth().padding(start = 8.dp, top = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                listOf(
-                    TileElement.NOTE to "שרי אם יש",
-                    TileElement.LAST_BOUGHT to "נקנה לפני 5 ימים",
-                    TileElement.FREQUENCY to "בערך כל 7 ימים",
-                    TileElement.ADDED_BY to "הוסיף/ה: אבא",
-                ).forEach { (element, text) ->
-                    Part(element, layout, onToggle) {
-                        Text(text, style = MaterialTheme.typography.bodySmall, color = muted, modifier = Modifier.padding(vertical = 2.dp))
-                    }
-                }
-            }
-            Row(
-                Modifier.fillMaxWidth().padding(top = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                Subline(layout, onToggle, onCutOff, Modifier.weight(1f).padding(start = 8.dp))
                 Part(TileElement.WEIGHT, layout, onToggle) {
-                    Text(weight, style = MaterialTheme.typography.bodySmall, color = muted, modifier = Modifier.padding(4.dp))
+                    Text(weight, style = MaterialTheme.typography.bodySmall, color = muted, modifier = Modifier.padding(end = 6.dp))
                 }
                 Part(TileElement.STEPPER, layout, onToggle) { QuantityStepper(quantity, onMinus = {}, onPlus = {}) }
             }
         }
     }
+}
+
+/**
+ * The line under the name as one text, two lines at most and cut with "…", like on the list. Each part of
+ * it is tappable on its own; the parts that fell entirely past the cut are reported to [onCutOff].
+ */
+@Composable
+private fun Subline(
+    layout: TileLayout,
+    onToggle: (TileElement) -> Unit,
+    onCutOff: (List<TileElement>) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val style = MaterialTheme.typography.bodySmall
+    val measurer = rememberTextMeasurer()
+    val starts = mutableMapOf<TileElement, Int>()
+    val text = buildAnnotatedString {
+        SUBLINE.forEachIndexed { i, (element, label) ->
+            if (i > 0) withStyle(SpanStyle(color = muted.copy(alpha = 0.6f))) { append(" · ") }
+            starts[element] = length
+            withLink(LinkAnnotation.Clickable(element.name, linkInteractionListener = { onToggle(element) })) {
+                withStyle(SpanStyle(color = if (element in layout) muted else muted.copy(alpha = HIDDEN_ALPHA))) { append(label) }
+            }
+        }
+    }
+    Text(
+        text,
+        style = style,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier,
+        onTextLayout = { result ->
+            // where the two lines end without the "…": a part starting after that is not on the tile at all
+            val clipped = measurer.measure(
+                text,
+                style = style,
+                maxLines = 2,
+                overflow = TextOverflow.Clip,
+                constraints = result.layoutInput.constraints,
+            )
+            val end = if (clipped.hasVisualOverflow) clipped.getLineEnd(clipped.lineCount - 1) - 1 else Int.MAX_VALUE
+            onCutOff(SUBLINE.map { it.first }.filter { (starts[it] ?: 0) >= end })
+        },
+    )
 }
