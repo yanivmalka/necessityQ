@@ -195,3 +195,18 @@ object VoiceSpeed {
     fun seekPosition(fraction: Float, totalMs: Long): Long =
         (fraction.coerceIn(0f, 1f) * totalMs).toLong().coerceIn(0L, totalMs)
 }
+
+/** Emoji reactions on a message (one per member, as in WhatsApp). */
+object Reactions {
+    /** The quick choices shown above a message on long-press. */
+    val quick = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
+
+    /** Tapping the emoji I already chose removes my reaction; another emoji replaces it. */
+    fun toggle(current: String?, chosen: String): String? = if (current == chosen) null else chosen
+
+    /** Each emoji with how many chose it, most chosen first (ties: in the order of [quick], then the rest). */
+    fun summary(reactions: Map<String, String>): List<Pair<String, Int>> =
+        reactions.values.groupingBy { it }.eachCount().entries
+            .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { quick.indexOf(it.key).let { i -> if (i < 0) quick.size else i } })
+            .map { it.key to it.value }
+}

@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.coroutines.flow.first
 import java.time.ZoneId
 
 class ChatFoodTest {
@@ -133,5 +134,48 @@ class ChatFoodTest {
         assertEquals(5_000L, VoiceSpeed.seekPosition(0.5f, 10_000))
         assertEquals(10_000L, VoiceSpeed.seekPosition(3f, 10_000))
         assertEquals(0L, VoiceSpeed.seekPosition(-1f, 10_000))
+    }
+
+    // ---------- deleting and reactions ----------
+
+    @Test fun `a deleted message keeps its place but cannot be edited or deleted again`() {
+        val m = msg("1", author = "u1").copy(deletedAtMillis = 5)
+        assertTrue(m.isDeleted)
+        assertEquals("🚫 ההודעה נמחקה", m.preview)
+        assertFalse(MessageRules.canEdit(m, "u1", 10))
+        assertFalse(MessageRules.canDelete(m, "u1"))
+        assertEquals("🚫 מחקת את ההודעה", MessageRules.deletedLabel(m, "u1", "יוחאי"))
+        assertEquals("🚫 ההודעה נמחקה על ידי יוחאי", MessageRules.deletedLabel(m, "u2", "יוחאי"))
+    }
+
+    @Test fun `deleting in memory clears the content and keeps the message`() = kotlinx.coroutines.runBlocking {
+        val repo = InMemoryCollabRepository()
+        val m = msg("1", author = "u1").copy(kind = MessageKind.IMAGE, mediaId = "img", mentions = listOf("u2"), reactions = mapOf("u2" to "👍"))
+        repo.saveMedia("h", "img", "u1", MediaBlob("image/jpeg", byteArrayOf(1)))
+        repo.sendMessage("h", m)
+        repo.markDeleted("h", m, 99)
+        val left = repo.messages("h").first().single()
+        assertEquals(99L, left.deletedAtMillis)
+        assertEquals(MessageKind.TEXT, left.kind)
+        assertNull(left.mediaId)
+        assertTrue(left.mentions.isEmpty() && left.reactions.isEmpty())
+        assertNull(repo.loadMedia("h", "img"))
+    }
+
+    @Test fun `one reaction per member, tapping it again removes it`() = kotlinx.coroutines.runBlocking {
+        assertNull(Reactions.toggle("👍", "👍"))
+        assertEquals("❤️", Reactions.toggle("👍", "❤️"))
+        assertEquals("👍", Reactions.toggle(null, "👍"))
+        val repo = InMemoryCollabRepository()
+        repo.sendMessage("h", msg("1"))
+        repo.react("h", "1", "u2", "👍")
+        repo.react("h", "1", "u3", "❤️")
+        repo.react("h", "1", "u4", "❤️")
+        repo.react("h", "1", "u2", "❤️") // replaces the 👍
+        repo.react("h", "1", "u4", null)
+        val m = repo.messages("h").first().single()
+        assertEquals(mapOf("u2" to "❤️", "u3" to "❤️"), m.reactions)
+        assertEquals(listOf("❤️" to 3, "👍" to 1), Reactions.summary(mapOf("a" to "👍", "b" to "❤️", "c" to "❤️", "d" to "❤️")))
+        assertEquals(listOf("👍" to 1, "🔥" to 1), Reactions.summary(mapOf("a" to "🔥", "b" to "👍")))
     }
 }

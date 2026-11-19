@@ -6,7 +6,7 @@ import {
   initializeTestEnvironment,
   type RulesTestEnvironment,
 } from "@firebase/rules-unit-testing";
-import { arrayRemove, arrayUnion, doc, getDoc, getDocs, collection, setDoc, updateDoc } from "firebase/firestore";
+import { arrayRemove, arrayUnion, deleteField, doc, getDoc, getDocs, collection, setDoc, updateDoc } from "firebase/firestore";
 import { afterAll, beforeAll, beforeEach, describe, it } from "vitest";
 
 const HID = "house1";
@@ -124,6 +124,31 @@ describe("join codes", () => {
   it("codes are never updated, and only the owner deletes them", async () => {
     await assertFails(updateDoc(doc(dbAs(OWNER), "joinCodes", "ABC123"), { householdId: "other" }));
     await assertFails(setDoc(doc(dbAs(MEMBER), "joinCodes", "ABC123"), { householdId: HID }));
+  });
+});
+
+describe("messages: reactions and deleting", () => {
+  const msg = (db: ReturnType<typeof dbAs>) => doc(db, "households", HID, "messages", "m1");
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(msg(ctx.firestore() as never), { itemId: "milk", authorId: OWNER, text: "hi", at: 1, reactions: { [OTHER_MEMBER]: "😂" } });
+    });
+  });
+
+  it("a member sets and removes only their own reaction", async () => {
+    await assertSucceeds(updateDoc(msg(dbAs(MEMBER)), { [`reactions.${MEMBER}`]: "👍" }));
+    await assertSucceeds(updateDoc(msg(dbAs(MEMBER)), { [`reactions.${MEMBER}`]: deleteField() }));
+  });
+
+  it("a member may not change somebody else's reaction or the text", async () => {
+    await assertFails(updateDoc(msg(dbAs(MEMBER)), { [`reactions.${OTHER_MEMBER}`]: deleteField() }));
+    await assertFails(updateDoc(msg(dbAs(MEMBER)), { text: "changed" }));
+    await assertFails(updateDoc(msg(dbAs(STRANGER)), { [`reactions.${STRANGER}`]: "👍" }));
+  });
+
+  it("only the author marks the message deleted", async () => {
+    await assertFails(updateDoc(msg(dbAs(MEMBER)), { deletedAt: 5, text: "" }));
+    await assertSucceeds(updateDoc(msg(dbAs(OWNER)), { deletedAt: 5, text: "" }));
   });
 });
 

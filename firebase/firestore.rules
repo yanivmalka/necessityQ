@@ -56,13 +56,16 @@ service cloud.firestore {
       match /stores/{id} { allow read, write: if isMember(hid); }
       match /itemMeta/{id} { allow read, write: if isMember(hid); }
       match /settings/{id} { allow read, write: if isMember(hid); }
-      // item conversations: members write as themselves; only the author edits; any member may archive
-      // (the shopping event ended) and delete (clearing a conversation)
+      // item conversations: members write as themselves; only the author edits (or marks deleted); any
+      // member may archive (the shopping event ended), delete (clearing a conversation), and set or
+      // remove their own emoji reaction — never somebody else's
       match /messages/{id} {
         allow read: if isMember(hid);
         allow create: if isMember(hid) && request.resource.data.authorId == uid();
         allow update: if isMember(hid) && (resource.data.authorId == uid()
-          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['archivedAt']));
+          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['archivedAt'])
+          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])
+              && request.resource.data.get('reactions', {}).diff(resource.data.get('reactions', {})).affectedKeys().hasOnly([uid()])));
         allow delete: if isMember(hid);
       }
 

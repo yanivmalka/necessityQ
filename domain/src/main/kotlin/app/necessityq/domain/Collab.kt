@@ -77,11 +77,16 @@ data class ItemMessage(
     val archivedAtMillis: Long? = null,
     /** Members tagged with "@name" (see [Mentions]); they, and the author of the quoted message, are alerted. */
     val mentions: List<String> = emptyList(),
+    /** Emoji reactions, one per member: user id → emoji (see [Reactions]). */
+    val reactions: Map<String, String> = emptyMap(),
+    /** Set when the author deleted the message: it stays in the conversation as "ההודעה נמחקה". */
+    val deletedAtMillis: Long? = null,
 ) {
     val isArchived: Boolean get() = archivedAtMillis != null
+    val isDeleted: Boolean get() = deletedAtMillis != null
 
     /** One-line preview for lists, notifications and quotes. */
-    val preview: String get() = when (kind) {
+    val preview: String get() = if (isDeleted) "🚫 ההודעה נמחקה" else when (kind) {
         MessageKind.TEXT -> text
         MessageKind.IMAGE -> "📷 תמונה" + (if (text.isNotBlank()) ": $text" else "")
         MessageKind.AUDIO -> "🎤 הקלטה" + (durationMs?.let { " " + formatDuration(it) } ?: "")
@@ -131,6 +136,13 @@ interface CollabRepository {
     suspend fun sendMessage(householdId: String, message: ItemMessage)
     /** [mentions]: the members tagged in the new text (a tag may be added or removed by the edit). */
     suspend fun editMessage(householdId: String, messageId: String, text: String, editedAtMillis: Long, mentions: List<String> = emptyList())
+    /**
+     * The author deletes one message: its content and attachment are removed, and it stays in the
+     * conversation as "ההודעה נמחקה על ידי …" (as in WhatsApp).
+     */
+    suspend fun markDeleted(householdId: String, message: ItemMessage, atMillis: Long)
+    /** [userId] reacts to a message with [emoji]; null removes their reaction. */
+    suspend fun react(householdId: String, messageId: String, userId: String, emoji: String?)
     /** Deletes the messages and their attachments for good (no statistics are kept). */
     suspend fun deleteMessages(householdId: String, messages: List<ItemMessage>)
     /** The shopping event of the item ended: its open conversation moves out of the list. */
@@ -184,6 +196,27 @@ class InMemoryCollabRepository : CollabRepository {
 
     override suspend fun editMessage(householdId: String, messageId: String, text: String, editedAtMillis: Long, mentions: List<String>) =
         messagesState.update { list -> list.map { if (it.id == messageId) it.copy(text = text, editedAtMillis = editedAtMillis, mentions = mentions) else it } }
+
+    override suspend fun markDeleted(householdId: String, message: ItemMessage, atMillis: Long) {
+        message.mediaId?.let { media.remove(it) }
+        messagesState.update { list ->
+            list.map {
+                if (it.id != message.id) it
+                else it.copy(
+                    text = "", kind = MessageKind.TEXT, mediaId = null, durationMs = null, waveform = null,
+                    mentions = emptyList(), reactions = emptyMap(), deletedAtMillis = atMillis,
+                )
+            }
+        }
+    }
+
+    override suspend fun react(householdId: String, messageId: String, userId: String, emoji: String?) =
+        messagesState.update { list ->
+            list.map {
+                if (it.id != messageId) it
+                else it.copy(reactions = if (emoji == null) it.reactions - userId else it.reactions + (userId to emoji))
+            }
+        }
 
     override suspend fun deleteMessages(householdId: String, messages: List<ItemMessage>) {
         val ids = messages.map { it.id }.toSet()

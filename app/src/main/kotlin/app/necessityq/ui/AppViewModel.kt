@@ -1251,7 +1251,15 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun deleteMessage(message: ItemMessage) {
         val (hid, uid, _) = ctx() ?: return
         if (!app.necessityq.domain.MessageRules.canDelete(message, uid)) return
-        launchSafe { container.collab.deleteMessages(hid, listOf(message)) }
+        // as in WhatsApp: the message stays in place as "ההודעה נמחקה על ידי …"; its content and attachment are removed
+        launchSafe { container.collab.markDeleted(hid, message, System.currentTimeMillis()) }
+    }
+
+    /** My emoji reaction to a message; null takes it back. */
+    fun react(message: ItemMessage, emoji: String?) {
+        val (hid, uid, _) = ctx() ?: return
+        if (message.isDeleted) return
+        launchSafe { container.collab.react(hid, message.id, uid, emoji) }
     }
 
     /** Deletes a whole conversation (the open one of an item, or an archived one). */
