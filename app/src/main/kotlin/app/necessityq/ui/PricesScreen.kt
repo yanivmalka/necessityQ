@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
@@ -37,6 +38,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -47,7 +49,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.necessityq.domain.BranchPriceStatus
-import app.necessityq.domain.BranchPrices
 import app.necessityq.domain.BranchProduct
 import app.necessityq.domain.HebrewText
 import app.necessityq.domain.NearbyBranch
@@ -148,7 +149,10 @@ private fun BranchesTab(vm: AppViewModel, branches: List<PriceBranch>, selected:
                 }
             }
         }
-        OutlinedTextField(filter, { filter = it }, label = { Text("חיפוש רשת או סניף") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(
+            filter, { filter = it }, label = { Text("חיפוש רשת או סניף") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            trailingIcon = if (filter.isNotEmpty()) { { IconButton(onClick = { filter = "" }) { Icon(Icons.Default.Close, contentDescription = "מחיקת הטקסט") } } } else null,
+        )
         Text(
             "סמנו את הסניפים שאתם קונים בהם (עד ${AppViewModel.MAX_BRANCHES}). המחירים שלהם נטענים פעם ביום, וגם כשנכנסים למצב \"בקנייה\".",
             style = MaterialTheme.typography.bodySmall,
@@ -191,6 +195,11 @@ private fun BranchRow(nb: NearbyBranch, checked: Boolean, status: BranchPriceSta
     HorizontalDivider()
 }
 
+/**
+ * Product prices at the followed branches. Several branches (or "הכל") can be chosen: each product found then shows
+ * its price at every chosen branch, the cheapest marked. With one branch, each product is compared with the same
+ * barcode at the household's other branches. The search runs once typing pauses, off the main thread.
+ */
 @Composable
 private fun ProductsTab(vm: AppViewModel, mine: List<PriceBranch>, status: Map<String, BranchPriceStatus>, onPickBranches: () -> Unit) {
     if (mine.isEmpty()) {
@@ -200,71 +209,186 @@ private fun ProductsTab(vm: AppViewModel, mine: List<PriceBranch>, status: Map<S
         }
         return
     }
-    var chosenId by rememberSaveable { mutableStateOf(mine.first().id) }
-    val branchId = chosenId.takeIf { id -> mine.any { it.id == id } } ?: mine.first().id
+    val mineIds = mine.map { it.id }
+    // chosen branch ids, saved as one line (ids are "chain_store", no commas)
+    var chosenRaw by rememberSaveable { mutableStateOf(mineIds.joinToString(",")) }
+    // branches no longer followed drop out; with none left, all are chosen
+    val chosen = chosenRaw.split(',').toSet().let { set -> mine.filter { it.id in set } }.ifEmpty { mine }
+    val ids = chosen.map { it.id }
+    val allChosen = chosen.size == mine.size
+    val comparing = chosen.size > 1
     var query by rememberSaveable { mutableStateOf("") }
+    var debounced by remember { mutableStateOf(query.trim()) }
+    LaunchedEffect(query) {
+        if (query.isNotBlank()) kotlinx.coroutines.delay(AppViewModel.SEARCH_DELAY_MS)
+        debounced = query.trim()
+    }
     val all by vm.branchPrices.collectAsStateWithLifecycle()
     val loading by vm.pricesLoading.collectAsStateWithLifecycle()
-    // load every followed branch so each product can show the range across them
-    LaunchedEffect(mine.map { it.id }, status.values.map { it.updatedAtMillis }) { mine.forEach { vm.loadPrices(it.id) } }
+    // load every followed branch so products can be compared across them
+    LaunchedEffect(mineIds, status.values.map { it.updatedAtMillis }) { mineIds.forEach { vm.loadPrices(it) } }
 
-    val current: BranchPrices? = all[branchId]
-    val mineLoaded = remember(all, mine) { all.filterKeys { id -> mine.any { it.id == id } } }
-    val results = remember(current, query) { current?.let { PriceData.search(it.products, query) }.orEmpty() }
+    val versions = ids.map { all[it]?.updatedAtMillis }
+    val otherVersions = mineIds.map { all[it]?.updatedAtMillis }
+    // the results with the text they answer, so "not found" is not shown while a search is still running
+    val searched by produceState("" to emptyList<app.necessityq.domain.ProductAcross>(), ids, versions, debounced) {
+        value = debounced to vm.searchProducts(ids, debounced)
+    }
+    val results = searched.second
+    // one branch: each product against the same barcode at the household's other branches
+    val singleComparisons by produceState(emptyMap<String, app.necessityq.domain.PriceComparison>(), results, comparing, otherVersions) {
+        value = if (comparing || results.isEmpty()) emptyMap() else vm.compareProducts(results.map { it.product }, ids.first())
+    }
+    val searching = query.trim() != debounced || searched.first != debounced
     val scan = rememberBarcodeScan(vm) { code -> query = app.necessityq.domain.Barcodes.normalize(code) ?: code }
+    val anyLoading = ids.any { it in loading }
 
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            mine.forEach { b -> FilterChip(selected = b.id == branchId, onClick = { chosenId = b.id }, label = { Text(b.title) }) }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(statusLine(status[branchId]), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-            IconButton(onClick = { vm.refreshPrices(branchId) }, enabled = branchId !in loading) {
-                Icon(Icons.Default.Refresh, contentDescription = "רענון המחירים של הסניף")
+            if (mine.size > 1) FilterChip(selected = allChosen, onClick = { chosenRaw = mineIds.joinToString(",") }, label = { Text("הכל") })
+            mine.forEach { b ->
+                val on = b.id in ids
+                FilterChip(
+                    selected = on && !(allChosen && mine.size > 1),
+                    onClick = {
+                        chosenRaw = when {
+                            // from "הכל", tapping a branch picks just that one
+                            allChosen && mine.size > 1 -> listOf(b.id)
+                            on -> (ids - b.id).ifEmpty { ids }
+                            else -> ids + b.id
+                        }.joinToString(",")
+                    },
+                    label = { Text(b.title) },
+                )
             }
         }
-        if (branchId in loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (comparing) "השוואה בין ${chosen.size} סניפים · " + (if (anyLoading) "טוען מחירים…" else "הזול בכל מוצר מסומן")
+                else statusLine(status[ids.first()]),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = { ids.forEach(vm::refreshPrices) }, enabled = !anyLoading) {
+                Icon(Icons.Default.Refresh, contentDescription = if (comparing) "רענון המחירים של הסניפים שנבחרו" else "רענון המחירים של הסניף")
+            }
+        }
+        if (anyLoading || searching) LinearProgressIndicator(Modifier.fillMaxWidth())
         OutlinedTextField(
             query, { query = it }, label = { Text("חיפוש מוצר או ברקוד") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-            trailingIcon = { IconButton(onClick = scan) { Icon(Icons.Default.QrCodeScanner, contentDescription = "סריקת ברקוד") } },
+            trailingIcon = {
+                Row {
+                    if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Default.Close, contentDescription = "מחיקת הטקסט") }
+                    IconButton(onClick = scan) { Icon(Icons.Default.QrCodeScanner, contentDescription = "סריקת ברקוד") }
+                }
+            },
         )
-        if (current != null && query.isBlank()) Text("${current.products.size} מוצרים בסניף. הקלידו שם מוצר, למשל \"קוטג 5%\".", style = MaterialTheme.typography.bodySmall)
-        if (current == null && branchId !in loading) Text("המחירים של הסניף עוד לא נטענו. נסו לרענן בעוד כמה דקות.", style = MaterialTheme.typography.bodySmall)
+        val loadedCount = ids.count { all.containsKey(it) }
+        if (loadedCount > 0 && query.isBlank()) {
+            val products = ids.sumOf { all[it]?.products?.size ?: 0 }
+            Text(
+                (if (comparing) "$products מוצרים ב-$loadedCount סניפים. " else "$products מוצרים בסניף. ") + "הקלידו שם מוצר, למשל \"קוטג 5%\".",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        if (loadedCount == 0 && !anyLoading) Text("המחירים עוד לא נטענו. נסו לרענן בעוד כמה דקות.", style = MaterialTheme.typography.bodySmall)
+        if (!searching && debounced.isNotBlank() && loadedCount > 0 && results.isEmpty()) Text("לא נמצאו מוצרים.", style = MaterialTheme.typography.bodySmall)
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(results, key = { it.code }) { p ->
-            ProductCard(p, current?.rangeDays ?: 90, if (mineLoaded.size > 1) PriceData.acrossBranches(p.code, mineLoaded) else null, mine)
+        items(results, key = { r -> "${r.product.internalCode}:${r.at.keys.first()}:${r.product.code}" }) { r ->
+            if (comparing) CompareCard(r, chosen)
+            else ProductCard(r.product, all[ids.first()]?.rangeDays ?: 90, singleComparisons[r.product.code], mine)
         }
     }
 }
 
+/** One product at each chosen branch: the cheapest marked, the others with how much dearer they are. */
 @Composable
-private fun ProductCard(p: BranchProduct, rangeDays: Int, across: app.necessityq.domain.CrossBranchRange?, mine: List<PriceBranch>) {
+private fun CompareCard(r: app.necessityq.domain.ProductAcross, chosen: List<PriceBranch>) {
+    val p = r.product
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                Column(Modifier.weight(1f)) {
+                    Text(p.name, fontWeight = FontWeight.Bold)
+                    productDetails(p)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                }
+                Text(PriceData.formatPrice(r.cheapest), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+            }
+            val cheapestIds = r.cheapestBranchIds
+            chosen.forEach { b ->
+                val at = r.at[b.id]
+                val cheapest = at != null && b.id in cheapestIds && r.at.size > 1
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        b.title,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = if (cheapest) FontWeight.Bold else FontWeight.Normal,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    when {
+                        at == null -> Text("לא נמכר", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        else -> {
+                            if (cheapest) Text("הזול  ", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            else if (r.at.size > 1 && r.cheapest > 0) {
+                                val diff = at.price / r.cheapest - 1
+                                if (diff >= 0.005) Text(
+                                    "+${app.necessityq.domain.PriceComparisons.percent(diff)}  ",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (diff >= app.necessityq.domain.PriceComparisons.SIGNIFICANT) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Text(
+                                PriceData.formatPrice(at.price),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (cheapest) FontWeight.ExtraBold else FontWeight.SemiBold,
+                                color = if (cheapest) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                }
+            }
+            if (p.internalCode) Text("קוד פנימי של הרשת — לא מושווה לרשתות אחרות", style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+private fun productDetails(p: BranchProduct): String? = listOfNotNull(
+    p.brand.takeIf { it.isNotBlank() },
+    p.packageSize?.let { q -> "${trim(q)} ${p.unit}".trim() }?.takeIf { !p.soldByWeight },
+    if (p.soldByWeight) "במשקל" else null,
+).takeIf { it.isNotEmpty() }?.joinToString(" · ")
+
+@Composable
+private fun ProductCard(p: BranchProduct, rangeDays: Int, comparison: app.necessityq.domain.PriceComparison?, mine: List<PriceBranch>) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f)) {
                     Text(p.name, fontWeight = FontWeight.Bold)
-                    val details = listOfNotNull(
-                        p.brand.takeIf { it.isNotBlank() },
-                        p.packageSize?.let { q -> "${trim(q)} ${p.unit}".trim() }?.takeIf { !p.soldByWeight },
-                        if (p.soldByWeight) "במשקל" else null,
-                    )
-                    if (details.isNotEmpty()) Text(details.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
+                    productDetails(p)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 }
                 Text(PriceData.formatPrice(p.price), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
             }
             Text("טווח $rangeDays יום בסניף: ${PriceData.formatRange(p.low, p.high)}", style = MaterialTheme.typography.bodyMedium)
             p.unitPrice?.let { Text("מחיר ליחידת מידה: ${PriceData.formatPrice(it)}", style = MaterialTheme.typography.bodySmall) }
             if (p.since.isNotBlank()) Text("במחיר הזה מאז ${p.since.split('-').reversed().joinToString("/")}", style = MaterialTheme.typography.bodySmall)
-            if (across != null && across.branches > 1) {
-                val cheapest = mine.filter { it.id in across.cheapestBranchIds }.joinToString(", ") { it.title }
-                Text(
-                    "בסניפים שלך (${across.branches}): ${PriceData.formatRange(across.low, across.high)}" +
-                        if (across.high > across.low) " · הזול: $cheapest" else "",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
+            if (comparison != null) {
+                val quotes = listOf(comparison.here) + comparison.others
+                val low = quotes.minOf { it.low }
+                val high = quotes.maxOf { it.high }
+                val cheapest = mine.firstOrNull { it.id == comparison.cheapestBranchId }?.title
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
+                    Text(
+                        "בסניפים שלך (${quotes.size}): ${PriceData.formatRange(low, high)}" + if (high > low && cheapest != null) " · הזול: $cheapest" else "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (comparison.notable) PriceComparisonPill(comparison)
+                }
             }
             if (p.internalCode) Text("קוד פנימי של הרשת — לא מושווה לרשתות אחרות", style = MaterialTheme.typography.labelSmall)
         }
