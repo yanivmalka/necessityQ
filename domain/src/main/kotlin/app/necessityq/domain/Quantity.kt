@@ -38,7 +38,23 @@ data class Quantity(val amount: Double, val unit: QuantityUnit) {
 
     fun format(): String = "${formatNumber(amount)} ${unit.label}"
 
+    /** A believable amount for one household shopping trip: not 750 יח' of cottage cheese. */
+    val isHomePlausible: Boolean get() = when (dimension) {
+        Dimension.COUNT -> amount <= MAX_HOME_COUNT
+        Dimension.WEIGHT, Dimension.VOLUME -> baseAmount <= MAX_HOME_BASE
+    }
+
     companion object {
+        const val MAX_HOME_COUNT = 30.0
+        /** 30 kg / 30 liters, in grams / milliliters. */
+        const val MAX_HOME_BASE = 30_000.0
+
+        /** An implausible amount (a mis-typed or mis-read number) becomes one unit; anything else is kept. */
+        fun homeSized(quantity: Quantity?): Quantity? = when {
+            quantity == null || quantity.isHomePlausible -> quantity
+            else -> pieces(1)
+        }
+
         fun pieces(n: Number) = Quantity(n.toDouble(), QuantityUnit.PIECE)
 
         /** Builds a readable quantity from a base amount (switches to kg / liter at 1000). */

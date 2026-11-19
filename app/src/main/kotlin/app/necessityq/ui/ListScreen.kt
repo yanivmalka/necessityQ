@@ -723,6 +723,7 @@ fun ListScreen(
                                 onRightSwipe = { if (shopping) vm.setMissing(line, !line.missing) else vm.delete(line) },
                                 onPlus = { vm.adjustQuantity(line, +1) },
                                 onMinus = { vm.adjustQuantity(line, -1) },
+                                onSetQuantity = { vm.changeQuantity(line, it) },
                                 onTap = {
                                     if (display.tapMode == TapMode.INFO) openItem = line
                                     else expanded = if (line.id in expanded) expanded - line.id else expanded + line.id
@@ -1181,6 +1182,7 @@ private fun ProductTile(
     onRightSwipe: () -> Unit,
     onPlus: () -> Unit,
     onMinus: () -> Unit,
+    onSetQuantity: ((Quantity?) -> Unit)? = null,
     onTap: () -> Unit,
     onInfo: () -> Unit,
 ) {
@@ -1280,7 +1282,7 @@ private fun ProductTile(
                                         modifier = Modifier.padding(end = 6.dp),
                                     )
                                 }
-                                if (showStepper) QuantityStepper(line.quantity, onMinus, onPlus)
+                                if (showStepper) QuantityStepper(line.quantity, onMinus, onPlus, onSetQuantity)
                                 if (controlsMode && controlsOpen) {
                                     IconButton(onClick = onInfo) { Icon(Icons.Outlined.Info, contentDescription = "דף מידע") }
                                 }
@@ -1300,7 +1302,8 @@ private fun costText(estimate: app.necessityq.domain.ListCostEstimate): String {
     val prefix = if (estimate.complete) "" else "~"
     return when {
         estimate.pricedLines == 0 -> "₪ —"
-        estimate.isRange -> prefix + "₪%.0f–%.0f".format(estimate.low, estimate.high)
+        // right-to-left: the dear price first, so the cheap one ends up on the left
+        estimate.isRange -> prefix + "₪%.0f–%.0f".format(estimate.high, estimate.low)
         else -> prefix + "₪%.0f".format(estimate.low)
     }
 }
@@ -1578,8 +1581,41 @@ fun PromoStrip(promo: String?) {
     )
 }
 
+/** Tapping the amount opens a field to type it, so a child's thousand taps on "+" is one edit, not a thousand on "−". */
 @Composable
-fun QuantityStepper(quantity: Quantity?, onMinus: () -> Unit, onPlus: () -> Unit) {
+private fun QuantityEditDialog(quantity: Quantity?, onSet: (Quantity?) -> Unit, onDismiss: () -> Unit) {
+    val unit = quantity?.unit ?: app.necessityq.domain.QuantityUnit.PIECE
+    var text by remember { mutableStateOf(quantity?.let { Quantity.formatNumber(it.amount) } ?: "") }
+    val amount = text.trim().replace(',', '.').toDoubleOrNull()
+    val blank = text.isBlank()
+    val valid = blank || (amount != null && amount > 0.0 && Quantity(amount, unit).isHomePlausible)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("כמות (${unit.label})") },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true,
+                isError = !valid,
+                supportingText = { if (!valid) Text("כמות לא הגיונית לקנייה ביתית") },
+                keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal, imeAction = ImeAction.Done),
+            )
+        },
+        confirmButton = {
+            TextButton(
+                enabled = valid,
+                onClick = { onSet(if (blank) null else Quantity(amount!!, unit)); onDismiss() },
+            ) { Text("אישור") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("ביטול") } },
+    )
+}
+
+@Composable
+fun QuantityStepper(quantity: Quantity?, onMinus: () -> Unit, onPlus: () -> Unit, onSet: ((Quantity?) -> Unit)? = null) {
+    var editing by remember { mutableStateOf(false) }
+    if (editing && onSet != null) QuantityEditDialog(quantity, onSet) { editing = false }
     Row(
         Modifier.clip(NqShapes.Pill).background(MaterialTheme.colorScheme.surfaceVariant),
         verticalAlignment = Alignment.CenterVertically,
@@ -1588,7 +1624,11 @@ fun QuantityStepper(quantity: Quantity?, onMinus: () -> Unit, onPlus: () -> Unit
         IconButton(onClick = onPlus, modifier = Modifier.size(38.dp)) {
             Icon(Icons.Default.Add, contentDescription = "יותר", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
         }
-        Text(quantity?.format() ?: "—", fontWeight = FontWeight.ExtraBold, modifier = Modifier.widthIn(min = 36.dp), textAlign = TextAlign.Center)
+        Text(
+            quantity?.format() ?: "—", fontWeight = FontWeight.ExtraBold,
+            modifier = Modifier.widthIn(min = 36.dp).let { if (onSet != null) it.clickable { editing = true } else it },
+            textAlign = TextAlign.Center,
+        )
         IconButton(onClick = onMinus, modifier = Modifier.size(38.dp)) { Icon(Icons.Default.Remove, contentDescription = "פחות", Modifier.size(20.dp)) }
     }
 }

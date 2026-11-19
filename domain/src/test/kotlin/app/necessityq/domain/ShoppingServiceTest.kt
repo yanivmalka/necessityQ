@@ -68,6 +68,18 @@ class ShoppingServiceTest {
         assertEquals(LineStatus.NEEDED, repo.current.value.lines.getValue(line.id).status)
     }
 
+    @Test fun `an absurd amount for a home is added as one`() = runBlocking {
+        val repo = InMemoryShoppingRepository()
+        val service = ShoppingService(repo, FakeClock(day0), SeqIds(), zone)
+        service.addFromText("h", "u1", "750 גבינה לבנה", emptyList())
+        service.addFromText("h", "u1", "12 ביצים", emptyList())
+        service.addFromText("h", "u1", "750 גרם גבינה צהובה", emptyList())
+        val lines = service.snapshot("h").first().lines.associateBy { it.name }
+        assertEquals(Quantity.pieces(1), lines.getValue("גבינה לבנה").quantity)
+        assertEquals(Quantity.pieces(12), lines.getValue("ביצים").quantity)
+        assertEquals(Quantity(750.0, QuantityUnit.GRAM), lines.getValue("גבינה צהובה").quantity)
+    }
+
     @Test fun `rename changes the identity and keeps the quantity`() = runBlocking {
         val repo = InMemoryShoppingRepository()
         val service = ShoppingService(repo, FakeClock(day0), SeqIds(), zone)
