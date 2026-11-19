@@ -1,28 +1,130 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Cream shopping basket with a green check mark and an amber "running low" dot,
-     drawn inside the 66dp adaptive-icon safe zone (21..87). -->
+<!-- A woven basket with greens, milk and a baguette, an amber "smart" check badge and sparkles.
+     Main content stays inside the 66dp adaptive-icon safe zone (21..87). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
+    <!-- Ground shadow: a circle squashed into an ellipse -->
+    <group android:pivotX="54" android:pivotY="81" android:scaleY="0.1875">
+        <path android:pathData="M30,81 a24,24 0 1,0 48,0 a24,24 0 1,0 -48,0 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="radial" android:centerX="54" android:centerY="81" android:gradientRadius="24">
+                    <item android:offset="0" android:color="#59000000" />
+                    <item android:offset="1" android:color="#00000000" />
+                </gradient>
+            </aapt:attr>
+        </path>
+    </group>
+
     <!-- Handle -->
     <path
-        android:fillColor="#00000000"
-        android:strokeColor="@color/launcher_cream"
-        android:strokeWidth="4.5"
-        android:strokeLineCap="round"
-        android:pathData="M40,48 Q54,24 68,48" />
+        android:pathData="M38,50 Q38,30 54,30 Q70,30 70,50"
+        android:strokeColor="#FFE9D3A4"
+        android:strokeWidth="4"
+        android:strokeLineCap="round" />
+    <group android:translateX="-0.6" android:translateY="-0.8">
+        <path
+            android:pathData="M38,50 Q38,30 54,30 Q70,30 70,50"
+            android:strokeColor="#E6FFF8E7"
+            android:strokeWidth="1.6"
+            android:strokeLineCap="round" />
+    </group>
+
+    <!-- Leafy greens -->
+    <path android:pathData="M44,52 C34,48 31,38 35,31 C41,35 45,43 44,52 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="31" android:startY="31" android:endX="45" android:endY="52">
+                <item android:offset="0" android:color="#FFC5E86C" />
+                <item android:offset="1" android:color="#FF5DAA2E" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:fillColor="#FF7CC243" android:pathData="M45,52 C41,44 42,36 47,32 C50,39 49,46 45,52 Z" />
+    <path
+        android:pathData="M44,51 C40,44 37,38 35.5,32"
+        android:strokeColor="#FF3E8E1F"
+        android:strokeWidth="0.8"
+        android:strokeLineCap="round" />
+
+    <!-- Milk carton -->
+    <path android:pathData="M49,52 V38 L52,33 H60 L63,38 V52 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="49" android:startY="0" android:endX="63" android:endY="0">
+                <item android:offset="0" android:color="#FFFFFFFF" />
+                <item android:offset="1" android:color="#FFDCE7F2" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:fillColor="#FFE3ECF5" android:pathData="M52,33 H60 V31 H52 Z" />
+    <path android:fillColor="#FF42A5F5" android:pathData="M49,42 H63 V47 H49 Z" />
+    <path android:strokeColor="#FFB9C9DA" android:strokeWidth="0.6" android:pathData="M49,38 H63" />
+
+    <!-- Baguette -->
+    <group android:pivotX="66" android:pivotY="41" android:rotation="32">
+        <path android:pathData="M66.25,26 a4.25,4.25 0 0,1 4.25,4.25 V51.75 a4.25,4.25 0 0,1 -8.5,0 V30.25 a4.25,4.25 0 0,1 4.25,-4.25 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear" android:startX="62" android:startY="26" android:endX="70.5" android:endY="56">
+                    <item android:offset="0" android:color="#FFF2B866" />
+                    <item android:offset="1" android:color="#FFC7782A" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path
+            android:pathData="M64,31 l4.5,-2 M64,37 l4.5,-2 M64,43 l4.5,-2"
+            android:strokeColor="#FFFCE3B4"
+            android:strokeWidth="1.3"
+            android:strokeLineCap="round" />
+    </group>
+
     <!-- Basket body -->
+    <path android:pathData="M31.5,53 H76.5 L71.4,77.4 Q70.8,80 68.2,80 H39.8 Q37.2,80 36.6,77.4 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="0" android:startY="53" android:endX="0" android:endY="80">
+                <item android:offset="0" android:color="#FFFFF8E7" />
+                <item android:offset="1" android:color="#FFF1DDB4" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Weave -->
     <path
-        android:fillColor="@color/launcher_cream"
-        android:pathData="M30,48 H78 L72,77.5 Q71.4,80 69,80 H39 Q36.6,80 36,77.5 Z" />
-    <!-- Check mark -->
+        android:pathData="M33.4,60.5 H74.6 M34.9,67.5 H73.1 M36.3,74 H71.7 M45,55 L46,79 M54,55 V79 M63,55 L62,79"
+        android:strokeColor="#FFE2C58E"
+        android:strokeWidth="1.1" />
+
+    <!-- Rim -->
+    <path android:pathData="M32.5,48.5 H75.5 a3.5,3.5 0 0,1 0,7 H32.5 a3.5,3.5 0 0,1 0,-7 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="0" android:startY="48.5" android:endX="0" android:endY="55.5">
+                <item android:offset="0" android:color="#FFFFFDF6" />
+                <item android:offset="1" android:color="#FFEAD3A2" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:fillColor="#CCFFFFFF" android:pathData="M31.7,49.4 H76.3 a0.7,0.7 0 0,1 0,1.4 H31.7 a0.7,0.7 0 0,1 0,-1.4 Z" />
+
+    <!-- Smart badge -->
+    <path android:fillColor="#4014451A" android:pathData="M59,70 a11,11 0 1,0 22,0 a11,11 0 1,0 -22,0 Z" />
+    <path android:fillColor="#FFFFF8E7" android:pathData="M59.5,69.5 a10.5,10.5 0 1,0 21,0 a10.5,10.5 0 1,0 -21,0 Z" />
+    <path android:pathData="M61.4,69.5 a8.6,8.6 0 1,0 17.2,0 a8.6,8.6 0 1,0 -17.2,0 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="61.4" android:startY="60.9" android:endX="78.6" android:endY="78.1">
+                <item android:offset="0" android:color="#FFFFD54F" />
+                <item android:offset="1" android:color="#FFFF8F00" />
+            </gradient>
+        </aapt:attr>
+    </path>
     <path
-        android:fillColor="@color/launcher_green"
-        android:pathData="M42.3,64.7 L45.8,61.2 L51,66.4 L63.2,53.2 L66.8,56.8 L51,73.4 Z" />
-    <!-- Amber accent -->
-    <path
-        android:fillColor="@color/launcher_amber"
-        android:pathData="M74,26 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
+        android:pathData="M65.6,69.8 L68.6,72.8 L74.6,66.6"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- Sparkles -->
+    <path android:fillColor="#FFFFE082" android:pathData="M79,33 Q79.6,37.4 84,38 Q79.6,38.6 79,43 Q78.4,38.6 74,38 Q78.4,37.4 79,33 Z" />
+    <path android:fillColor="#D9FFE082" android:pathData="M30,62 Q30.3,64.2 32.5,64.5 Q30.3,64.8 30,67 Q29.7,64.8 27.5,64.5 Q29.7,64.2 30,62 Z" />
 </vector>
