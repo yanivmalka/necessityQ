@@ -168,10 +168,19 @@ data class ProductAcross(
     /** branch id → the product there */
     val at: Map<String, BranchProduct>,
 ) {
-    val cheapest: Double get() = at.values.minOf { it.price }
-    val dearest: Double get() = at.values.maxOf { it.price }
+    /**
+     * Branch id → the price there in the price unit of [product] (per 100 g, per kg, per package; see
+     * [PriceComparisons.inUnitOf]), so a chain that publishes it per kg and one that publishes it per 100 g compare.
+     * A branch where it can't be put in that unit (price unit not recognised, or sold by the package there) is
+     * left out: it sells the product but is not compared.
+     */
+    val prices: Map<String, Double> by lazy {
+        at.mapNotNull { (id, p) -> (if (p == product) p.price else PriceComparisons.inUnitOf(product, p))?.let { id to it } }.toMap()
+    }
+    val cheapest: Double get() = prices.values.minOrNull() ?: product.price
+    val dearest: Double get() = prices.values.maxOrNull() ?: product.price
     /** Branches selling it at the lowest price (several when tied). */
-    val cheapestBranchIds: Set<String> get() = at.filterValues { it.price <= cheapest + 0.005 }.keys
+    val cheapestBranchIds: Set<String> get() = prices.filterValues { it <= cheapest + 0.005 }.keys
     /** Price spread between the chosen branches: 0.25 = the dearest is 25% above the cheapest. */
     val spread: Double get() = if (cheapest > 0) dearest / cheapest - 1 else 0.0
 }
@@ -181,7 +190,7 @@ object ProductSearch {
      * Searches the products of several branches at once ([branches]: branch id → products, in display order) and
      * merges hits by barcode, so each product shows its price at every chosen branch that sells it ([codes]: branch
      * id → products by barcode, see [PriceComparisons.byCode]). Chain-internal codes stay per branch. Exact barcode
-     * first, then products sold at more of the branches (they can be compared), then shorter names.
+     * first, then products that can be compared at more of the branches ([ProductAcross.prices]), then shorter names.
      */
     fun across(
         branches: List<Pair<String, List<BranchProduct>>>,
@@ -202,7 +211,7 @@ object ProductSearch {
             }
         }
         return found.values
-            .sortedWith(compareBy<ProductAcross>({ if (it.product.code == code) 0 else 1 }, { -it.at.size }, { it.product.name.length }, { it.cheapest }))
+            .sortedWith(compareBy<ProductAcross>({ if (it.product.code == code) 0 else 1 }, { -it.prices.size }, { it.product.name.length }, { it.cheapest }))
             .take(limit)
     }
 }

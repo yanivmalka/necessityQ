@@ -335,4 +335,37 @@ class WeightUnitTest {
         val unknownAtB = ItemPriceInfo("b", 4.9, 4.9, listOf(b.copy(measure = "", unit = "גרם")), null)
         assertNull(PriceComparisons.item(here, mapOf("b" to unknownAtB)))
     }
+
+    @Test
+    fun searchAcrossBranchesComparesPerKilo() {
+        // the same barcoded olives: per 100 g at a, per kg at b and c, sold by the package at d
+        val a = weighed("2900001", 4.9, "גרם", "100 גרם").copy(internalCode = false, name = "זיתי קלמטה")
+        val b = weighed("2900001", 39.0, "ק\"ג", "קילוגרם").copy(internalCode = false, name = "זיתי קלמטה")
+        val c = weighed("2900001", 52.0, "ק\"ג", "ק\"ג").copy(internalCode = false, name = "זיתי קלמטה")
+        val d = BranchProduct("2900001", "זיתי קלמטה", "", 500.0, "גרם", false, false, 12.9, null, "", 12.9, 12.9)
+        val branches = listOf("a" to listOf(a), "b" to listOf(b), "c" to listOf(c), "d" to listOf(d))
+        val codes = branches.associate { (id, ps) -> id to PriceComparisons.byCode(ps) }
+        val r = ProductSearch.across(branches, codes, "קלמטה").single()
+        assertEquals(setOf("a", "b", "c", "d"), r.at.keys)
+        // in a's unit (per 100 g): 4.90, 3.90, 5.20; d is listed but not compared
+        assertEquals(mapOf("a" to 4.9, "b" to 3.9, "c" to 5.2), r.prices.mapValues { Math.round(it.value * 100) / 100.0 })
+        assertEquals(3.9, r.cheapest, 1e-9)
+        assertEquals(5.2, r.dearest, 1e-9)
+        assertEquals(setOf("b"), r.cheapestBranchIds)
+        assertEquals(5.2 / 3.9 - 1, r.spread, 1e-9)
+        // before: 4.90 looked like the cheapest and 52 like +961%
+    }
+
+    @Test
+    fun searchAcrossBranchesKeepsAnUnknownUnitOutOfTheComparison() {
+        val odd = weighed("2900001", 4.9, "גרם", "").copy(internalCode = false, name = "זיתי קלמטה")
+        val b = weighed("2900001", 39.0, "ק\"ג", "קילוגרם").copy(internalCode = false, name = "זיתי קלמטה")
+        val branches = listOf("a" to listOf(odd), "b" to listOf(b))
+        val codes = branches.associate { (id, ps) -> id to PriceComparisons.byCode(ps) }
+        val r = ProductSearch.across(branches, codes, "קלמטה").single()
+        // listed at a with its own price; b can't be put in a's unit
+        assertEquals(mapOf("a" to 4.9), r.prices)
+        assertEquals(setOf("a"), r.cheapestBranchIds)
+        assertEquals(0.0, r.spread, 1e-9)
+    }
 }
