@@ -786,7 +786,7 @@ fun ListScreen(
         )
     }
     if (showTileEditor) {
-        TileEditorDialog(
+        TileEditorSheet(
             mode = mode,
             layout = tile,
             onSave = { vm.setDisplay(vm.display.value.withTile(mode, it)); showTileEditor = false },

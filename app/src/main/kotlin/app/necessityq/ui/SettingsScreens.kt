@@ -114,7 +114,7 @@ fun DisplaySettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier) = Pag
         }
     }
     editing?.let { m ->
-        TileEditorDialog(
+        TileEditorSheet(
             mode = m,
             layout = current.tile(m),
             onSave = { vm.setDisplay(current.withTile(m, it)); editing = null },
