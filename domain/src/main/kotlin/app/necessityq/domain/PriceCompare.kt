@@ -13,7 +13,7 @@ enum class CompareBasis {
 }
 
 /** One followed branch's price for an item or a product. */
-data class BranchQuote(val branchId: String, val low: Double, val high: Double)
+data class BranchPriceRange(val branchId: String, val low: Double, val high: Double)
 
 /**
  * A price at one branch compared with the household's other followed branches ("the stores we usually buy in").
@@ -24,9 +24,9 @@ data class PriceComparison(
     val diff: Double,
     val basis: CompareBasis,
     /** the price here (exact product) or its typical range */
-    val here: BranchQuote,
+    val here: BranchPriceRange,
     /** the other branches that could be compared, cheapest first */
-    val others: List<BranchQuote>,
+    val others: List<BranchPriceRange>,
 ) {
     /** CHEAP / EXPENSIVE once the gap is significant ([PriceComparisons.SIGNIFICANT]), FAIR otherwise. */
     val level: PriceLevel
@@ -80,11 +80,11 @@ object PriceComparisons {
     fun product(product: BranchProduct, branchId: String, others: Map<String, Map<String, BranchProduct>>): PriceComparison? {
         if (product.internalCode || product.price <= 0) return null
         val quotes = others.filterKeys { it != branchId }.mapNotNull { (id, codes) ->
-            codes[product.code]?.takeIf { it.price > 0 }?.let { BranchQuote(id, it.price, it.price) }
+            codes[product.code]?.takeIf { it.price > 0 }?.let { BranchPriceRange(id, it.price, it.price) }
         }
         if (quotes.isEmpty()) return null
         val diff = product.price / median(quotes.map { it.low }) - 1
-        return PriceComparison(branchId, diff, CompareBasis.SAME_PRODUCT, BranchQuote(branchId, product.price, product.price), quotes.sortedBy { it.low })
+        return PriceComparison(branchId, diff, CompareBasis.SAME_PRODUCT, BranchPriceRange(branchId, product.price, product.price), quotes.sortedBy { it.low })
     }
 
     /**
@@ -109,7 +109,7 @@ object PriceComparisons {
         val hereTypical = typical(here)
         var basis = CompareBasis.TYPICAL
         val ratios = mutableListOf<Double>()
-        val quotes = mutableListOf<BranchQuote>()
+        val quotes = mutableListOf<BranchPriceRange>()
         for ((id, info) in others) {
             if (id == here.branchId || info == null || info.candidates.isEmpty()) continue
             val shared = info.candidates.mapNotNull { o -> hereCodes[o.code]?.takeIf { o.price > 0 && !o.internalCode }?.let { it.price / o.price } }
@@ -119,10 +119,10 @@ object PriceComparisons {
                 else -> null
             } ?: continue
             ratios += ratio
-            quotes += BranchQuote(id, info.low, info.high)
+            quotes += BranchPriceRange(id, info.low, info.high)
         }
         if (ratios.isEmpty()) return null
-        return PriceComparison(here.branchId, median(ratios) - 1, basis, BranchQuote(here.branchId, here.low, here.high), quotes.sortedBy { (it.low + it.high) / 2 })
+        return PriceComparison(here.branchId, median(ratios) - 1, basis, BranchPriceRange(here.branchId, here.low, here.high), quotes.sortedBy { (it.low + it.high) / 2 })
     }
 
     /** Median price of the item's products, when there are enough of them to stand for the branch. */

@@ -1495,7 +1495,7 @@ private fun BranchProductRow(c: app.necessityq.domain.BranchProduct, chosen: Boo
 @Composable
 private fun BranchComparison(c: app.necessityq.domain.PriceComparison, branches: List<app.necessityq.domain.PriceBranch>) {
     fun title(id: String) = branches.firstOrNull { it.id == id }?.title ?: id
-    fun price(q: app.necessityq.domain.BranchQuote) = app.necessityq.domain.PriceData.formatRange(q.low, q.high)
+    fun price(q: app.necessityq.domain.BranchPriceRange) = app.necessityq.domain.PriceData.formatRange(q.low, q.high)
     val cheapest = c.cheapestBranchId
     Column(
         Modifier.fillMaxWidth().clip(NqShapes.Panel).background(MaterialTheme.colorScheme.surfaceVariant).padding(10.dp),
