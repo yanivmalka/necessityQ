@@ -1,5 +1,14 @@
 package app.necessityq.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -224,18 +233,58 @@ private fun ScanContent(vm: AppViewModel, r: ScanResult) {
     }
 }
 
-/** Is the price reasonable here: compared with the household's branches, its own recent range and similar products. */
+/**
+ * Is the price reasonable here: a filled verdict pill, a three-step scale (זול · רגיל · יקר) with the
+ * verdict's step lit, then the reasons (the household's branches, its own recent range, similar products).
+ */
 @Composable
 private fun VerdictCard(v: app.necessityq.domain.PriceVerdict) {
-    val (container, ink) = when (v.level) {
-        app.necessityq.domain.PriceLevel.CHEAP -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
-        app.necessityq.domain.PriceLevel.FAIR -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
-        app.necessityq.domain.PriceLevel.EXPENSIVE -> MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
+    val levels = app.necessityq.domain.PriceLevel.entries
+    val tone = when (v.level) {
+        app.necessityq.domain.PriceLevel.CHEAP -> MaterialTheme.colorScheme.primary
+        app.necessityq.domain.PriceLevel.FAIR -> MaterialTheme.colorScheme.onSurfaceVariant
+        app.necessityq.domain.PriceLevel.EXPENSIVE -> MaterialTheme.colorScheme.secondary
     }
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = container, contentColor = ink)) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(v.level.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            v.reasons.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+    val onTone = when (v.level) {
+        app.necessityq.domain.PriceLevel.CHEAP -> MaterialTheme.colorScheme.onPrimary
+        app.necessityq.domain.PriceLevel.FAIR -> MaterialTheme.colorScheme.surface
+        app.necessityq.domain.PriceLevel.EXPENSIVE -> MaterialTheme.colorScheme.onSecondary
+    }
+    Column(
+        Modifier.fillMaxWidth().clip(NqShapes.Tile).background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, NqTheme.colors.hairline, NqShapes.Tile).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(
+            Modifier.clip(NqShapes.Pill).background(tone).padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (v.level == app.necessityq.domain.PriceLevel.CHEAP) {
+                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = onTone, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+            }
+            Text(v.level.label, color = onTone, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
         }
+        // RTL: cheap on the right, expensive on the left
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            levels.forEach { level ->
+                Box(
+                    Modifier.weight(1f).height(8.dp).clip(NqShapes.Pill)
+                        .background(if (level == v.level) tone else MaterialTheme.colorScheme.surfaceVariant),
+                )
+            }
+        }
+        Row(Modifier.fillMaxWidth()) {
+            listOf("זול", "רגיל", "יקר").forEach { label ->
+                Text(
+                    label,
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+        v.reasons.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
     }
 }

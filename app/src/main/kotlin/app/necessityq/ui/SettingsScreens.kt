@@ -13,9 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material3.Badge
-import androidx.compose.material3.BadgedBox
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -38,30 +36,31 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.necessityq.BuildConfig
 import app.necessityq.domain.Account
 
-/** Opens the navigation drawer from any screen's top bar. */
-val LocalOpenDrawer = compositionLocalOf<() -> Unit> { {} }
+/**
+ * Back action of the current page. Null on the bottom-bar tabs (they have no back button) and set on
+ * pages reached from another screen (the "הבית" hub, or messages opened from the list).
+ */
+val LocalNavBack = compositionLocalOf<(() -> Unit)?> { null }
 
-/** New messages across the app — shown as a dot on the menu button of every screen. */
+/** New messages across the app: a badge on the "הבית" tab. */
 val LocalUnreadTotal = compositionLocalOf { 0 }
 
+/** Back arrow in a page's top bar; renders nothing on a top-level tab. */
 @Composable
-fun DrawerButton() {
-    val open = LocalOpenDrawer.current
-    val unread = LocalUnreadTotal.current
-    IconButton(onClick = open) {
-        BadgedBox(badge = { if (unread > 0) Badge() }) {
-            Icon(Icons.Default.Menu, contentDescription = if (unread > 0) "תפריט ראשי — $unread הודעות חדשות" else "תפריט ראשי")
-        }
+fun BackNavButton() {
+    val back = LocalNavBack.current ?: return
+    IconButton(onClick = back) {
+        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "חזרה")
     }
 }
 
-/** Common frame for the drawer's secondary pages. */
+/** Common frame for the secondary pages. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PageScaffold(title: String, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         TopAppBar(
-            navigationIcon = { DrawerButton() },
+            navigationIcon = { BackNavButton() },
             title = { Text(title, fontWeight = FontWeight.ExtraBold) },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
         )
