@@ -48,4 +48,17 @@ class TodoSampleTest {
         assertTrue(snap.stats.values.count { it.cadenceDays != null } > 40)
         assertEquals(12, snap.frequent.size)
     }
+
+    @Test fun `undocumented weeks are inferred and nothing looks months overdue`() = runBlocking {
+        val repo = InMemoryShoppingRepository()
+        val service = service(repo)
+        service.importTodoSample("h", "u", emptyList())
+        val today = LocalDate.of(2026, 11, 16)
+        val coverage = TodoCoverage.of(repo.current.value.purchases.values.toList(), today, zone)!!
+        assertTrue("weekly shopping with gaps in the records", coverage.missingTrips >= 10)
+        assertTrue(coverage.tripIntervalDays in 5.0..8.0)
+        val snap = service.snapshot("h").first()
+        val stale = snap.stats.values.filter { it.nextDue?.isBefore(today.minusDays(30)) == true }
+        assertTrue("overdue by more than a month: ${stale.map { it.identity.displayName }}", stale.isEmpty())
+    }
 }

@@ -210,6 +210,7 @@ fun HistoryScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
                             s.cadenceDays?.let { add("כל ~${it.roundToInt()} ימים") }
                             s.typicalQuantity?.let { add("בדרך כלל ${it.format()}") }
                             add("לאחרונה ${s.lastPurchase.format(dateFormat)}")
+                            if (s.lastPurchaseEstimated) add("כנראה ${s.estimatedLastPurchase.format(dateFormat)} (לא תועד)")
                             s.nextDue?.let { add("צפוי ${it.format(dateFormat)}") }
                         }
                         Text(parts.joinToString(" · "), style = MaterialTheme.typography.bodySmall)

@@ -82,7 +82,7 @@ object ListGenerator {
                 val ratio = s.dueRatio(today) ?: 0.0
                 GeneratedItem(
                     s.identity, s.typicalQuantity,
-                    SuggestionEngine.runningLowReason(cadence, s.daysSinceLast(today)),
+                    SuggestionEngine.runningLowReason(cadence, s.daysSinceLast(today), s.lastPurchaseEstimated),
                     preselected = ratio >= 0.6 || s.classification == Classification.ROUTINE,
                 )
             }

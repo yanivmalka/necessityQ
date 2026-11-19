@@ -1,7 +1,8 @@
 package app.necessityq.domain
 
 /**
- * Real shopping history exported from Microsoft To Do (list "קניות", Mar 2025 – Nov 2026).
+ * Real shopping history exported from Microsoft To Do (list "קניות", Mar 2025 – Nov 2026). It documents
+ * most trips but not all of them, and use stopped in Sep 2026; [TodoCoverage] accounts for the gaps.
  * Open tasks become list lines; completed tasks become purchases for the statistics.
  * Titles are raw and are run through the same quick-entry parser and brand-agnostic catalogue
  * the app uses for typed entries, so "2 קוטג 9%" and "קוטג'" land on the same item.

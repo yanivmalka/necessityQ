@@ -948,13 +948,15 @@ private fun binTime(millis: Long): String =
 // ---------- info lines ----------
 
 private fun daysAgo(stats: ItemStats?, today: LocalDate): String? {
-    val last = stats?.lastPurchase ?: return null
+    val s = stats ?: return null
+    val last = s.estimatedLastPurchase
     val days = ChronoUnit.DAYS.between(last, today)
-    return when {
+    val text = when {
         days <= 0 -> "נקנה היום"
         days == 1L -> "נקנה אתמול"
         else -> "נקנה לפני $days ימים"
     }
+    return if (s.lastPurchaseEstimated) "כנראה $text" else text
 }
 
 private fun cadence(stats: ItemStats?): String? =
