@@ -321,6 +321,7 @@ fun ListScreen(
             listState.animateScrollToItem(maxOf(0, target - 1))
         }
     }
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
     val reorderState = rememberReorderableLazyListState(listState) { from, to ->
         val fromIndex = rows.indexOfFirst { it.key == from.key }
         val toIndex = rows.indexOfFirst { it.key == to.key }
@@ -685,8 +686,12 @@ fun ListScreen(
                                             Icons.Default.DragIndicator,
                                             contentDescription = "גרירה",
                                             tint = MaterialTheme.colorScheme.outline,
-                                            modifier = Modifier.draggableHandle(
-                                                onDragStarted = { dragging = true },
+                                            // a long press first, so a scroll that starts on the handle scrolls the list
+                                            modifier = Modifier.longPressDraggableHandle(
+                                                onDragStarted = {
+                                                    haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                                    dragging = true
+                                                },
                                                 onDragStopped = {
                                                     persistMove(line.id)
                                                     dragging = false
