@@ -1300,7 +1300,8 @@ private fun costText(estimate: app.necessityq.domain.ListCostEstimate): String {
     val prefix = if (estimate.complete) "" else "~"
     return when {
         estimate.pricedLines == 0 -> "₪ —"
-        estimate.isRange -> prefix + "₪%.0f–%.0f".format(estimate.low, estimate.high)
+        // right-to-left: the dear price first, so the cheap one ends up on the left
+        estimate.isRange -> prefix + "₪%.0f–%.0f".format(estimate.high, estimate.low)
         else -> prefix + "₪%.0f".format(estimate.low)
     }
 }

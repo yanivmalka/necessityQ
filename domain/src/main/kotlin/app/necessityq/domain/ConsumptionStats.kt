@@ -93,14 +93,15 @@ class ConsumptionStatsEngine(
             .sortedBy { it.day }
             .takeLast(maxTrips)
 
-        val knownAmounts = trips.mapNotNull { it.baseAmount }
-        val typicalBase = if (knownAmounts.isEmpty()) null else median(knownAmounts)
-        val typicalQuantity = typicalBase?.let { base ->
-            val dim = trips.firstNotNullOfOrNull { it.quantity }?.dimension ?: Dimension.COUNT
-            Quantity.fromBase(base, dim)
-        }
+        // Base amounts are only comparable within one dimension (1 יח' vs 750 גרם): use the dimension of the
+        // latest purchase and ignore trips in another one, so "750 g" is never read as 750 pieces.
+        val dim = trips.lastOrNull { it.baseAmount != null }?.quantity?.dimension
+        val knownAmounts = trips.filter { it.quantity?.dimension == dim }.mapNotNull { it.baseAmount }
+        val typicalBase = if (dim == null || knownAmounts.isEmpty()) null else median(knownAmounts)
+        val typicalQuantity = typicalBase?.let { Quantity.fromBase(it, dim!!) }
 
         fun sizeRatio(trip: Trip): Double {
+            if (trip.quantity?.dimension != dim) return 1.0
             val amount = trip.baseAmount ?: return 1.0
             val typical = typicalBase ?: return 1.0
             return (amount / typical).coerceIn(0.5, 3.0)

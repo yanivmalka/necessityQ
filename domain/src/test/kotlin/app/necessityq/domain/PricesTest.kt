@@ -58,7 +58,7 @@ class PricesTest {
     @Test
     fun formats() {
         assertEquals("₪5.90", PriceData.formatRange(5.9, 5.9))
-        assertEquals("₪5.50–₪6.90", PriceData.formatRange(5.5, 6.9))
+        assertEquals("₪6.90–₪5.50", PriceData.formatRange(5.5, 6.9)) // right-to-left: cheap on the left
         assertEquals("1.2 ק\"מ", PriceData.formatDistance(1234.0))
         assertEquals("350 מ'", PriceData.formatDistance(351.0))
     }

@@ -58,6 +58,21 @@ class StatsAndSuggestionsTest {
         assertEquals(Quantity.pieces(1.5), stats.typicalQuantity) // median of 2 (same day) and 1
     }
 
+    @Test fun `typical quantity ignores purchases in another dimension`() {
+        // bought as 1 יח' twice, once as 750 g: 750 must never turn into "750 יח'"
+        val purchases = listOf(
+            purchase("גבינה לבנה", start, Quantity.pieces(1)),
+            purchase("גבינה לבנה", start.plusDays(7), Quantity(750.0, QuantityUnit.GRAM)),
+            purchase("גבינה לבנה", start.plusDays(14), Quantity.pieces(1)),
+            purchase("גבינה לבנה", start.plusDays(21), Quantity.pieces(2)),
+        )
+        val stats = engine.compute(purchases, start.plusDays(21)).values.single()
+        assertEquals(Quantity.pieces(1.5), stats.typicalQuantity)
+        // the latest purchase decides the dimension
+        val grams = purchases.dropLast(1) + purchase("גבינה לבנה", start.plusDays(21), Quantity(500.0, QuantityUnit.GRAM))
+        assertEquals(Quantity(625.0, QuantityUnit.GRAM), engine.compute(grams, start.plusDays(21)).values.single().typicalQuantity)
+    }
+
     @Test fun `stock-up does not slow the cadence`() {
         // usually 1 every 7 days; once bought 2 and the next trip came 14 days later
         val purchases = listOf(

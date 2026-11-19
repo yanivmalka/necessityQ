@@ -150,9 +150,12 @@ object PriceData {
 
     fun formatPrice(price: Double): String = String.format(java.util.Locale.US, "₪%.2f", price)
 
-    /** "₪5.90" when the range is a single price, otherwise "₪5.50–₪6.90". */
+    /**
+     * "₪5.90" when the range is a single price, otherwise "₪6.90–₪5.50". The dearest comes first in the
+     * string because the text is right-to-left: on screen the cheap price is then on the left, the dear on the right.
+     */
     fun formatRange(low: Double, high: Double): String =
-        if (kotlin.math.abs(high - low) < 0.005) formatPrice(low) else "${formatPrice(low)}–${formatPrice(high)}"
+        if (kotlin.math.abs(high - low) < 0.005) formatPrice(low) else "${formatPrice(high)}–${formatPrice(low)}"
 }
 
 /** Port to the price data (Firestore index + per-branch snapshots in the backend). */
