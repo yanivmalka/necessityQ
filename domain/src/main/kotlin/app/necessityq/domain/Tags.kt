@@ -11,18 +11,25 @@ object ItemTags {
      *  - לפעמים: bought now and then
      *  - מיוחד: one-off or never bought before (occasions, new products)
      *  - מועדף / חסר: user flags
-     *  - מתכון: the line was derived from a menu or recipe
+     *  - מתכון / תפריט: the line was derived from a recipe or the menu. With [compact] (the list) only the kind
+     *    is shown, with a count when there are several ("מתכון | 2"); otherwise (the item page) each one is named.
      *  - אוטומטי: generated from past purchases (not added by a person)
      */
-    fun of(line: ListLine, stats: ItemStats?, favorite: Boolean): List<ItemTag> = buildList {
+    fun of(line: ListLine, stats: ItemStats?, favorite: Boolean, compact: Boolean = false): List<ItemTag> = buildList {
         if (line.missing) add(ItemTag(TagKind.MISSING, "חסר"))
-        if (line.recipeParts.isNotEmpty()) {
-            line.recipeParts.forEach { p ->
+        val parts = line.recipeParts.ifEmpty {
+            listOfNotNull(line.recipe?.let { RecipePart(it, null, fromMenu = line.isFromMenu) })
+        }
+        if (compact) {
+            parts.distinctBy { it.fromMenu to it.dish }.groupBy { it.fromMenu }.toSortedMap().forEach { (fromMenu, group) ->
+                val kind = if (fromMenu) "תפריט" else "מתכון"
+                add(ItemTag(TagKind.RECIPE, if (group.size > 1) "$kind | ${group.size}" else kind))
+            }
+        } else {
+            parts.forEach { p ->
                 val label = (if (p.fromMenu) "תפריט: " else "מתכון: ") + p.dish + (p.quantity?.let { " · ${it.format()}" } ?: "")
                 add(ItemTag(TagKind.RECIPE, label))
             }
-        } else {
-            line.recipe?.let { add(ItemTag(TagKind.RECIPE, if (line.isFromMenu) "תפריט: $it" else "מתכון: $it")) }
         }
         when (stats?.classification) {
             Classification.ROUTINE -> add(ItemTag(TagKind.ROUTINE, "קבוע"))

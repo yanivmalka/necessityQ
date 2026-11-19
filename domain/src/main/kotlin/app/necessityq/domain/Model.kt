@@ -132,6 +132,8 @@ data class Member(
     val displayName: String,
     val email: String?,
     val role: MemberRole,
+    /** Profile picture: a small JPEG, Base64-encoded (the member's own or their Google picture). */
+    val photo: String? = null,
 )
 
 /** The signed-in identity. Anonymous accounts work fully but are lost with the app data. */
@@ -139,11 +141,21 @@ data class Account(
     val displayName: String?,
     val email: String?,
     val isAnonymous: Boolean,
+    /** Profile picture (small Base64 JPEG): the one the user chose, otherwise the Google account's. */
+    val photo: String? = null,
+    /** The name on the Google account, to go back to after renaming. */
+    val googleName: String? = null,
+    /** True when [photo] is one the user picked rather than the Google account's. */
+    val customPhoto: Boolean = false,
 )
 
 /** Merges the household's member ids with the profile documents members wrote about themselves. */
 object Members {
-    fun resolve(household: Household, profiles: Map<String, Pair<String?, String?>>): List<Member> {
+    fun resolve(
+        household: Household,
+        profiles: Map<String, Pair<String?, String?>>,
+        photos: Map<String, String?> = emptyMap(),
+    ): List<Member> {
         val owner = household.effectiveOwnerId
         return household.members.mapIndexed { index, id ->
             val (name, email) = profiles[id] ?: (null to null)
@@ -152,6 +164,7 @@ object Members {
                 displayName = name?.takeIf { it.isNotBlank() } ?: "משתתף ${index + 1}",
                 email = email,
                 role = if (id == owner) MemberRole.OWNER else MemberRole.MEMBER,
+                photo = photos[id]?.takeIf { it.isNotBlank() },
             )
         }.sortedWith(compareBy({ it.role != MemberRole.OWNER }, { it.displayName }))
     }

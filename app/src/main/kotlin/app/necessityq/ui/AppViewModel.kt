@@ -373,10 +373,35 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
      * Adds a dish built from a Tzameret food (its composition becomes the ingredient list) and returns its id;
      * when that food is already one of the household's recipes, the existing recipe's id.
      */
-    fun addDishFromNutrition(food: app.necessityq.domain.NutritionFood): String? {
+    fun addDishFromNutrition(food: app.necessityq.domain.NutritionFood, imported: app.necessityq.domain.ImportedRecipe? = null): String? {
         meals.value.dishes.firstOrNull { it.nutritionCode == food.code }?.let { return it.id }
         val index = _nutrition.value ?: return null
-        val dish = index.dishFrom(food, java.util.UUID.randomUUID().toString())
+        val base = index.dishFrom(food, java.util.UUID.randomUUID().toString())
+        // a method found on the web comes with that recipe's own ingredients and yield
+        val dish = if (imported == null) base else base.copy(
+            ingredients = imported.ingredients.ifEmpty { base.ingredients },
+            instructions = imported.instructions,
+            servings = imported.servings ?: base.servings,
+        )
+        updateMeals { it.withDish(dish) }
+        _messages.tryEmit("נשמר במתכונים: ${dish.name}")
+        return dish.id
+    }
+
+    /** Reads the recipe on a web page (for a preview; nothing is saved). */
+    suspend fun fetchRecipe(url: String): app.necessityq.domain.ImportedRecipe = app.necessityq.platform.RecipeFetcher.fetch(url)
+
+    /** Saves a recipe read from a web page as one of the household's recipes and returns its id. */
+    fun addImportedRecipe(recipe: app.necessityq.domain.ImportedRecipe): String {
+        val servings = recipe.servings ?: app.necessityq.domain.Dish.DEFAULT_SERVINGS
+        val dish = app.necessityq.domain.Dish(
+            id = java.util.UUID.randomUUID().toString(),
+            name = recipe.name.ifBlank { "מתכון" },
+            ingredients = recipe.ingredients,
+            servings = servings,
+            cookServings = servings,
+            instructions = recipe.instructions,
+        )
         updateMeals { it.withDish(dish) }
         _messages.tryEmit("נשמר במתכונים: ${dish.name}")
         return dish.id
@@ -1254,6 +1279,11 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     fun signOut() = launchSafe { container.household.signOut() }
     fun updateDisplayName(name: String) = launchSafe { container.household.updateDisplayName(name) }
+    /** [photo]: a small Base64 JPEG (AvatarCodec); null goes back to the Google account's picture. */
+    fun updatePhoto(photo: String?) = launchSafe {
+        container.household.updatePhoto(photo)
+        _messages.tryEmit(if (photo == null) "חזרה לתמונה מחשבון Google" else "התמונה עודכנה")
+    }
     fun renameHousehold(name: String) = launchSafe { container.household.renameHousehold(name) }
     fun removeMember(userId: String) = launchSafe {
         container.household.removeMember(userId)
@@ -1290,12 +1320,24 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     private var downloadJob: kotlinx.coroutines.Job? = null
 
-    init {
-        if (prefs.autoCheckUpdates) checkForUpdates(manual = false)
+    private var lastUpdateCheck = 0L
+
+    /**
+     * Every return to the app checks for an update (when automatic checks are on), at most every
+     * 15 minutes. The first call comes from the activity's start, so this also covers opening the app.
+     */
+    fun onForeground() {
+        if (!prefs.autoCheckUpdates) return
+        if (System.currentTimeMillis() - lastUpdateCheck < 15 * 60_000L) return
+        when (_update.value) {
+            UpdateState.Idle, UpdateState.UpToDate, is UpdateState.Failed -> checkForUpdates(manual = false)
+            else -> Unit // a found / downloading / downloaded update stays as it is
+        }
     }
 
     fun checkForUpdates(manual: Boolean) {
         if (_update.value is UpdateState.Checking || _update.value is UpdateState.Downloading) return
+        lastUpdateCheck = System.currentTimeMillis()
         _update.value = UpdateState.Checking
         viewModelScope.launch {
             runCatching { container.updater.latest() }

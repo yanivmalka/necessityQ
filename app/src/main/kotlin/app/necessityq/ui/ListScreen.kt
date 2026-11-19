@@ -525,6 +525,12 @@ fun ListScreen(
                 label = { Text(if (filter.isActive) "סינון · ${filter.activeCount}" else "סינון") },
                 leadingIcon = { Icon(Icons.Default.FilterList, null, Modifier.size(18.dp)) },
             )
+            FilterChip(
+                selected = false,
+                onClick = onOpenDisplaySettings,
+                label = { Text("תצוגה") },
+                leadingIcon = { Icon(Icons.Default.Tune, contentDescription = "הגדרות תצוגה", modifier = Modifier.size(18.dp)) },
+            )
             Spacer(Modifier.weight(1f))
             if (titledKeys.isNotEmpty()) {
                 IconButton(onClick = {
@@ -678,7 +684,7 @@ fun ListScreen(
                                 line = line,
                                 shopping = shopping,
                                 subline = tileInfo(line, stats, names, display, today),
-                                tags = ItemTags.of(line, stats, favorite = line.itemId in favorites)
+                                tags = ItemTags.of(line, stats, favorite = line.itemId in favorites, compact = true)
                                     .filter { display.showFavorite || it.kind != TagKind.FAVORITE },
                                 chat = if (thread.isEmpty()) null else {
                                     val last = thread.maxBy { it.atMillis }
