@@ -75,6 +75,8 @@ data class ItemMessage(
     val waveform: List<Int>? = null,
     /** Set when the shopping event of the item ended: the conversation left the list and awaits its retention period. */
     val archivedAtMillis: Long? = null,
+    /** Members tagged with "@name" (see [Mentions]); they, and the author of the quoted message, are alerted. */
+    val mentions: List<String> = emptyList(),
 ) {
     val isArchived: Boolean get() = archivedAtMillis != null
 
@@ -127,7 +129,8 @@ interface CollabRepository {
 
     fun messages(householdId: String): Flow<List<ItemMessage>>
     suspend fun sendMessage(householdId: String, message: ItemMessage)
-    suspend fun editMessage(householdId: String, messageId: String, text: String, editedAtMillis: Long)
+    /** [mentions]: the members tagged in the new text (a tag may be added or removed by the edit). */
+    suspend fun editMessage(householdId: String, messageId: String, text: String, editedAtMillis: Long, mentions: List<String> = emptyList())
     /** Deletes the messages and their attachments for good (no statistics are kept). */
     suspend fun deleteMessages(householdId: String, messages: List<ItemMessage>)
     /** The shopping event of the item ended: its open conversation moves out of the list. */
@@ -179,8 +182,8 @@ class InMemoryCollabRepository : CollabRepository {
     override fun messages(householdId: String): Flow<List<ItemMessage>> = messagesState
     override suspend fun sendMessage(householdId: String, message: ItemMessage) = messagesState.update { it + message }
 
-    override suspend fun editMessage(householdId: String, messageId: String, text: String, editedAtMillis: Long) =
-        messagesState.update { list -> list.map { if (it.id == messageId) it.copy(text = text, editedAtMillis = editedAtMillis) else it } }
+    override suspend fun editMessage(householdId: String, messageId: String, text: String, editedAtMillis: Long, mentions: List<String>) =
+        messagesState.update { list -> list.map { if (it.id == messageId) it.copy(text = text, editedAtMillis = editedAtMillis, mentions = mentions) else it } }
 
     override suspend fun deleteMessages(householdId: String, messages: List<ItemMessage>) {
         val ids = messages.map { it.id }.toSet()

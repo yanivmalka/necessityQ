@@ -368,7 +368,7 @@ fun ListScreen(
             BadgedBox(badge = { if (unreadTotal > 0) Badge { Text("$unreadTotal") } }) {
                 Icon(
                     Icons.AutoMirrored.Filled.Chat,
-                    contentDescription = if (unreadTotal > 0) "$unreadTotal הודעות חדשות" else "הודעות",
+                    contentDescription = if (unreadTotal > 0) "צ'אט פוד: $unreadTotal הודעות חדשות" else "צ'אט פוד",
                     tint = tint,
                 )
             }

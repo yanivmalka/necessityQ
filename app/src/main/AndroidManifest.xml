@@ -8,6 +8,8 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <!-- voice messages in item conversations -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- צ'אט פוד: a tag or quote vibrates too -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:name=".NecessityApp"
@@ -26,6 +28,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- צ'אט פוד: pushes of tags and quotes, also while the app is closed -->
+        <service
+            android:name=".data.firebase.ChatPushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
 
         <!-- installs Google's barcode-scanner module together with the app (no camera permission needed) -->
         <meta-data

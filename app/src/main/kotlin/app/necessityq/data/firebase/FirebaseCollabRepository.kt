@@ -20,7 +20,7 @@ import kotlinx.coroutines.flow.map
  *   households/{hid}/stores/{id}        { name, type, lat?, lng? }
  *   households/{hid}/itemMeta/{itemId}  { favorite, price?, chatMessages?, chatThreads?, chatMedia?, chatLastAt? }
  *   households/{hid}/messages/{id}      { itemId, itemName, authorId, authorName, text, at, kind?, mediaId?, durationMs?, replyTo?,
- *                                         wave?, editedAt?, archivedAt? }
+ *                                         wave?, editedAt?, archivedAt?, mentions[]?, pushedAt? }
  *   households/{hid}/settings/chat      { retentionDays }
  *   households/{hid}/media/{id}         { mime, data (bytes), by, at }  — picture / recording of a message
  *   households/{hid}/settings/notify    { missingRecipients[] }
@@ -78,9 +78,9 @@ class FirebaseCollabRepository(private val db: FirebaseFirestore) : CollabReposi
         household(householdId).collection("messages").document(message.id).set(FirestoreMapping.messageToMap(message))
     }
 
-    override suspend fun editMessage(householdId: String, messageId: String, text: String, editedAtMillis: Long) {
+    override suspend fun editMessage(householdId: String, messageId: String, text: String, editedAtMillis: Long, mentions: List<String>) {
         household(householdId).collection("messages").document(messageId)
-            .update(mapOf("text" to text, "editedAt" to editedAtMillis))
+            .update(mapOf("text" to text, "editedAt" to editedAtMillis, "mentions" to mentions))
     }
 
     override suspend fun deleteMessages(householdId: String, messages: List<ItemMessage>) {

@@ -146,6 +146,23 @@ class AppPrefs(context: Context) {
         get() = p.getBoolean("chat_sound", true)
         set(v) = p.edit().putBoolean("chat_sound", v).apply()
 
+    /** צ'אט פוד: notify on every message, or only when I am tagged / quoted (the default). */
+    var chatNotifyMode: app.necessityq.domain.ChatNotifyMode
+        get() = p.getString("chat_notify_mode", null)
+            ?.let { runCatching { app.necessityq.domain.ChatNotifyMode.valueOf(it) }.getOrNull() }
+            ?: app.necessityq.domain.ChatNotifyMode.TAGGED_ONLY
+        set(v) = p.edit().putString("chat_notify_mode", v.name).apply()
+
+    /** A tag or a quote is heard even when the phone is on silent (played on the alarm stream). */
+    var loudMentions: Boolean
+        get() = p.getBoolean("loud_mentions", true)
+        set(v) = p.edit().putBoolean("loud_mentions", v).apply()
+
+    /** Playback speed of voice messages (1, 1.5 or 2). */
+    var voiceSpeed: Float
+        get() = p.getFloat("voice_speed", 1f)
+        set(v) = p.edit().putFloat("voice_speed", v).apply()
+
     /** Look for a new version every time the app opens. */
     var autoCheckUpdates: Boolean
         get() = p.getBoolean("upd_auto_check", true)

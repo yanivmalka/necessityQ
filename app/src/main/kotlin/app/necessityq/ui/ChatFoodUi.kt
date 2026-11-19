@@ -1,0 +1,894 @@
+package app.necessityq.ui
+
+import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.absoluteOffset
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Reply
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.AlternateEmail
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.AbsoluteAlignment
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.necessityq.domain.BubbleSlot
+import app.necessityq.domain.ChatLayout
+import app.necessityq.domain.ChatMember
+import app.necessityq.domain.ItemMessage
+import app.necessityq.domain.MediaBlob
+import app.necessityq.domain.Mentions
+import app.necessityq.domain.MessageKind
+import app.necessityq.domain.MessageRules
+import app.necessityq.domain.VoiceSpeed
+import app.necessityq.domain.Waveform
+import app.necessityq.platform.ImageCodec
+import app.necessityq.platform.VoiceRecorder
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import kotlin.math.abs
+import kotlin.math.roundToInt
+
+/*
+ * צ'אט פוד — the conversation about a product, laid out like WhatsApp:
+ *  - my messages on one side in green, everyone else's on the other side in white, each writer's name
+ *    in their own colour with a small initials avatar, runs of one writer grouped, a line per day;
+ *  - swipe a message sideways to quote it (long-press for more);
+ *  - voice messages: drag or tap the waveform to jump, pause / resume, and 1× · 1.5× · 2×;
+ *  - "@" tags a member. Only tagged members and the author of a quoted message are alerted.
+ */
+
+private val clockFormat = DateTimeFormatter.ofPattern("HH:mm")
+private fun clock(millis: Long) = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).format(clockFormat)
+
+/** The conversation itself. */
+@Composable
+internal fun ChatFoodThread(
+    thread: List<ItemMessage>,
+    vm: AppViewModel,
+    onReply: (ItemMessage) -> Unit,
+    onEdit: (ItemMessage) -> Unit,
+    onDelete: (ItemMessage) -> Unit,
+    onDetails: (ItemMessage) -> Unit,
+) {
+    if (thread.isEmpty()) {
+        Text(
+            "אין עדיין הודעות. כתבו שאלה, צלמו תמונה או הקליטו הודעה, וכל בני הבית יראו. " +
+                "כדי שמישהו יקבל התראה, תייגו אותו עם @ או החליקו את ההודעה שלו כדי לצטט אותה.",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        return
+    }
+    val names by vm.memberNames.collectAsStateWithLifecycle()
+    val members by vm.chatMembers.collectAsStateWithLifecycle()
+    val colors = NqTheme.colors
+    val memberIds = names.keys.toList()
+    val slots = remember(thread) { ChatLayout.slots(thread, System.currentTimeMillis()) }
+    val byId = remember(thread) { thread.associateBy { it.id } }
+    fun nameOf(uid: String, fallback: String) = if (uid == vm.me) "אני" else names[uid] ?: fallback
+    fun colorOf(uid: String) = colors.senderColors[ChatLayout.colorSlot(uid, memberIds, colors.senderColors.size)]
+
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val maxBubble = maxWidth * 0.8f
+        Column {
+            slots.forEach { slot ->
+                key(slot.message.id) {
+                    slot.dayHeader?.let { ChatDayChip(it) }
+                    BubbleRow(
+                        slot = slot,
+                        vm = vm,
+                        quoted = slot.message.replyToId?.let { byId[it] },
+                        members = members,
+                        maxBubble = maxBubble,
+                        nameOf = ::nameOf,
+                        colorOf = ::colorOf,
+                        onReply = onReply,
+                        onEdit = onEdit,
+                        onDelete = onDelete,
+                        onDetails = onDetails,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChatDayChip(label: String) {
+    Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.background(NqTheme.colors.dayChip, NqShapes.Pill).padding(horizontal = 10.dp, vertical = 3.dp),
+        )
+    }
+}
+
+/** Initials in the writer's colour. */
+@Composable
+private fun Avatar(name: String, color: Color, size: Dp = 28.dp) {
+    Box(
+        Modifier.size(size).background(color.copy(alpha = 0.18f), CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(ChatLayout.initials(name), color = color, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium)
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun BubbleRow(
+    slot: BubbleSlot,
+    vm: AppViewModel,
+    quoted: ItemMessage?,
+    members: List<ChatMember>,
+    maxBubble: Dp,
+    nameOf: (String, String) -> String,
+    colorOf: (String) -> Color,
+    onReply: (ItemMessage) -> Unit,
+    onEdit: (ItemMessage) -> Unit,
+    onDelete: (ItemMessage) -> Unit,
+    onDetails: (ItemMessage) -> Unit,
+) {
+    val m = slot.message
+    val mine = m.authorId == vm.me
+    val colors = NqTheme.colors
+    val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
+    val threshold = with(LocalDensity.current) { 64.dp.toPx() }
+    var dragX by remember { mutableFloatStateOf(0f) }
+    var armed by remember { mutableStateOf(false) }
+    var menu by remember { mutableStateOf(false) }
+    val authorColor = colorOf(m.authorId)
+    val authorName = nameOf(m.authorId, m.authorName)
+
+    // swipe sideways (either way) past the threshold to quote the message, as in WhatsApp
+    val swipe = Modifier.draggable(
+        orientation = Orientation.Horizontal,
+        state = rememberDraggableState { delta ->
+            dragX = (dragX + delta * 0.7f).coerceIn(-threshold * 1.4f, threshold * 1.4f)
+            val nowArmed = abs(dragX) >= threshold
+            if (nowArmed && !armed) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            armed = nowArmed
+        },
+        onDragStopped = {
+            if (abs(dragX) >= threshold) onReply(m)
+            armed = false
+            animate(dragX, 0f, animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)) { v, _ -> dragX = v }
+        },
+    )
+
+    Box(Modifier.fillMaxWidth().padding(top = if (slot.firstInRun) 6.dp else 2.dp, bottom = if (slot.lastInRun) 2.dp else 0.dp)) {
+        // the reply arrow shows in the space the bubble leaves while it is swiped
+        val reveal = (abs(dragX) / threshold).coerceIn(0f, 1f)
+        if (reveal > 0f) {
+            Box(
+                Modifier.align(if (dragX > 0) AbsoluteAlignment.CenterLeft else AbsoluteAlignment.CenterRight)
+                    .padding(horizontal = 8.dp)
+                    .alpha(reveal)
+                    .size(30.dp)
+                    .background(if (armed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Reply, contentDescription = null, Modifier.size(18.dp),
+                    tint = if (armed) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().absoluteOffset { IntOffset(dragX.roundToInt(), 0) },
+            horizontalArrangement = if (mine) Arrangement.Start else Arrangement.End,
+            verticalAlignment = Alignment.Top,
+        ) {
+            Box {
+                val outer = 4.dp
+                val round = 16.dp
+                val shape = RoundedCornerShape(
+                    topStart = if (mine && slot.firstInRun) outer else round,
+                    topEnd = if (!mine && slot.firstInRun) outer else round,
+                    bottomStart = round,
+                    bottomEnd = round,
+                )
+                Surface(
+                    shape = shape,
+                    color = if (mine) colors.myBubble else colors.theirBubble,
+                    border = if (!mine) BorderStroke(1.dp, colors.hairline) else null,
+                    modifier = Modifier
+                        .widthIn(min = 64.dp, max = maxBubble)
+                        .then(swipe)
+                        .combinedClickable(
+                            onClick = {},
+                            onLongClick = { haptics.performHapticFeedback(HapticFeedbackType.LongPress); menu = true },
+                            onLongClickLabel = "פעולות על ההודעה",
+                        ),
+                ) {
+                    Column(Modifier.padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 4.dp)) {
+                        if (!mine && slot.firstInRun) {
+                            Text(
+                                authorName,
+                                color = authorColor,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.labelLarge,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        if (m.replyToId != null) QuoteBlock(quoted, quoted?.let { nameOf(it.authorId, it.authorName) }, quoted?.let { colorOf(it.authorId) })
+                        when (m.kind) {
+                            MessageKind.IMAGE -> m.mediaId?.let { ImageAttachment(vm, it) }
+                            MessageKind.AUDIO -> m.mediaId?.let { VoiceNote(vm, it, m.durationMs, m.waveform, accent = if (mine) MaterialTheme.colorScheme.primary else authorColor) }
+                            MessageKind.TEXT -> Unit
+                        }
+                        if (m.text.isNotBlank()) {
+                            Text(mentionText(m.text, members, vm.me), style = MaterialTheme.typography.bodyLarge)
+                        }
+                        Row(
+                            Modifier.align(Alignment.End).padding(top = 1.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            if (vm.me in m.mentions) {
+                                Icon(Icons.Default.AlternateEmail, contentDescription = "תייגו אותך", Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
+                            }
+                            if (m.editedAtMillis != null) {
+                                Text("נערכה", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Text(clock(m.atMillis), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (mine) DeliveryTicks(vm.deliveryStatus(m))
+                        }
+                    }
+                }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("ציטוט ותגובה") },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.Reply, null) },
+                        onClick = { menu = false; onReply(m) },
+                    )
+                    if (m.text.isNotBlank()) {
+                        DropdownMenuItem(
+                            text = { Text("העתקת הטקסט") },
+                            leadingIcon = { Icon(Icons.Default.ContentCopy, null) },
+                            onClick = {
+                                menu = false
+                                runCatching {
+                                    context.getSystemService(ClipboardManager::class.java)
+                                        .setPrimaryClip(ClipData.newPlainText("הודעה", m.text))
+                                }
+                            },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text("פרטי הודעה") },
+                        leadingIcon = { Icon(Icons.Default.Info, null) },
+                        onClick = { menu = false; onDetails(m) },
+                    )
+                    val now = System.currentTimeMillis()
+                    if (MessageRules.canEdit(m, vm.me, now)) {
+                        DropdownMenuItem(
+                            text = { Text("עריכה (עוד ${MessageRules.minutesLeft(m, now)} דק')") },
+                            leadingIcon = { Icon(Icons.Default.Edit, null) },
+                            onClick = { menu = false; onEdit(m) },
+                        )
+                    }
+                    if (MessageRules.canDelete(m, vm.me)) {
+                        DropdownMenuItem(
+                            text = { Text("מחיקה") },
+                            leadingIcon = { Icon(Icons.Default.Delete, null) },
+                            onClick = { menu = false; onDelete(m) },
+                        )
+                    }
+                }
+            }
+            if (!mine) {
+                Spacer(Modifier.width(6.dp))
+                if (slot.firstInRun) Avatar(authorName, authorColor) else Spacer(Modifier.width(28.dp))
+            }
+        }
+    }
+}
+
+/** The quoted message inside a bubble: a bar in the quoted writer's colour, their name and the start of it. */
+@Composable
+private fun QuoteBlock(quoted: ItemMessage?, name: String?, color: Color?) {
+    val accent = color ?: MaterialTheme.colorScheme.outline
+    Row(
+        Modifier.padding(top = 2.dp, bottom = 4.dp)
+            .height(IntrinsicSize.Min)
+            .background(accent.copy(alpha = 0.10f), NqShapes.Inset),
+    ) {
+        Box(Modifier.width(4.dp).fillMaxHeight().background(accent, RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp)))
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+            Text(name ?: "הודעה", style = MaterialTheme.typography.labelMedium, color = accent, fontWeight = FontWeight.Bold, maxLines = 1)
+            Text(
+                quoted?.preview ?: "ההודעה המקורית אינה זמינה",
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** The text with every "@name" tag bold and coloured; a tag of me also gets a tinted background. */
+@Composable
+private fun mentionText(text: String, members: List<ChatMember>, me: String): AnnotatedString {
+    val tagColor = MaterialTheme.colorScheme.primary
+    val myTag = NqTheme.colors.mentionBackground
+    return remember(text, members, me, tagColor, myTag) {
+        val found = Mentions.find(text, members)
+        if (found.isEmpty()) return@remember AnnotatedString(text)
+        AnnotatedString.Builder(text).apply {
+            found.forEach { (range, uid) ->
+                val forMe = uid == me || uid == Mentions.EVERYONE
+                addStyle(
+                    SpanStyle(color = tagColor, fontWeight = FontWeight.Bold, background = if (forMe) myTag else Color.Unspecified),
+                    range.first, range.last + 1,
+                )
+            }
+        }.toAnnotatedString()
+    }
+}
+
+/** Colours "@name" tags while typing (the text itself is unchanged). */
+private class MentionHighlight(private val members: List<ChatMember>, private val style: SpanStyle) : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        val found = Mentions.find(text.text, members)
+        if (found.isEmpty()) return TransformedText(text, OffsetMapping.Identity)
+        val styled = AnnotatedString.Builder(text).apply {
+            found.forEach { (range, _) -> addStyle(style, range.first, range.last + 1) }
+        }.toAnnotatedString()
+        return TransformedText(styled, OffsetMapping.Identity)
+    }
+
+    override fun equals(other: Any?) = other is MentionHighlight && other.members == members && other.style == style
+    override fun hashCode() = members.hashCode() * 31 + style.hashCode()
+}
+
+// ---------- voice messages ----------
+
+/**
+ * A voice message: play / pause, the waveform (tap or drag to jump to any point, also before playing),
+ * the time, and the speed chip 1× → 1.5× → 2× (one speed for all recordings, remembered).
+ */
+@Composable
+internal fun VoiceNote(vm: AppViewModel, mediaId: String, durationMs: Long?, waveform: List<Int>?, accent: Color) {
+    val scope = rememberCoroutineScope()
+    val speed by vm.voiceSpeed.collectAsStateWithLifecycle()
+    var playing by remember { mutableStateOf(false) }
+    var loading by remember { mutableStateOf(false) }
+    var position by remember { mutableLongStateOf(0L) }
+    /** While the finger drags on the waveform: where it is (0..1). */
+    var dragFraction by remember { mutableStateOf<Float?>(null) }
+    val total = durationMs ?: 0L
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val rest = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+    // recordings from before the waveform existed get a neutral shape
+    val bars = waveform ?: remember { List(Waveform.BARS) { 25 + (it * 7 % 5) * 8 } }
+    val fraction = dragFraction ?: if (total > 0) (position.toFloat() / total).coerceIn(0f, 1f) else 0f
+
+    LaunchedEffect(playing) {
+        while (playing) {
+            // another recording started: this one stopped
+            if (vm.player.playingId != mediaId) { playing = false; break }
+            if (dragFraction == null) position = vm.player.position()
+            delay(50)
+        }
+    }
+    DisposableEffect(mediaId) { onDispose { if (vm.player.playingId == mediaId) vm.player.stop() } }
+
+    fun start() {
+        if (vm.player.playingId == mediaId && vm.player.resume()) { playing = true; return }
+        loading = true
+        scope.launch {
+            val media = vm.loadMedia(mediaId)
+            loading = false
+            if (media == null) {
+                vm.reportError("לא ניתן לטעון את ההקלטה")
+                return@launch
+            }
+            val from = if (position >= total - 250) 0L else position
+            runCatching { vm.player.play(mediaId, media.bytes, startMs = from) { playing = false; position = 0L } }
+                .onSuccess { playing = true }
+                .onFailure { vm.reportError("ההשמעה נכשלה") }
+        }
+    }
+
+    fun seek(f: Float) {
+        val ms = VoiceSpeed.seekPosition(f, total)
+        position = ms
+        if (vm.player.playingId == mediaId) vm.player.seekTo(ms.toInt())
+    }
+
+    fun fractionAt(x: Float, width: Int): Float =
+        (x / width.coerceAtLeast(1)).coerceIn(0f, 1f).let { if (rtl) 1f - it else it }
+
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
+        IconButton(onClick = { if (playing) { vm.player.pause(); playing = false } else start() }) {
+            when {
+                loading -> CircularProgressIndicator(Modifier.size(20.dp))
+                playing -> Icon(Icons.Default.Pause, contentDescription = "השהיה", tint = accent)
+                else -> Icon(Icons.Default.PlayArrow, contentDescription = "השמעה", tint = accent)
+            }
+        }
+        Column(Modifier.weight(1f)) {
+            Canvas(
+                Modifier.fillMaxWidth().height(34.dp)
+                    .pointerInput(total, rtl) {
+                        detectTapGestures { o -> if (total > 0) seek(fractionAt(o.x, size.width)) }
+                    }
+                    .pointerInput(total, rtl) {
+                        detectHorizontalDragGestures(
+                            onDragStart = { o -> if (total > 0) dragFraction = fractionAt(o.x, size.width) },
+                            onHorizontalDrag = { change, _ ->
+                                if (total > 0) {
+                                    change.consume()
+                                    dragFraction = fractionAt(change.position.x, size.width)
+                                }
+                            },
+                            onDragEnd = { dragFraction?.let { seek(it) }; dragFraction = null },
+                            onDragCancel = { dragFraction = null },
+                        )
+                    },
+            ) {
+                val n = bars.size
+                val slotW = size.width / n
+                val barW = slotW * 0.55f
+                fun xOf(t: Float) = (if (rtl) 1f - t else t) * size.width
+                bars.forEachIndexed { i, level ->
+                    val t = (i + 0.5f) / n
+                    val h = (size.height * level / 100f).coerceAtLeast(4.dp.toPx())
+                    drawRoundRect(
+                        color = if (t <= fraction) accent else rest,
+                        topLeft = Offset(xOf(t) - barW / 2, (size.height - h) / 2),
+                        size = Size(barW, h),
+                        cornerRadius = CornerRadius(barW / 2),
+                    )
+                }
+                val r = (if (dragFraction != null) 9.dp else 6.dp).toPx()
+                drawCircle(accent, radius = r, center = Offset(xOf(fraction).coerceIn(r, size.width - r), size.height / 2))
+            }
+            val shownMs = when {
+                dragFraction != null -> VoiceSpeed.seekPosition(dragFraction!!, total)
+                playing || position > 0 -> position
+                else -> total
+            }
+            Text(ItemMessage.formatDuration(shownMs), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Spacer(Modifier.width(6.dp))
+        Surface(
+            onClick = { vm.cycleVoiceSpeed() },
+            shape = NqShapes.Pill,
+            color = accent.copy(alpha = 0.14f),
+            modifier = Modifier.heightIn(min = 32.dp),
+        ) {
+            Box(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    VoiceSpeed.label(speed),
+                    color = accent,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.semantics { contentDescription = "מהירות השמעה ${VoiceSpeed.label(speed)}, נגיעה להחלפה" },
+                )
+            }
+        }
+    }
+}
+
+// ---------- the message box ----------
+
+/**
+ * Text box with picture, camera and voice; the message being answered or edited above it; member
+ * suggestions while typing "@"; and a line that says who will be alerted.
+ */
+@Composable
+internal fun ChatFoodComposer(
+    vm: AppViewModel,
+    itemId: String,
+    itemName: String,
+    replyTo: ItemMessage?,
+    onReplyDone: () -> Unit,
+    editing: ItemMessage?,
+    onEditDone: () -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val members by vm.chatMembers.collectAsStateWithLifecycle()
+    val names by vm.memberNames.collectAsStateWithLifecycle()
+    var draft by remember(itemId) { mutableStateOf(TextFieldValue("")) }
+    // leaving the conversation (or switching product) ends our "typing…"
+    DisposableEffect(itemId) { onDispose { vm.stopTyping() } }
+    var recording by remember { mutableStateOf(false) }
+    var elapsed by remember { mutableLongStateOf(0L) }
+
+    fun setDraft(value: TextFieldValue) {
+        val changed = value.text != draft.text
+        draft = value
+        if (changed) vm.onDraftChanged(itemId, itemName, value.text)
+    }
+
+    // starting an edit puts the message text in the box; quoting or editing moves the cursor there
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(editing?.id) { if (editing != null) draft = TextFieldValue(editing.text, TextRange(editing.text.length)) }
+    LaunchedEffect(replyTo?.id, editing?.id) { if (replyTo != null || editing != null) runCatching { focus.requestFocus() } }
+
+    fun sendImage(bitmap: android.graphics.Bitmap?) {
+        if (bitmap == null) return
+        scope.launch {
+            val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { ImageCodec.compress(bitmap) }
+            vm.sendMedia(itemId, itemName, MessageKind.IMAGE, MediaBlob("image/jpeg", bytes), caption = draft.text, replyToId = replyTo?.id)
+            draft = TextFieldValue("")
+            onReplyDone()
+        }
+    }
+
+    fun sendRecording(r: VoiceRecorder.Recording) {
+        vm.sendMedia(
+            itemId, itemName, MessageKind.AUDIO, MediaBlob("audio/mp4", r.bytes),
+            durationMs = r.durationMs, replyToId = replyTo?.id, waveform = r.waveform,
+        )
+        onReplyDone()
+    }
+
+    val gallery = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) scope.launch {
+            sendImage(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ImageCodec.fromUri(context, uri) })
+        }
+    }
+    // the camera writes the full-size photo into a file of ours; kept across the activity being recreated
+    var cameraPath by rememberSaveable { mutableStateOf<String?>(null) }
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { taken ->
+        val path = cameraPath
+        cameraPath = null
+        if (taken && path != null) scope.launch {
+            val file = java.io.File(path)
+            val bitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                ImageCodec.fromUri(context, android.net.Uri.fromFile(file)).also { file.delete() }
+            }
+            if (bitmap == null) vm.reportError("לא ניתן לקרוא את התמונה") else sendImage(bitmap)
+        }
+    }
+    fun openCamera() {
+        runCatching {
+            val (file, uri) = ImageCodec.newCameraFile(context)
+            cameraPath = file.absolutePath
+            camera.launch(uri)
+        }.onFailure { cameraPath = null; vm.reportError("לא ניתן לפתוח את המצלמה") }
+    }
+
+    fun startRecording() {
+        runCatching { vm.recorder.start() }
+            .onSuccess { recording = true; elapsed = 0L }
+            .onFailure { vm.reportError("ההקלטה לא הצליחה להתחיל") }
+    }
+    val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) startRecording() else vm.reportError("כדי להקליט צריך הרשאת מיקרופון")
+    }
+    LaunchedEffect(recording) {
+        while (recording) {
+            delay(VoiceRecorder.SAMPLE_MS)
+            vm.recorder.sample()
+            elapsed += VoiceRecorder.SAMPLE_MS
+            if (elapsed >= VoiceRecorder.MAX_MS) {
+                recording = false
+                vm.recorder.stop()?.let { sendRecording(it) }
+            }
+        }
+    }
+    DisposableEffect(Unit) { onDispose { if (vm.recorder.isRecording) vm.recorder.stopQuietly() } }
+
+    replyTo?.let { m ->
+        val palette = NqTheme.colors.senderColors
+        val color = palette[ChatLayout.colorSlot(m.authorId, names.keys.toList(), palette.size)]
+        Row(
+            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, NqShapes.Strip)
+                .height(IntrinsicSize.Min),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.width(4.dp).fillMaxHeight().background(color, RoundedCornerShape(topStart = 10.dp, bottomStart = 10.dp)))
+            Column(Modifier.weight(1f).padding(horizontal = 10.dp, vertical = 4.dp)) {
+                Text(
+                    if (m.authorId == vm.me) "ציטוט של הודעה שלי" else "ציטוט של ${names[m.authorId] ?: m.authorName}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = color,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(m.preview, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            IconButton(onClick = onReplyDone) { Icon(Icons.Default.Close, contentDescription = "ביטול הציטוט") }
+        }
+    }
+    editing?.let { m ->
+        Row(
+            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.tertiaryContainer, NqShapes.Strip)
+                .padding(start = 10.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Default.Edit, null, Modifier.size(18.dp))
+            Column(Modifier.weight(1f).padding(horizontal = 6.dp)) {
+                Text("עריכת הודעה", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                Text("אפשר לערוך עוד ${MessageRules.minutesLeft(m, System.currentTimeMillis())} דק'", style = MaterialTheme.typography.bodySmall)
+            }
+            IconButton(onClick = { draft = TextFieldValue(""); onEditDone() }) { Icon(Icons.Default.Close, contentDescription = "ביטול העריכה") }
+        }
+    }
+
+    if (recording) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 4.dp)) {
+                    IconButton(onClick = { vm.recorder.stopQuietly(); recording = false }) {
+                        Icon(Icons.Default.Delete, contentDescription = "ביטול ההקלטה", tint = MaterialTheme.colorScheme.error)
+                    }
+                    Box(Modifier.size(10.dp).background(MaterialTheme.colorScheme.error, CircleShape))
+                    Text(
+                        "  " + ItemMessage.formatDuration(elapsed) + " / " + ItemMessage.formatDuration(VoiceRecorder.MAX_MS),
+                        Modifier.weight(1f),
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+            Spacer(Modifier.size(6.dp))
+            ComposerAction(Icons.AutoMirrored.Filled.Send, "שליחת ההקלטה") {
+                recording = false
+                val result = vm.recorder.stop()
+                if (result == null) vm.reportError("ההקלטה קצרה מדי") else sendRecording(result)
+            }
+        }
+        return
+    }
+
+    // "@" typed: members to tag
+    val query = Mentions.activeQuery(draft.text, draft.selection.start)
+    val suggestions = remember(query, members) { query?.let { Mentions.suggest(it, members, vm.me) }.orEmpty() }
+    if (suggestions.isNotEmpty()) {
+        val palette = NqTheme.colors.senderColors
+        MentionSuggestions(suggestions, colorOf = { uid -> palette[ChatLayout.colorSlot(uid, names.keys.toList(), palette.size)] }) { member ->
+            val (text, cursor) = Mentions.complete(draft.text, draft.selection.start, member.name)
+            setDraft(TextFieldValue(text, TextRange(cursor)))
+        }
+    }
+
+    // who will get an alert for this message: the tagged members and the author of the quoted message
+    val alerted = remember(draft.text, members, replyTo) {
+        (Mentions.resolve(draft.text, members, vm.me) + listOfNotNull(replyTo?.authorId?.takeIf { it != vm.me }))
+            .distinct().mapNotNull { id -> members.firstOrNull { it.userId == id }?.name }
+    }
+    if (alerted.isNotEmpty() && editing == null) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 6.dp)) {
+            Icon(Icons.Default.NotificationsActive, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+            Text(
+                "  התראה תישלח ל" + alerted.joinToString(", "),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+
+    val tagStyle = SpanStyle(color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+    val highlight = remember(members, tagStyle) { MentionHighlight(members, tagStyle) }
+
+    // WhatsApp-style bar: a rounded box with the text and the picture buttons, and beside it one
+    // round button that records when the box is empty and sends once something is typed
+    Row(verticalAlignment = Alignment.Bottom) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+        ) {
+            Row(verticalAlignment = Alignment.Bottom) {
+                TextField(
+                    draft, { setDraft(it) },
+                    modifier = Modifier.weight(1f).focusRequester(focus),
+                    placeholder = { Text(if (editing != null) "עריכה…" else if (replyTo != null) "תגובה…" else "הודעה · @ לתיוג") },
+                    maxLines = 5,
+                    visualTransformation = highlight,
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        disabledContainerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        disabledIndicatorColor = Color.Transparent,
+                    ),
+                )
+                if (editing == null) {
+                    IconButton(onClick = { gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
+                        Icon(Icons.Default.AttachFile, contentDescription = "שליחת תמונה מהגלריה", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    // as in WhatsApp, the camera makes room once typing starts
+                    if (draft.text.isBlank()) {
+                        IconButton(onClick = { openCamera() }) {
+                            Icon(Icons.Default.PhotoCamera, contentDescription = "צילום תמונה", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.size(6.dp))
+        when {
+            editing != null -> ComposerAction(
+                Icons.Default.Check, "שמירת העריכה",
+                enabled = draft.text.isNotBlank() || editing.kind != MessageKind.TEXT,
+            ) { vm.editMessage(editing, draft.text); draft = TextFieldValue(""); onEditDone() }
+            draft.text.isBlank() -> ComposerAction(Icons.Default.Mic, "הקלטת הודעה") {
+                val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                if (granted) startRecording() else micPermission.launch(Manifest.permission.RECORD_AUDIO)
+            }
+            else -> ComposerAction(Icons.AutoMirrored.Filled.Send, "שליחה") {
+                vm.sendMessage(itemId, itemName, draft.text, replyTo?.id)
+                draft = TextFieldValue("")
+                onReplyDone()
+            }
+        }
+    }
+}
+
+/** Members offered while typing "@": tap one to put the tag in the text. */
+@Composable
+private fun MentionSuggestions(members: List<ChatMember>, colorOf: (String) -> Color, onPick: (ChatMember) -> Unit) {
+    Surface(
+        shape = NqShapes.Panel,
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, NqTheme.colors.hairline),
+        shadowElevation = 2.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
+            members.forEachIndexed { i, member ->
+                if (i > 0) HorizontalDivider(color = NqTheme.colors.hairline)
+                val everyone = member.userId == Mentions.EVERYONE
+                Row(
+                    Modifier.fillMaxWidth().clickable { onPick(member) }.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (everyone) {
+                        Box(
+                            Modifier.size(28.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) { Icon(Icons.Default.AlternateEmail, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary) }
+                    } else {
+                        Avatar(member.name, colorOf(member.userId))
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        Text(member.name, fontWeight = FontWeight.SemiBold)
+                        if (everyone) {
+                            Text("כל בני הבית יקבלו התראה", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** The round button beside the message box (record / send / save), as in WhatsApp. */
+@Composable
+internal fun ComposerAction(
+    icon: ImageVector,
+    description: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    androidx.compose.material3.FilledIconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.size(48.dp),
+        shape = CircleShape,
+    ) {
+        Icon(icon, contentDescription = description)
+    }
+}

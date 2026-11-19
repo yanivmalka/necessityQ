@@ -1,5 +1,6 @@
 import { initializeApp } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
+import { FieldValue, getFirestore } from "firebase-admin/firestore";
+import { getMessaging } from "firebase-admin/messaging";
 import { getStorage } from "firebase-admin/storage";
 import { gunzipSync, gzipSync } from "fflate";
 import { setGlobalOptions } from "firebase-functions/v2";
@@ -8,6 +9,7 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onMessagePublished } from "firebase-functions/v2/pubsub";
 import { GoogleAuth } from "google-auth-library";
 import { guardConfig, parseNotification, shouldCut } from "./budget";
+import { AlertTarget, ChatMessage, alertTargets, alertText, isDeadToken } from "./chat";
 import * as logger from "firebase-functions/logger";
 import { BranchStatus, PriceConfig, PriceStore, refreshBranchPrices, refreshBranches, tick, withDefaults } from "./ingest";
 import { Branch, Snapshot } from "./model";
@@ -177,3 +179,77 @@ export const refreshNutrition = onCall({ timeoutSeconds: 540, memory: "512MiB" }
   if (!req.auth || !config.admins.includes(req.auth.uid)) throw new HttpsError("permission-denied", "admins only");
   return refreshNutritionSnapshot();
 });
+
+/**
+ * צ'אט פוד: push one message to the members it is aimed at — those tagged with "@" and the author of
+ * the message it quotes — and to nobody else. Called by the writer's app right after sending; while
+ * the message has not reached the server yet (sent offline) it answers not-found and the app retries.
+ * The pushes are data messages with high priority, so the app can sound the alert even on silent.
+ */
+export const chatPush = onCall({ memory: "256MiB", timeoutSeconds: 30 }, async (req) => {
+  if (!req.auth) throw new HttpsError("unauthenticated", "sign in first");
+  const uid = req.auth.uid;
+  const { householdId, messageId } = (req.data ?? {}) as { householdId?: string; messageId?: string };
+  if (!householdId || !messageId || householdId.includes("/") || messageId.includes("/")) {
+    throw new HttpsError("invalid-argument", "householdId and messageId are required");
+  }
+  const household = db.doc(`households/${householdId}`);
+  const members = ((await household.get()).get("members") as string[] | undefined) ?? [];
+  if (!members.includes(uid)) throw new HttpsError("permission-denied", "not a member");
+
+  const ref = household.collection("messages").doc(messageId);
+  // claim the targets in a transaction, so a retry that overlaps never pushes twice
+  const claimed = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new HttpsError("not-found", "message not synced yet");
+    const m = snap.data() as ChatMessage & { replyTo?: string };
+    if (m.authorId !== uid) throw new HttpsError("permission-denied", "only the writer");
+    let quotedAuthor: string | null = null;
+    if (m.replyTo) {
+      const quoted = await tx.get(household.collection("messages").doc(m.replyTo));
+      quotedAuthor = (quoted.get("authorId") as string | undefined) ?? null;
+    }
+    const targets = alertTargets(m, quotedAuthor, members);
+    if (targets.length) tx.update(ref, { pushedTo: FieldValue.arrayUnion(...targets.map((t) => t.uid)) });
+    return { m, targets };
+  });
+  if (!claimed.targets.length) return { sent: 0 };
+  return { sent: await sendAlerts(householdId, messageId, claimed.m, claimed.targets) };
+});
+
+async function sendAlerts(householdId: string, messageId: string, m: ChatMessage, targets: AlertTarget[]): Promise<number> {
+  const jobs: { uid: string; token: string; reason: AlertTarget["reason"] }[] = [];
+  for (const t of targets) {
+    const tokens = ((await db.doc(`users/${t.uid}`).get()).get("pushTokens") as string[] | undefined) ?? [];
+    for (const token of tokens) jobs.push({ uid: t.uid, token, reason: t.reason });
+  }
+  if (!jobs.length) return 0;
+  const result = await getMessaging().sendEach(
+    jobs.map((j) => {
+      const { title, body } = alertText(m, j.reason);
+      return {
+        token: j.token,
+        data: {
+          type: "chat",
+          to: j.uid,
+          householdId,
+          messageId,
+          itemId: m.itemId,
+          itemName: m.itemName ?? "",
+          reason: j.reason,
+          title,
+          body,
+        },
+        android: { priority: "high" as const, ttl: 6 * 3600 * 1000 },
+      };
+    }),
+  );
+  // tokens of uninstalled apps / signed-out phones are removed
+  const dead = new Map<string, string[]>();
+  result.responses.forEach((r, i) => {
+    if (!r.success && isDeadToken(r.error?.code)) dead.set(jobs[i].uid, [...(dead.get(jobs[i].uid) ?? []), jobs[i].token]);
+  });
+  await Promise.all([...dead.entries()].map(([u, tokens]) => db.doc(`users/${u}`).update({ pushTokens: FieldValue.arrayRemove(...tokens) })));
+  logger.info("chat push", { householdId, messageId, targets: targets.length, sent: result.successCount });
+  return result.successCount;
+}
