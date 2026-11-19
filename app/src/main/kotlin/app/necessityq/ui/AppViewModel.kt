@@ -1421,6 +1421,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                         } else if (chatNotifyMode.value == app.necessityq.domain.ChatNotifyMode.ALL) {
                             container.notifier.notify(
                                 it.id.hashCode(), "צ'אט פוד · ${it.itemName}", "${it.authorName}: ${it.preview}", sound = chatSound.value,
+                                openItemId = it.itemId, openItemName = it.itemName,
                             )
                         }
                     }
@@ -1439,7 +1440,10 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                     if (configured.isEmpty() || me in configured) {
                         flagged.values.filter { it.id !in previous && it.missingBy != me }.forEach {
                             val who = it.missingBy?.let { id -> memberNames.value[id] } ?: "מישהו"
-                            container.notifier.notify(it.id.hashCode(), "חסר: ${it.displayName}", "$who סימן/ה שהמוצר חסר")
+                            container.notifier.notify(
+                                it.id.hashCode(), "חסר: ${it.displayName}", "$who סימן/ה שהמוצר חסר",
+                                openItemId = it.itemId, openItemName = it.displayName,
+                            )
                         }
                     }
                 }

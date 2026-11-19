@@ -204,17 +204,31 @@ class Notifier(private val context: Context) {
         }
     }
 
+    /** [openItemId]: a tap opens that product's conversation (צ'אט פוד); null = a tap opens the app. */
     @SuppressLint("MissingPermission")
-    fun notify(id: Int, title: String, text: String, sound: Boolean = true) {
+    fun notify(id: Int, title: String, text: String, sound: Boolean = true, openItemId: String? = null, openItemName: String? = null) {
         if (!allowed()) {
             if (sound) chime()
             return
         }
+        val open = android.content.Intent(context, app.necessityq.ui.MainActivity::class.java).apply {
+            flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP
+            if (openItemId != null) {
+                putExtra(MentionAlerter.EXTRA_ITEM_ID, openItemId)
+                putExtra(MentionAlerter.EXTRA_ITEM_NAME, openItemName.orEmpty())
+            }
+        }
+        val tap = android.app.PendingIntent.getActivity(
+            context, openItemId?.hashCode() ?: 0, open,
+            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+        )
         val notification = NotificationCompat.Builder(context, if (sound) LOUD else QUIET)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setContentIntent(tap)
             .setAutoCancel(true)
             .build()
         runCatching { NotificationManagerCompat.from(context).notify(id, notification) }
