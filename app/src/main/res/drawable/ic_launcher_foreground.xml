@@ -1,28 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Shopping basket with a check mark, drawn inside the 66dp adaptive-icon safe zone. -->
+<!-- Cream shopping basket with a green check mark and an amber "running low" dot,
+     drawn inside the 66dp adaptive-icon safe zone (21..87). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- Handle -->
     <path
         android:fillColor="#00000000"
-        android:strokeColor="@color/launcher_green"
-        android:strokeWidth="4"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M30,46 L78,46 L72,76 L36,76 Z" />
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="@color/launcher_green"
-        android:strokeWidth="4"
-        android:strokeLineCap="round"
-        android:pathData="M42,46 L50,32 M66,46 L58,32" />
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="@color/launcher_green"
+        android:strokeColor="@color/launcher_cream"
         android:strokeWidth="4.5"
         android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M44,61 L51,67 L64,54" />
+        android:pathData="M40,48 Q54,24 68,48" />
+    <!-- Basket body -->
+    <path
+        android:fillColor="@color/launcher_cream"
+        android:pathData="M30,48 H78 L72,77.5 Q71.4,80 69,80 H39 Q36.6,80 36,77.5 Z" />
+    <!-- Check mark -->
+    <path
+        android:fillColor="@color/launcher_green"
+        android:pathData="M42.3,64.7 L45.8,61.2 L51,66.4 L63.2,53.2 L66.8,56.8 L51,73.4 Z" />
+    <!-- Amber accent -->
+    <path
+        android:fillColor="@color/launcher_amber"
+        android:pathData="M74,26 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
 </vector>
