@@ -5,6 +5,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.pow
 import kotlin.math.roundToLong
 
@@ -100,7 +101,8 @@ class ConsumptionStatsEngine(
         val typicalBase = if (dim == null || knownAmounts.isEmpty()) null else median(knownAmounts)
         // a median far beyond any home purchase of this item is a slip in the data (750 יח' of cottage cheese)
         val typicalQuantity = QuantityNorms.homeSized(
-            latestIdentity.name, latestIdentity.category, typicalBase?.let { Quantity.fromBase(it, dim!!) },
+            latestIdentity.name, latestIdentity.category,
+            typicalBase?.let { typical(it, dim!!, trips.lastOrNull { t -> t.quantity?.dimension == dim }?.quantity?.unit) },
         )
 
         fun sizeRatio(trip: Trip): Double {
@@ -213,6 +215,17 @@ class ConsumptionStatsEngine(
     }
 
     companion object {
+        /**
+         * The usual amount as something one can buy: pieces and packages are whole, so a median between two
+         * trips (3 and 4 sweet potatoes → 3.5) rounds up, in the unit last bought (packages stay packages).
+         */
+        fun typical(base: Double, dimension: Dimension, lastUnit: QuantityUnit?): Quantity =
+            if (dimension == Dimension.COUNT) {
+                Quantity(ceil(base - 1e-9).coerceAtLeast(1.0), lastUnit?.takeIf { it.dimension == Dimension.COUNT } ?: QuantityUnit.PIECE)
+            } else {
+                Quantity.fromBase(base, dimension)
+            }
+
         fun median(values: List<Double>): Double {
             require(values.isNotEmpty())
             val sorted = values.sorted()

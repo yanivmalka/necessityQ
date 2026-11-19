@@ -55,7 +55,22 @@ class StatsAndSuggestionsTest {
         )
         val stats = engine.compute(purchases, start.plusDays(4)).values.single()
         assertEquals(2, stats.purchaseDays)
-        assertEquals(Quantity.pieces(1.5), stats.typicalQuantity) // median of 2 (same day) and 1
+        // median of 2 (same day) and 1 is 1.5 — half a loaf can't be bought, so it rounds up
+        assertEquals(Quantity.pieces(2), stats.typicalQuantity)
+    }
+
+    @Test fun `typical count is whole and keeps the unit last bought`() {
+        val potatoes = listOf(
+            purchase("בטטה", start, Quantity.pieces(3)),
+            purchase("בטטה", start.plusDays(7), Quantity.pieces(4)),
+        )
+        assertEquals(Quantity.pieces(4), engine.compute(potatoes, start.plusDays(7)).values.single().typicalQuantity)
+
+        val sugar = listOf(
+            purchase("סוכר", start, Quantity(1.0, QuantityUnit.PACKAGE)),
+            purchase("סוכר", start.plusDays(14), Quantity(2.0, QuantityUnit.PACKAGE)),
+        )
+        assertEquals(Quantity(2.0, QuantityUnit.PACKAGE), engine.compute(sugar, start.plusDays(14)).values.single().typicalQuantity)
     }
 
     @Test fun `typical quantity ignores purchases in another dimension`() {
