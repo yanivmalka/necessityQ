@@ -521,20 +521,12 @@ fun ListScreen(
                     Column {
                         SectionToggle("כנראה נגמר בקרוב", snap.runningLow.size, lowExpanded) { lowExpanded = !lowExpanded }
                         if (lowExpanded) {
-                            TwoRowStrip(snap.runningLow) { s ->
-                                InputChip(
-                                    selected = false,
-                                    onClick = { vm.accept(s) },
-                                    label = { Text(s.identity.displayName + (s.quantity?.let { " · " + it.format() } ?: "")) },
-                                    leadingIcon = { Icon(Icons.Default.Add, contentDescription = "הוסף לרשימה", Modifier.size(18.dp)) },
-                                    trailingIcon = {
-                                        Icon(
-                                            Icons.Default.Close,
-                                            contentDescription = "לא עכשיו",
-                                            Modifier.size(18.dp).clip(CircleShape).clickable { vm.dismiss(s) },
-                                        )
-                                    },
-                                    shape = NqShapes.Pill,
+                            TwoRowStrip(snap.runningLow, height = 112.dp) { s ->
+                                RunningLowChip(
+                                    s,
+                                    info = recommendationInfo(s, snap.stats[s.itemId], favorites, display, today),
+                                    onAdd = { vm.accept(s) },
+                                    onDismiss = { vm.dismiss(s) },
                                 )
                             }
                         }
@@ -899,6 +891,14 @@ private fun tileInfo(line: ListLine, stats: ItemStats?, names: Map<String, Strin
         if (display.showStats && display.showLastBought) daysAgo(stats, today) else null,
         if (display.showStats && display.showFrequency) cadence(stats) else null,
         if (display.showAddedBy) names[line.addedBy]?.let { (if (line.isAuto) "נוצר אוטומטית עבור " else "הוסיף/ה: ") + it } else null,
+    ).joinToString(" · ")
+
+private fun recommendationInfo(s: Suggestion, stats: ItemStats?, favorites: Set<String>, display: DisplayOptions, today: LocalDate): String =
+    listOfNotNull(
+        if (display.showReason) s.reason else null,
+        if (display.showLastBought && !display.showReason) daysAgo(stats, today) else null,
+        if (display.showFrequency && !display.showReason) cadence(stats) else null,
+        if (display.showFavorite && s.itemId in favorites) "★ במועדפים" else null,
     ).joinToString(" · ")
 
 // ---------- building blocks ----------
@@ -1548,16 +1548,57 @@ private fun SectionToggle(title: String, count: Int, expanded: Boolean, onToggle
     }
 }
 
+/**
+ * "Running out soon" suggestion: tap the body to add it; the reason ("usually every 5 days · bought
+ * 4 days ago") sits under the name; ✕ is a full-size touch target so dismissing never adds by mistake.
+ */
+@Composable
+private fun RunningLowChip(s: Suggestion, info: String, onAdd: () -> Unit, onDismiss: () -> Unit) {
+    Card(
+        onClick = onAdd,
+        shape = NqShapes.Tile,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+    ) {
+        Row(
+            Modifier.widthIn(max = 280.dp).padding(start = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Default.Add, contentDescription = "הוסף לרשימה", Modifier.size(18.dp))
+            Column(Modifier.padding(start = 6.dp).weight(1f, fill = false)) {
+                Text(
+                    s.identity.displayName + (s.quantity?.let { " · " + it.format() } ?: ""),
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (info.isNotBlank()) {
+                    Text(
+                        info,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.75f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            IconButton(onClick = onDismiss) {
+                Icon(Icons.Default.Close, contentDescription = "לא עכשיו", Modifier.size(18.dp))
+            }
+        }
+    }
+}
+
 /** Chips in two rows that scroll sideways, so suggestions never push the list off the screen. */
 @Composable
 private fun <T> TwoRowStrip(
     entries: List<T>,
+    height: androidx.compose.ui.unit.Dp = 100.dp,
     fullHeight: (T) -> Boolean = { false },
     chip: @Composable (T) -> Unit,
 ) {
     androidx.compose.foundation.lazy.staggeredgrid.LazyHorizontalStaggeredGrid(
         rows = androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells.Fixed(2),
-        modifier = Modifier.fillMaxWidth().height(100.dp),
+        modifier = Modifier.fillMaxWidth().height(height),
         contentPadding = PaddingValues(horizontal = 12.dp),
         horizontalItemSpacing = 6.dp,
         verticalArrangement = Arrangement.spacedBy(2.dp),
