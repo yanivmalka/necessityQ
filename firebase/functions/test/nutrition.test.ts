@@ -41,6 +41,27 @@ describe("tzameret snapshot", () => {
     expect(snapshotStats(s)).toEqual({ foods: 3, units: 2, recipes: 1 });
   });
 
+  it("reads the published composition table: codes only, shares from ingredient weights", () => {
+    // shape of the real data.gov.il rows: mmitzrach, mitzbsisi, mishkal, ahuz (empty), text values
+    const s = buildSnapshot({
+      foods,
+      unitNames: [],
+      units: [],
+      recipes: [
+        { _id: 1, mmitzrach: "2002", mitzbsisi: "3003", mishkal: "202", retention: "521", ahuz: null, mida: "200", kamut: "1", is_visible: "1" },
+        { _id: 2, mmitzrach: "2002", mitzbsisi: "1001", mishkal: "480", retention: "3751", ahuz: null, mida: "103", kamut: "3", is_visible: "1" },
+        { _id: 3, mmitzrach: "2002", mitzbsisi: "9999", mishkal: "100", retention: null, ahuz: null, mida: "1", kamut: "1", is_visible: "1" },
+        { _id: 4, mmitzrach: "2002", mitzbsisi: "8888", mishkal: "0", retention: null, ahuz: null, mida: "1", kamut: "1", is_visible: "1" },
+      ],
+    });
+    expect(s.foods[1].r).toEqual([
+      [1001, "עגבנייה, טרייה", 61.38],
+      [3003, "ביצה, שלמה", 25.83],
+      [9999, "", 12.79],
+    ]);
+    expect(snapshotStats(s).recipes).toBe(1);
+  });
+
   it("parses numbers leniently", () => {
     expect(num("1,5")).toBe(1.5);
     expect(num("abc")).toBeNull();

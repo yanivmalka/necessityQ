@@ -94,16 +94,40 @@ export function buildSnapshot(
     units.set(food, list);
   }
 
-  const recipes = new Map<number, [number, string, number][]>();
+  // ingredient names come from the foods table: the published composition table has codes only
+  const foodName = new Map<number, string>();
+  for (const r of tables.foods) {
+    const c = foodCode(r);
+    const n = text(field(r, "shmmitzrach"));
+    if (c !== null && n && !foodName.has(c)) foodName.set(c, n);
+  }
+
+  // Composition rows as published on data.gov.il: mmitzrach (dish code), mitzbsisi (ingredient
+  // code), mishkal (ingredient weight in g), ahuz (% of the dish, usually empty). When a dish's rows
+  // lack a percentage, each ingredient's share is its weight over the dish's total weight.
+  const rawParts = new Map<number, { part: number; name: string; pct: number | null; grams: number | null }[]>();
   for (const r of tables.recipes) {
-    const dish = num(field(r, "smlmitzrach", "mmitzrach"));
-    const part = num(field(r, "smlmarciv", "marciv"));
-    const name = text(field(r, "shmmarciv"));
-    const pct = num(field(r, "achuz_marciv", "achuz"));
-    if (dish === null || part === null || pct === null || pct <= 0) continue;
-    const list = recipes.get(dish) ?? [];
-    list.push([part, name, round(pct, 2)!]);
-    recipes.set(dish, list);
+    const dish = num(field(r, "mmitzrach", "smlmitzrach"));
+    const part = num(field(r, "mitzbsisi", "smlmarciv", "marciv"));
+    if (dish === null || part === null) continue;
+    const name = text(field(r, "shmmarciv")) || foodName.get(part) || "";
+    const pct = num(field(r, "ahuz", "achuz_marciv", "achuz"));
+    const grams = num(field(r, "mishkal"));
+    const list = rawParts.get(dish) ?? [];
+    list.push({ part, name, pct, grams });
+    rawParts.set(dish, list);
+  }
+  const recipes = new Map<number, [number, string, number][]>();
+  for (const [dish, parts] of rawParts) {
+    const byPercent = parts.every((p) => p.pct !== null);
+    const total = parts.reduce((s, p) => s + (p.grams !== null && p.grams > 0 ? p.grams : 0), 0);
+    const list: [number, string, number][] = [];
+    for (const p of parts) {
+      const pct = byPercent ? p.pct : total > 0 && p.grams !== null && p.grams > 0 ? (p.grams / total) * 100 : null;
+      if (pct === null || pct <= 0) continue;
+      list.push([p.part, p.name, round(pct, 2)!]);
+    }
+    if (list.length) recipes.set(dish, list);
   }
 
   const seen = new Set<number>();
