@@ -1294,7 +1294,7 @@ private fun BranchPriceSection(
     if (!expanded) {
         // part-way open: the chosen product first, then the next ones, fading out; a tap opens the list
         val peek = (listOfNotNull(info.preferred) + info.candidates.filter { it.code != info.preferred?.code }).take(3)
-        val fadeTo = androidx.compose.material3.BottomSheetDefaults.ContainerColor
+        val fadeTo = MaterialTheme.colorScheme.surfaceContainerLow // the sheet's background
         Box(Modifier.fillMaxWidth().clickable { onExpandedChange(true) }) {
             Column {
                 peek.forEach { c -> BranchProductRow(c, chosen = info.preferred?.code == c.code, onChoose = null) }
