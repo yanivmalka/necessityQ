@@ -301,4 +301,38 @@ class WeightUnitTest {
         val unknown = ItemPriceInfo("c", 4.9, 4.9, listOf(weighed("c1", 4.9, "גרם", "")), null)
         assertNull(PriceComparisons.item(here, mapOf("c" to unknown)))
     }
+
+    @Test
+    fun theSameBarcodeIsComparedPerKilo() {
+        // one chain publishes the olives per 100 g, another per kg
+        val here = weighed("2900001", 4.9, "גרם", "100 גרם").copy(internalCode = false)
+        val perKg = weighed("2900001", 39.0, "ק\"ג", "קילוגרם").copy(internalCode = false)
+        assertEquals(3.9, PriceComparisons.inUnitOf(here, perKg)!!, 1e-9)
+        assertEquals(49.0, PriceComparisons.inUnitOf(perKg, here)!!, 1e-9)
+        val c = PriceComparisons.product(here, "a", mapOf("b" to mapOf("2900001" to perKg)))!!
+        // 4.90 per 100 g against 3.90 per 100 g: dearer by ~26%, not 87% cheaper
+        assertEquals(4.9 / 3.9 - 1, c.diff, 1e-9)
+        assertEquals(PriceLevel.EXPENSIVE, c.level)
+        assertEquals(3.9, c.others.single().low, 1e-9)
+        // not comparable: unknown unit, or by weight against by the package
+        val unknown = here.copy(measure = "", unit = "גרם")
+        val packaged = BranchProduct("2900001", "זיתים", "", 500.0, "גרם", false, false, 12.9, null, "", 12.9, 12.9)
+        assertNull(PriceComparisons.product(here, "a", mapOf("b" to mapOf("2900001" to unknown))))
+        assertNull(PriceComparisons.product(unknown, "a", mapOf("b" to mapOf("2900001" to perKg))))
+        assertNull(PriceComparisons.product(here, "a", mapOf("b" to mapOf("2900001" to packaged))))
+    }
+
+    @Test
+    fun sharedProductsAreComparedPerKilo() {
+        val a = weighed("2900001", 4.9, "גרם", "100 גרם").copy(internalCode = false)
+        val b = weighed("2900001", 39.0, "ק\"ג", "קילוגרם").copy(internalCode = false)
+        val here = ItemPriceInfo("a", 49.0, 49.0, listOf(a), null, perKilo = true)
+        val other = ItemPriceInfo("b", 39.0, 39.0, listOf(b), null, perKilo = true)
+        val c = PriceComparisons.item(here, mapOf("b" to other))!!
+        assertEquals(CompareBasis.SHARED_PRODUCTS, c.basis)
+        assertEquals(49.0 / 39.0 - 1, c.diff, 1e-9)
+        // the shared product's unit is not known at b: falls back to the typical prices, which leave it out too
+        val unknownAtB = ItemPriceInfo("b", 4.9, 4.9, listOf(b.copy(measure = "", unit = "גרם")), null)
+        assertNull(PriceComparisons.item(here, mapOf("b" to unknownAtB)))
+    }
 }
