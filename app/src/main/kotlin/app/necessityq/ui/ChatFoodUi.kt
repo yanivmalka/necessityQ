@@ -136,7 +136,7 @@ import kotlin.math.roundToInt
 
 /*
  * צ'אט פוד — the conversation about a product, laid out like WhatsApp:
- *  - my messages on one side in green, everyone else's on the other side in white, each writer's name
+ *  - my messages on the left in green, everyone else's on the right in white, each writer's name
  *    in their own colour with a small initials avatar, runs of one writer grouped, a line per day;
  *  - swipe a message sideways to quote it (long-press for more);
  *  - voice messages: drag or tap the waveform to jump, pause / resume, and 1× · 1.5× · 2×;
@@ -284,15 +284,20 @@ private fun BubbleRow(
         }
         Row(
             Modifier.fillMaxWidth().absoluteOffset { IntOffset(dragX.roundToInt(), 0) },
-            horizontalArrangement = if (mine) Arrangement.Start else Arrangement.End,
+            // as in Hebrew WhatsApp: mine on the left (end), everyone else's on the right (start) with their avatar outside
+            horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
             verticalAlignment = Alignment.Top,
         ) {
+            if (!mine) {
+                if (slot.firstInRun) Avatar(authorName, authorColor) else Spacer(Modifier.width(28.dp))
+                Spacer(Modifier.width(6.dp))
+            }
             Box {
                 val outer = 4.dp
                 val round = 16.dp
                 val shape = RoundedCornerShape(
-                    topStart = if (mine && slot.firstInRun) outer else round,
-                    topEnd = if (!mine && slot.firstInRun) outer else round,
+                    topStart = if (!mine && slot.firstInRun) outer else round,
+                    topEnd = if (mine && slot.firstInRun) outer else round,
                     bottomStart = round,
                     bottomEnd = round,
                 )
@@ -385,10 +390,6 @@ private fun BubbleRow(
                         )
                     }
                 }
-            }
-            if (!mine) {
-                Spacer(Modifier.width(6.dp))
-                if (slot.firstInRun) Avatar(authorName, authorColor) else Spacer(Modifier.width(28.dp))
             }
         }
     }
