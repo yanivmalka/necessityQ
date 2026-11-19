@@ -38,6 +38,7 @@ export function parsePrices(xml: string): { storeId: string | null; items: RawIt
       brand: clean(pick(r, "manufacturername", "manufacturename")),
       qty: num(pick(r, "quantity")),
       unit: clean(pick(r, "unitqty", "unitofmeasure")),
+      measure: clean(pick(r, "unitofmeasure")),
       weighted,
       price,
       unitPrice: num(pick(r, "unitofmeasureprice")),

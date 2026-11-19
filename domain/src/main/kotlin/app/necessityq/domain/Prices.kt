@@ -51,6 +51,11 @@ data class BranchProduct(
     val high: Double,
     /** [day, price] changes, oldest first */
     val history: List<Pair<String, Double>> = emptyList(),
+    /**
+     * The file's `UnitOfMeasure`: what [price] is per when sold by weight ("100 גרם", "ק\"ג"). Blank in
+     * snapshots written before it was kept; [unit] is used then.
+     */
+    val measure: String = "",
 ) {
     /**
      * Priced per kilo. Many chains don't set the "weighted" flag on produce; a chain-internal (or short) code
@@ -58,6 +63,43 @@ data class BranchProduct(
      */
     val soldByWeight: Boolean
         get() = weighted || (PieceWeights.isKiloUnit(unit) && (internalCode || code.length <= 7))
+
+    /** Kilos [price] is for: 0.1 for "100 גרם", 1 for "ק\"ג"; null when the unit is not recognised. */
+    val priceUnitKilos: Double?
+        get() = WeightUnits.kilos(measure.ifBlank { unit })
+
+    /**
+     * [price] per kilo for a product sold by weight (×10 when priced per 100 g). Null when not sold by weight,
+     * or when its unit is not recognised — then the price is not multiplied by a weight at all.
+     */
+    val pricePerKilo: Double?
+        get() = if (soldByWeight) priceUnitKilos?.let { price / it } else null
+}
+
+/**
+ * Weight units of the price files. A weighted item's price is per `UnitOfMeasure`, which is not always a kilo:
+ * "קילוגרם", "ק\"ג", "1קילוגרם", "100 גרם", with any spacing.
+ */
+object WeightUnits {
+    private val kilo = setOf("קג", "קילו", "קילוגרם", "kg")
+    private val gram = setOf("גרם", "גר", "ג", "g", "gr")
+    private val form = Regex("""^(?:ל\s*)?(\d+(?:\.\d+)?)?\s*(\D+)$""")
+
+    /**
+     * Kilos a price unit stands for, or null when it is not a recognised weight. Ambiguous forms are not
+     * guessed: "גרם" with no amount, or a kilo unit with an amount other than 1 (e.g. "100 ק\"ג").
+     */
+    fun kilos(unit: String): Double? {
+        val k = HebrewText.matchKey(unit)
+        val m = form.matchEntire(k) ?: return null
+        val amount = m.groupValues[1].takeIf { it.isNotEmpty() }?.toDouble()
+        val name = m.groupValues[2].replace(".", "").trim()
+        return when (name) {
+            in kilo -> if (amount == null || amount == 1.0) 1.0 else null
+            in gram -> amount?.takeIf { it > 0 }?.let { it / 1000.0 }
+            else -> null
+        }
+    }
 }
 
 data class BranchPrices(
@@ -316,18 +358,27 @@ object ListCost {
             when {
                 own != null -> (own * PriceEstimate.units(line.quantity)).let { low += it; high += it }
                 info?.preferred != null -> {
-                    val n = packages(line.quantity, info.preferred.soldByWeight, grams) ?: continue
-                    (info.preferred.price * n).let { low += it; high += it }
+                    val p = info.preferred
+                    val n = packages(line.quantity, p.soldByWeight, grams) ?: continue
+                    // a weight on the list is priced per kilo; unknown unit of the price → not priced
+                    val each = if (p.soldByWeight && line.quantity != null) p.pricePerKilo ?: continue else p.price
+                    (each * n).let { low += it; high += it }
                 }
                 info != null -> {
                     val byWeight = LineCosts.weighted(line, info)
-                    if (byWeight != null) {
-                        low += byWeight.low
-                        high += byWeight.high
-                    } else {
-                        val n = packages(line.quantity, info.candidates.firstOrNull()?.soldByWeight == true, grams) ?: continue
-                        low += info.low * n
-                        high += info.high * n
+                    val firstByWeight = info.candidates.firstOrNull()?.soldByWeight == true
+                    when {
+                        byWeight != null -> {
+                            low += byWeight.low
+                            high += byWeight.high
+                        }
+                        // sold by weight, but the unit of the price is not known: don't multiply it by a weight
+                        firstByWeight && line.quantity != null -> continue
+                        else -> {
+                            val n = packages(line.quantity, firstByWeight, grams) ?: continue
+                            low += info.low * n
+                            high += info.high * n
+                        }
                     }
                 }
                 else -> continue
