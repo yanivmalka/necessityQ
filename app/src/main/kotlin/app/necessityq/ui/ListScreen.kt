@@ -167,6 +167,8 @@ import app.necessityq.domain.Quantity
 import app.necessityq.domain.StoreType
 import app.necessityq.domain.Suggestion
 import app.necessityq.domain.TagKind
+import app.necessityq.domain.TileElement
+import app.necessityq.domain.TileLayout
 import app.necessityq.platform.DisplayOptions
 import app.necessityq.platform.TapMode
 import kotlinx.coroutines.launch
@@ -257,6 +259,9 @@ fun ListScreen(
     var openOther by remember { mutableStateOf<Pair<String, String>?>(null) }
     var addOpen by remember { mutableStateOf(false) }
     val shopping = mode == ListMode.SHOP
+    // each stage of use has its own tile (set in the "תצוגה" popup)
+    val tile = display.tile(mode)
+    var showTileEditor by remember { mutableStateOf(false) }
 
     // Local copy of the rows so a drag can move items immediately; re-synced from the live data when idle.
     val rows = remember { mutableStateListOf<ListRow>() }
@@ -531,9 +536,9 @@ fun ListScreen(
             )
             FilterChip(
                 selected = false,
-                onClick = onOpenDisplaySettings,
+                onClick = { showTileEditor = true },
                 label = { Text("תצוגה") },
-                leadingIcon = { Icon(Icons.Default.Tune, contentDescription = "הגדרות תצוגה", modifier = Modifier.size(18.dp)) },
+                leadingIcon = { Icon(Icons.Default.Tune, contentDescription = "התאמת תצוגה", modifier = Modifier.size(18.dp)) },
             )
             Spacer(Modifier.weight(1f))
             if (titledKeys.isNotEmpty()) {
@@ -687,10 +692,10 @@ fun ListScreen(
                             ProductTile(
                                 line = line,
                                 shopping = shopping,
-                                subline = tileInfo(line, stats, names, display, today),
+                                subline = tileInfo(line, stats, names, tile, today),
                                 tags = ItemTags.of(line, stats, favorite = line.itemId in favorites, compact = true)
-                                    .filter { display.showFavorite || it.kind != TagKind.FAVORITE },
-                                chat = if (thread.isEmpty()) null else {
+                                    .filter { tile.showsTag(it.kind) },
+                                chat = if (thread.isEmpty() || TileElement.CHAT !in tile) null else {
                                     val last = thread.maxBy { it.atMillis }
                                     ChatState(
                                         unread = vm.unreadCount(line.itemId, messages),
@@ -698,13 +703,14 @@ fun ListScreen(
                                         status = if (last.authorId == vm.me) vm.deliveryStatus(last) else null,
                                     )
                                 },
-                                display = display,
+                                tile = tile,
+                                tapMode = display.tapMode,
                                 price = prices[line.itemId],
                                 priceInfo = itemPrices[line.itemId],
                                 comparison = comparisons[line.itemId]?.takeIf { it.notable },
                                 controlsOpen = line.id in expanded,
                                 lifted = isDragging,
-                                dragHandle = if (sort == ListSort.GROUPS && !descending && !filter.isActive) {
+                                dragHandle = if (sort == ListSort.GROUPS && !descending && !filter.isActive && TileElement.DRAG in tile) {
                                     {
                                         Icon(
                                             Icons.Default.DragIndicator,
@@ -777,6 +783,15 @@ fun ListScreen(
             resultCount = sections.sumOf { sec -> sec.lines.count { it.status == LineStatus.NEEDED } },
             onChange = vm::setFilter,
             onDismiss = { showFilter = false },
+        )
+    }
+    if (showTileEditor) {
+        TileEditorDialog(
+            mode = mode,
+            layout = tile,
+            onSave = { vm.setDisplay(vm.display.value.withTile(mode, it)); showTileEditor = false },
+            onDismiss = { showTileEditor = false },
+            onMoreSettings = { showTileEditor = false; onOpenDisplaySettings() },
         )
     }
     if (showGenerate) GenerateSheet(vm, onDismiss = { showGenerate = false })
@@ -1024,12 +1039,12 @@ private fun daysAgo(stats: ItemStats?, today: LocalDate): String? {
 private fun cadence(stats: ItemStats?): String? =
     stats?.cadenceDays?.let { "בערך כל ${it.roundToInt().coerceAtLeast(1)} ימים" }
 
-private fun tileInfo(line: ListLine, stats: ItemStats?, names: Map<String, String>, display: DisplayOptions, today: LocalDate): String =
+private fun tileInfo(line: ListLine, stats: ItemStats?, names: Map<String, String>, tile: TileLayout, today: LocalDate): String =
     listOfNotNull(
-        line.note,
-        if (display.showStats && display.showLastBought) daysAgo(stats, today) else null,
-        if (display.showStats && display.showFrequency) cadence(stats) else null,
-        if (display.showAddedBy) names[line.addedBy]?.let { (if (line.isAuto) "נוצר אוטומטית עבור " else "הוסיף/ה: ") + it } else null,
+        if (TileElement.NOTE in tile) line.note else null,
+        if (TileElement.LAST_BOUGHT in tile) daysAgo(stats, today) else null,
+        if (TileElement.FREQUENCY in tile) cadence(stats) else null,
+        if (TileElement.ADDED_BY in tile) names[line.addedBy]?.let { (if (line.isAuto) "נוצר אוטומטית עבור " else "הוסיף/ה: ") + it } else null,
     ).joinToString(" · ")
 
 private fun recommendationInfo(s: Suggestion, stats: ItemStats?, favorites: Set<String>, display: DisplayOptions, today: LocalDate): String =
@@ -1178,7 +1193,8 @@ private fun ProductTile(
     subline: String,
     tags: List<ItemTag>,
     chat: ChatState?,
-    display: DisplayOptions,
+    tile: TileLayout,
+    tapMode: TapMode,
     price: Double?,
     priceInfo: app.necessityq.domain.ItemPriceInfo? = null,
     /** significantly dearer / cheaper here than at the household's other branches */
@@ -1201,12 +1217,12 @@ private fun ProductTile(
         SwipeAction("מחיקה", Icons.Default.Delete, NqPalette.SwipeDelete, onRightSwipe)
     }
     val left = SwipeAction("נקנה", Icons.Default.Check, NqPalette.SwipeBought, onBought)
-    val controlsMode = display.tapMode == TapMode.CONTROLS
-    // stepper: always (info mode, if enabled) or only after a tap (controls mode)
-    val showStepper = if (controlsMode) controlsOpen else display.showStepper
-    val showQuantityText = display.showQuantity && !showStepper && line.quantity != null
+    val controlsMode = tapMode == TapMode.CONTROLS
+    // stepper: always (info mode, if on the tile) or only after a tap (controls mode)
+    val showStepper = if (controlsMode) controlsOpen else TileElement.STEPPER in tile
+    val showQuantityText = TileElement.QUANTITY in tile && !showStepper && line.quantity != null
     // produce counted in pieces: estimated weight, and the price for that weight
-    val weight = if (display.showWeightEstimate) app.necessityq.domain.PieceWeights.estimate(line.name, line.quantity) else null
+    val weight = if (TileElement.WEIGHT in tile) app.necessityq.domain.PieceWeights.estimate(line.name, line.quantity) else null
     val weightedCost = priceInfo?.let { app.necessityq.domain.LineCosts.weighted(line, it) }
 
     Column(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) {
@@ -1232,11 +1248,15 @@ private fun ProductTile(
                     Column(Modifier.weight(1f).clickable(onClick = onTap).padding(start = 6.dp, end = 12.dp, top = 8.dp, bottom = 6.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             dragHandle?.invoke()
-                            val checkSize = if (shopping) 48.dp else 40.dp
-                            Box(Modifier.size(checkSize).clip(CircleShape).clickable(onClick = onBought), contentAlignment = Alignment.Center) {
-                                Box(Modifier.size(checkSize - 18.dp).border(2.dp, MaterialTheme.colorScheme.outline, CircleShape))
+                            if (TileElement.CHECK in tile) {
+                                val checkSize = if (shopping) 48.dp else 40.dp
+                                Box(Modifier.size(checkSize).clip(CircleShape).clickable(onClick = onBought), contentAlignment = Alignment.Center) {
+                                    Box(Modifier.size(checkSize - 18.dp).border(2.dp, MaterialTheme.colorScheme.outline, CircleShape))
+                                }
+                                Spacer(Modifier.width(6.dp))
+                            } else {
+                                Spacer(Modifier.width(10.dp))
                             }
-                            Spacer(Modifier.width(6.dp))
                             Column(Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
@@ -1269,7 +1289,7 @@ private fun ProductTile(
                                     }
                                 }
                             }
-                            if (display.showPrices) {
+                            if (TileElement.PRICE in tile) {
                                 PriceSlot(price = price?.let { it * PriceEstimate.units(line.quantity) }, average = null, info = priceInfo, weighted = weightedCost, quantity = line.quantity, comparison = comparison)
                             }
                         }
@@ -1514,7 +1534,7 @@ fun DeliveryTicks(status: DeliveryStatus) {
 
 /** On the tile only when the item has a conversation: new-message count, or ticks of my last message. */
 @Composable
-private fun ChatIndicator(state: ChatState) {
+internal fun ChatIndicator(state: ChatState) {
     val active = state.unread > 0
     Row(
         Modifier.clip(NqShapes.Pill)

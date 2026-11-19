@@ -13,7 +13,10 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import app.necessityq.R
+import app.necessityq.domain.ListMode
 import app.necessityq.domain.ListSort
+import app.necessityq.domain.TileElement
+import app.necessityq.domain.TileLayout
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 
@@ -23,20 +26,17 @@ enum class TapMode(val label: String, val hint: String) {
     CONTROLS("נגיעה מציגה פקדים", "הפקדים מופיעים רק בנגיעה; דף המידע בכפתור ⓘ"),
 }
 
-/** Display toggles for the list ("what to show from the recommendation"). */
+/** Display toggles for the list and the recommendations. */
 data class DisplayOptions(
+    /** Recommendation cards: why it is suggested, when last bought, how often, the ★. */
     val showReason: Boolean = true,
     val showLastBought: Boolean = true,
     val showFrequency: Boolean = true,
     val showFavorite: Boolean = true,
-    val showAddedBy: Boolean = false,
-    val showPrices: Boolean = true,
-    /** The requested quantity on the tile. */
-    val showQuantity: Boolean = true,
-    /** The +/− quantity buttons. */
-    val showStepper: Boolean = true,
-    /** Statistics on the tile (last bought, frequency). */
-    val showStats: Boolean = true,
+    /** What a product tile shows while making the list. */
+    val planTile: TileLayout = TileLayout.defaultFor(ListMode.PLAN),
+    /** What a product tile shows in the shop. */
+    val shopTile: TileLayout = TileLayout.defaultFor(ListMode.SHOP),
     /** Estimated total at the bottom of the list. */
     val showTotal: Boolean = true,
     /** Dairy, meat/fish and frozen grouped at the end of the list. */
@@ -44,9 +44,12 @@ data class DisplayOptions(
     val tapMode: TapMode = TapMode.INFO,
     /** Items already checked off (struck through) at the bottom of the list. */
     val showBought: Boolean = true,
-    /** Estimated weight of produce counted in pieces ("15 יח' ≈1.7 ק\"ג"). */
-    val showWeightEstimate: Boolean = true,
-)
+) {
+    fun tile(mode: ListMode): TileLayout = if (mode == ListMode.SHOP) shopTile else planTile
+
+    fun withTile(mode: ListMode, layout: TileLayout): DisplayOptions =
+        if (mode == ListMode.SHOP) copy(shopTile = layout) else copy(planTile = layout)
+}
 
 /** Small device-local preferences: theme, sort, display toggles, current store, read markers. */
 class AppPrefs(context: Context) {
@@ -85,25 +88,43 @@ class AppPrefs(context: Context) {
             showLastBought = p.getBoolean("d_last", true),
             showFrequency = p.getBoolean("d_freq", true),
             showFavorite = p.getBoolean("d_fav", true),
-            showAddedBy = p.getBoolean("d_by", false),
-            showPrices = p.getBoolean("d_price", true),
-            showQuantity = p.getBoolean("d_qty", true),
-            showStepper = p.getBoolean("d_stepper", true),
-            showStats = p.getBoolean("d_stats", true),
+            planTile = tileLayout(ListMode.PLAN),
+            shopTile = tileLayout(ListMode.SHOP),
             showTotal = p.getBoolean("d_total", true),
             chilledLast = p.getBoolean("d_chilled", false),
             tapMode = runCatching { TapMode.valueOf(p.getString("d_tap", null) ?: "") }.getOrDefault(TapMode.INFO),
             showBought = p.getBoolean("d_bought", true),
-            showWeightEstimate = p.getBoolean("d_weight", true),
         )
         set(v) = p.edit()
             .putBoolean("d_reason", v.showReason).putBoolean("d_last", v.showLastBought)
             .putBoolean("d_freq", v.showFrequency).putBoolean("d_fav", v.showFavorite)
-            .putBoolean("d_by", v.showAddedBy).putBoolean("d_price", v.showPrices)
-            .putBoolean("d_qty", v.showQuantity).putBoolean("d_stepper", v.showStepper)
-            .putBoolean("d_stats", v.showStats).putBoolean("d_total", v.showTotal)
+            .putString("tile_" + ListMode.PLAN.name, v.planTile.encode())
+            .putString("tile_" + ListMode.SHOP.name, v.shopTile.encode())
+            .putBoolean("d_total", v.showTotal)
             .putBoolean("d_chilled", v.chilledLast).putString("d_tap", v.tapMode.name)
-            .putBoolean("d_bought", v.showBought).putBoolean("d_weight", v.showWeightEstimate).apply()
+            .putBoolean("d_bought", v.showBought).apply()
+
+    /**
+     * The tile of [mode]; before tiles were set per stage, one set of checkboxes covered both, so a phone
+     * that never saved a layout starts from those choices.
+     */
+    private fun tileLayout(mode: ListMode): TileLayout {
+        TileLayout.decode(p.getString("tile_" + mode.name, null))?.let { return it }
+        var shown = TileLayout.defaultFor(mode).shown
+        fun off(key: String, default: Boolean, vararg elements: TileElement) {
+            if (!p.getBoolean(key, default)) shown = shown - elements.toSet()
+        }
+        off("d_qty", true, TileElement.QUANTITY)
+        off("d_stepper", true, TileElement.STEPPER)
+        off("d_price", true, TileElement.PRICE)
+        off("d_stats", true, TileElement.LAST_BOUGHT, TileElement.FREQUENCY)
+        off("d_last", true, TileElement.LAST_BOUGHT)
+        off("d_freq", true, TileElement.FREQUENCY)
+        off("d_fav", true, TileElement.FAVORITE)
+        off("d_weight", true, TileElement.WEIGHT)
+        if (p.getBoolean("d_by", false)) shown = shown + TileElement.ADDED_BY
+        return TileLayout(shown)
+    }
 
     /** Sort direction per stage of use: false = ascending. */
     fun descendingFor(mode: app.necessityq.domain.ListMode): Boolean = p.getBoolean("desc_" + mode.name, false)

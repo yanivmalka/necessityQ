@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -27,6 +28,9 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -35,6 +39,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.necessityq.BuildConfig
 import app.necessityq.domain.Account
+import app.necessityq.domain.ListMode
+import app.necessityq.domain.TileElement
 
 /**
  * Back action of the current page. Null on the bottom-bar tabs (they have no back button) and set on
@@ -93,15 +99,33 @@ fun DisplaySettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier) = Pag
     val current by vm.display.collectAsStateWithLifecycle()
     val sound by vm.chatSound.collectAsStateWithLifecycle()
 
+    var editing by remember { mutableStateOf<ListMode?>(null) }
     Text("מה להציג על כל פריט ברשימה", style = MaterialTheme.typography.titleMedium)
-    OptionRow("כמות", current.showQuantity) { vm.setDisplay(current.copy(showQuantity = it)) }
-    OptionRow("כפתורי כמות (+ / −)", current.showStepper) { vm.setDisplay(current.copy(showStepper = it)) }
-    OptionRow("מחירים", current.showPrices) { vm.setDisplay(current.copy(showPrices = it)) }
-    OptionRow("סטטיסטיקה (נקנה לאחרונה, תדירות)", current.showStats) { vm.setDisplay(current.copy(showStats = it)) }
+    Text(
+        "לכל שלב תצוגה משלו. נגיעה ברכיב באריח לדוגמה מסתירה או מחזירה אותו.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ListMode.entries.forEach { m ->
+            OutlinedButton(onClick = { editing = m }, modifier = Modifier.weight(1f)) {
+                Text("${m.label} · ${current.tile(m).shown.size}/${TileElement.entries.size}")
+            }
+        }
+    }
+    editing?.let { m ->
+        TileEditorDialog(
+            mode = m,
+            layout = current.tile(m),
+            onSave = { vm.setDisplay(current.withTile(m, it)); editing = null },
+            onDismiss = { editing = null },
+        )
+    }
+
+    Text("רשימה", style = MaterialTheme.typography.titleMedium)
     OptionRow("מחיר משוער בתחתית הרשימה", current.showTotal) { vm.setDisplay(current.copy(showTotal = it)) }
     OptionRow("מוצרי קירור והקפאה בסוף הרשימה", current.chilledLast) { vm.setDisplay(current.copy(chilledLast = it)) }
     OptionRow("מוצרים שסומנו או נמחקו (מחוקים בקו) בתחתית הרשימה", current.showBought) { vm.setDisplay(current.copy(showBought = it)) }
-    OptionRow("משקל מוערך לירקות ופירות שנספרים ביחידות", current.showWeightEstimate) { vm.setDisplay(current.copy(showWeightEstimate = it)) }
 
     Text("נגיעה בפריט", style = MaterialTheme.typography.titleMedium)
     app.necessityq.platform.TapMode.entries.forEach { mode ->
@@ -120,12 +144,11 @@ fun DisplaySettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier) = Pag
     Text("הודעות", style = MaterialTheme.typography.titleMedium)
     OptionRow("צליל כשמגיעה הודעה חדשה", sound) { vm.setChatSound(it) }
 
-    Text("פרטים בהמלצות ובפריטים", style = MaterialTheme.typography.titleMedium)
+    Text("פרטים בהמלצות", style = MaterialTheme.typography.titleMedium)
     OptionRow("סיבת ההמלצה", current.showReason) { vm.setDisplay(current.copy(showReason = it)) }
     OptionRow("מתי נקנה לאחרונה", current.showLastBought) { vm.setDisplay(current.copy(showLastBought = it)) }
     OptionRow("תדירות קנייה", current.showFrequency) { vm.setDisplay(current.copy(showFrequency = it)) }
     OptionRow("סימון מועדפים ★", current.showFavorite) { vm.setDisplay(current.copy(showFavorite = it)) }
-    OptionRow("מי הוסיף", current.showAddedBy) { vm.setDisplay(current.copy(showAddedBy = it)) }
 }
 
 @Composable
