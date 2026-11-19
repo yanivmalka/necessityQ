@@ -55,7 +55,7 @@ class SuggestionEngine(
                     kind = SuggestionKind.RUNNING_LOW,
                     quantity = s.typicalQuantity,
                     score = s.confidence * ratio.coerceAtMost(2.0),
-                    reason = runningLowReason(cadence, s.daysSinceLast(today)),
+                    reason = runningLowReason(cadence, s.daysSinceLast(today), s.lastPurchaseEstimated),
                 )
             }
             .sortedByDescending { it.score }
@@ -87,7 +87,8 @@ class SuggestionEngine(
     }
 
     companion object {
-        fun runningLowReason(cadenceDays: Double, daysSince: Long): String {
+        /** [estimated]: the last purchase is inferred, because later trips were not documented. */
+        fun runningLowReason(cadenceDays: Double, daysSince: Long, estimated: Boolean = false): String {
             val every = cadenceDays.roundToInt().coerceAtLeast(1)
             val cadenceText = when (every) {
                 1 -> "כל יום"
@@ -102,7 +103,7 @@ class SuggestionEngine(
                 2L -> "נקנה לפני יומיים"
                 else -> "נקנה לפני $daysSince ימים"
             }
-            return "בדרך כלל $cadenceText · $sinceText"
+            return if (estimated) "בדרך כלל $cadenceText · כנראה $sinceText (לא תועד)" else "בדרך כלל $cadenceText · $sinceText"
         }
     }
 }

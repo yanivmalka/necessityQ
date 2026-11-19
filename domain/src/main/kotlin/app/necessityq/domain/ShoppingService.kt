@@ -284,7 +284,7 @@ class ShoppingService(
                 repository.addPurchase(
                     householdId,
                     Purchase(
-                        id = "p_todo_$index",
+                        id = "${Purchase.TODO_PURCHASE_PREFIX}$index",
                         itemId = identity.id,
                         name = identity.name,
                         variant = identity.variant,

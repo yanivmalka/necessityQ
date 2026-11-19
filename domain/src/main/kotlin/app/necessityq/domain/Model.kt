@@ -104,6 +104,13 @@ data class Purchase(
     val storeId: String? = null,
 ) {
     val identity: ItemIdentity get() = ItemIdentity(name, variant, category)
+
+    /** Imported from the Microsoft To Do history rather than checked off in the app (see [TodoCoverage]). */
+    val isFromTodo: Boolean get() = id.startsWith(TODO_PURCHASE_PREFIX)
+
+    companion object {
+        const val TODO_PURCHASE_PREFIX = "p_todo_"
+    }
 }
 
 /** User feedback on a suggestion: hidden until [untilEpochDay]. */

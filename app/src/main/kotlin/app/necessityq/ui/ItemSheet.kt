@@ -379,6 +379,10 @@ fun ItemSheet(
                 stats?.let { s ->
                     val days = ChronoUnit.DAYS.between(s.lastPurchase, LocalDate.now())
                     InfoLine("נקנה לאחרונה", if (days <= 0) "היום" else "לפני $days ימים")
+                    if (s.lastPurchaseEstimated) {
+                        val est = ChronoUnit.DAYS.between(s.estimatedLastPurchase, LocalDate.now())
+                        InfoLine("הערכה", "היו קניות שלא תועדו · כנראה נקנה לפני $est ימים")
+                    }
                     // frequency and usual amount are in the rhythm card above
                     if (s.cadenceDays == null) InfoLine("תדירות", "אין עדיין מספיק היסטוריה")
                     InfoLine("נקנה", "${s.purchaseDays} פעמים")
