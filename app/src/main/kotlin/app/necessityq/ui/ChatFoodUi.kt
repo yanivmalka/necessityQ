@@ -1,5 +1,7 @@
 package app.necessityq.ui
 
+import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.filled.Add
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -342,6 +344,7 @@ private fun BubbleRow(
     var dragX by remember { mutableFloatStateOf(0f) }
     var armed by remember { mutableStateOf(false) }
     var showReactions by remember { mutableStateOf(false) }
+    var showAllEmoji by remember { mutableStateOf(false) }
     LaunchedEffect(selected) { if (!selected) showReactions = false }
     val authorColor = colorOf(m.authorId)
     val authorName = nameOf(m.authorId, m.authorName)
@@ -413,12 +416,15 @@ private fun BubbleRow(
                     bottomStart = round,
                     bottomEnd = round,
                 )
+                val reacted = m.reactions.isNotEmpty() && !m.isDeleted
                 Box {
                     Surface(
                         shape = shape,
                         color = if (mine) colors.myBubble else colors.theirBubble,
                         border = if (!mine) BorderStroke(1.dp, colors.hairline) else null,
                         modifier = Modifier
+                            // room under the bubble for the part of the reactions that hangs below it
+                            .padding(bottom = if (reacted) ReactionOverhang else 0.dp)
                             .widthIn(min = 64.dp, max = maxBubble)
                             .then(swipe)
                             .combinedClickable(
@@ -483,6 +489,13 @@ private fun BubbleRow(
                             }
                         }
                     }
+                    // the reactions sit on the bubble's lower edge, half over it, as in WhatsApp
+                    if (reacted) {
+                        ReactionChips(
+                            vm, m, nameOf, enabled = !readOnly,
+                            modifier = Modifier.align(if (mine) Alignment.BottomEnd else Alignment.BottomStart).padding(horizontal = 10.dp),
+                        )
+                    }
                     if (selected && showReactions) {
                         ReactionPicker(
                             mine = m.reactions[vm.me],
@@ -491,19 +504,50 @@ private fun BubbleRow(
                                 showReactions = false
                                 onSelect(null)
                             },
+                            onMore = { showReactions = false; showAllEmoji = true },
                             onDismiss = { showReactions = false },
                         )
                     }
                 }
-                if (m.reactions.isNotEmpty() && !m.isDeleted) ReactionChips(vm, m, nameOf, enabled = !readOnly)
             }
         }
+        // while a message is selected, a tap anywhere on a row (the highlight, a picture, a recording) answers
+        // the selection first: on the selected message it clears it, on another it selects that one instead
+        if (anySelected) {
+            Box(
+                Modifier.matchParentSize().combinedClickable(
+                    interactionSource = null,
+                    indication = null,
+                    onClick = { onSelect(if (selected) null else m) },
+                    onLongClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onSelect(m)
+                        showReactions = !readOnly && !m.isDeleted
+                    },
+                    onClickLabel = if (selected) "ביטול הבחירה" else "בחירת ההודעה",
+                ),
+            )
+        }
+    }
+    if (showAllEmoji) {
+        EmojiPickerSheet(
+            current = m.reactions[vm.me],
+            onPick = { emoji ->
+                vm.react(m, Reactions.toggle(m.reactions[vm.me], emoji))
+                showAllEmoji = false
+                onSelect(null)
+            },
+            onDismiss = { showAllEmoji = false },
+        )
     }
 }
 
-/** The row of quick emoji that opens above a long-pressed message. */
+/** How far the reactions (30dp tall) hang below the bubble they sit on; the rest lies over its edge. */
+private val ReactionOverhang = 18.dp
+
+/** The row of quick emoji that opens above a long-pressed message; its "+" opens all the emoji. */
 @Composable
-private fun ReactionPicker(mine: String?, onPick: (String) -> Unit, onDismiss: () -> Unit) {
+private fun ReactionPicker(mine: String?, onPick: (String) -> Unit, onMore: () -> Unit, onDismiss: () -> Unit) {
     val lift = with(LocalDensity.current) { 52.dp.roundToPx() }
     androidx.compose.ui.window.Popup(
         alignment = Alignment.TopCenter,
@@ -521,6 +565,24 @@ private fun ReactionPicker(mine: String?, onPick: (String) -> Unit, onDismiss: (
                         contentAlignment = Alignment.Center,
                     ) { Text(emoji, style = MaterialTheme.typography.titleLarge) }
                 }
+                // anything else: my reaction may already be an emoji from the full list, then "+" shows it
+                val other = mine?.takeIf { it !in Reactions.quick }
+                Box(
+                    Modifier.padding(start = 2.dp).size(38.dp)
+                        .background(
+                            if (other != null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                            CircleShape,
+                        )
+                        .clickable(onClick = onMore)
+                        .semantics { contentDescription = "עוד אימוג'י" },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (other != null) {
+                        Text(other, style = MaterialTheme.typography.titleLarge)
+                    } else {
+                        Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
             }
         }
     }
@@ -528,20 +590,36 @@ private fun ReactionPicker(mine: String?, onPick: (String) -> Unit, onDismiss: (
 
 /** The reactions under a message; a tap shows who reacted with what (and lets me take mine back). */
 @Composable
-private fun ReactionChips(vm: AppViewModel, m: ItemMessage, nameOf: (String, String) -> String, enabled: Boolean) {
+private fun ReactionChips(
+    vm: AppViewModel,
+    m: ItemMessage,
+    nameOf: (String, String) -> String,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
     var details by remember { mutableStateOf(false) }
     val summary = Reactions.summary(m.reactions)
+    // one reaction: a round badge, as in WhatsApp; more: a pill with the emoji and how many reacted
+    val single = summary.size == 1 && m.reactions.size == 1
+    // a plain (not clickable) Surface: a clickable one grows to 48dp and would no longer sit on the edge
     Surface(
-        onClick = { details = true },
-        shape = NqShapes.Pill,
+        shape = if (single) CircleShape else NqShapes.Pill,
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, NqTheme.colors.hairline),
-        modifier = Modifier.padding(horizontal = 8.dp).absoluteOffset(y = (-6).dp),
+        shadowElevation = 2.dp,
+        modifier = modifier.height(30.dp).then(if (single) Modifier.width(30.dp) else Modifier),
     ) {
-        Row(Modifier.padding(horizontal = 6.dp, vertical = 1.dp), verticalAlignment = Alignment.CenterVertically) {
-            summary.take(3).forEach { (emoji, _) -> Text(emoji, style = MaterialTheme.typography.bodyMedium) }
+        Row(
+            Modifier.fillMaxHeight()
+                .clickable(onClickLabel = "מי הגיב") { details = true }
+                .padding(horizontal = if (single) 0.dp else 8.dp)
+                .then(if (single) Modifier.fillMaxWidth() else Modifier),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            summary.take(3).forEach { (emoji, _) -> Text(emoji, fontSize = 16.sp) }
             if (m.reactions.size > 1) {
-                Text(" ${m.reactions.size}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(" ${m.reactions.size}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
