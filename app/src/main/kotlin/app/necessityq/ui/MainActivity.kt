@@ -131,6 +131,7 @@ private enum class Dest(val title: String) {
     LIST("רשימה"), MENU("תפריט"), PRICES("מחירים"), HOME("הבית"),
     HOUSEHOLD("הבית ומשתתפים"), MESSAGES("צ'אט פוד"), HISTORY("היסטוריה"), ACCOUNT("חשבון"),
     SETTINGS("הגדרות תצוגה"), APPEARANCE("מראה"), UPDATES("עדכונים"), ABOUT("אודות"),
+    FAMILY_MEMBER("בן/בת משפחה"),
 }
 
 /** The bottom-bar tabs, in order (the first is on the right). */
@@ -186,6 +187,8 @@ private fun Root(vm: AppViewModel) {
             var dest by rememberSaveable { mutableStateOf(Dest.LIST) }
             /** Where the back arrow of a secondary page leads; null on the tabs. */
             var backTo by rememberSaveable { mutableStateOf<Dest?>(null) }
+            /** The family member whose profile is open ("" = a new member). */
+            var familyMember by rememberSaveable { mutableStateOf("") }
             val unread by vm.unreadTotal.collectAsStateWithLifecycle()
             val update by vm.update.collectAsStateWithLifecycle()
             var openChat by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -314,7 +317,10 @@ private fun Root(vm: AppViewModel) {
                                         )
                                         Dest.MENU -> MenuScreen(vm, modifier, onInnerPage = { menuInnerPage = it })
                                         Dest.PRICES -> PricesScreen(vm, modifier)
-                                        else -> HomeHubScreen(vm, household.name, modifier, entries = hubEntries)
+                                        else -> HomeHubScreen(
+                                            vm, household.name, modifier, entries = hubEntries,
+                                            onOpenFamilyMember = { id -> familyMember = id.orEmpty(); go(Dest.FAMILY_MEMBER, from = Dest.HOME) },
+                                        )
                                     }
                                 }
                                 Dest.MESSAGES -> MessagesScreen(vm, modifier, onOpen = { itemId, name -> openChat = itemId to name })
@@ -325,6 +331,7 @@ private fun Root(vm: AppViewModel) {
                                 Dest.APPEARANCE -> AppearanceScreen(vm, modifier)
                                 Dest.UPDATES -> UpdatesScreen(vm, modifier)
                                 Dest.ABOUT -> AboutScreen(modifier)
+                                Dest.FAMILY_MEMBER -> MemberScreen(vm, familyMember.ifEmpty { null }, onBack = { back() }, modifier = modifier)
                                 // the tabs are never a page of their own (they live in the pager)
                                 Dest.LIST, Dest.MENU, Dest.PRICES, Dest.HOME -> Unit
                             }

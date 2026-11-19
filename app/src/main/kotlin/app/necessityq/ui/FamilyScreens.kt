@@ -176,6 +176,8 @@ fun MemberScreen(vm: AppViewModel, memberId: String?, onBack: () -> Unit, modifi
             )
             freed.withMember(draft)
         }
+        // my own profile: my account takes the same name, so the household and צ'אט פוד agree with the family
+        if (draft.linkedUserId != null && draft.linkedUserId == vm.me) vm.syncAccountName(draft.name)
         onBack()
     }
 

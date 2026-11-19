@@ -1,5 +1,7 @@
 package app.necessityq.ui
 
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.animation.AnimatedContent
@@ -95,7 +97,6 @@ private sealed interface MenuPage {
     data object Search : MenuPage
     data class Recipe(val dishId: String) : MenuPage
     data class EditRecipe(val dishId: String?) : MenuPage
-    data class Member(val memberId: String?) : MenuPage
 }
 
 private val shortDate = DateTimeFormatter.ofPattern("d.M")
@@ -138,7 +139,6 @@ fun MenuScreen(
                     onSaved = { id -> pop(); if (page.dishId == null) push(MenuPage.Recipe(id)) },
                     modifier = modifier,
                 )
-                is MenuPage.Member -> MemberScreen(vm, page.memberId, onBack = { pop() }, modifier = modifier)
             }
         }
     }
@@ -156,7 +156,6 @@ private fun MenuHome(vm: AppViewModel, modifier: Modifier, onOpen: (MenuPage) ->
     val horizon = 7 * data.plan.cycleWeeks
     var selected by rememberSaveable { mutableLongStateOf(todayDay) }
     var picking by remember { mutableStateOf<Pair<Long, MealSlot>?>(null) }
-    var claimMe by remember { mutableStateOf(false) }
     var showAllRecipes by remember { mutableStateOf(false) }
     /** Recipes ticked for deletion; null = not in selection mode. */
     var picked by remember { mutableStateOf<Set<String>?>(null) }
@@ -176,33 +175,6 @@ private fun MenuHome(vm: AppViewModel, modifier: Modifier, onOpen: (MenuPage) ->
             Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // ---- family ----
-            MenuCard("המשפחה") {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    items(data.members, key = { it.id }) { m ->
-                        MemberBubble(m, isMe = m.linkedUserId != null && m.linkedUserId == vm.me, age = m.ageLabel(today)) { onOpen(MenuPage.Member(m.id)) }
-                    }
-                    item {
-                        Column(Modifier.clickable { onOpen(MenuPage.Member(null)) }, horizontalAlignment = Alignment.CenterHorizontally) {
-                            Box(Modifier.size(56.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape), contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.Add, contentDescription = null)
-                            }
-                            Text("הוספה", style = MaterialTheme.typography.labelMedium)
-                        }
-                    }
-                }
-                val mine = data.memberFor(vm.me)
-                when {
-                    mine != null -> AssistChip(
-                        onClick = { onOpen(MenuPage.Member(mine.id)) },
-                        label = { Text("הדירוגים שלי (${mine.name})") },
-                        leadingIcon = { Icon(Icons.Default.Star, null, Modifier.size(18.dp)) },
-                    )
-                    vm.isShared && data.members.any { it.linkedUserId == null } ->
-                        TextButton(onClick = { claimMe = true }) { Text("אני ברשימה? קישור לחשבון שלי") }
-                }
-            }
-
             // ---- planning ahead ----
             MenuCard("תכנון קדימה") {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
@@ -398,40 +370,6 @@ private fun MenuHome(vm: AppViewModel, modifier: Modifier, onOpen: (MenuPage) ->
             },
             dismissButton = { TextButton(onClick = { confirmBulkDelete = false }) { Text("ביטול") } },
         )
-    }
-    if (claimMe) {
-        AlertDialog(
-            onDismissRequest = { claimMe = false },
-            title = { Text("מי את/ה?") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("בחירה מקשרת את החשבון שלך לבן/בת המשפחה, כדי שתוכל/י לדרג מאכלים בעצמך.", style = MaterialTheme.typography.bodySmall)
-                    data.members.filter { it.linkedUserId == null }.forEach { m ->
-                        Row(
-                            Modifier.fillMaxWidth().clickable {
-                                vm.updateMeals { it.withMember(m.copy(linkedUserId = vm.me)) }
-                                claimMe = false
-                            }.padding(vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            MemberAvatar(m, size = 36.dp)
-                            Spacer(Modifier.width(10.dp))
-                            Text(m.name, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { claimMe = false }) { Text("ביטול") } },
-        )
-    }
-}
-
-@Composable
-private fun MemberBubble(member: FamilyMember, isMe: Boolean, age: String?, onClick: () -> Unit) {
-    Column(Modifier.width(64.dp).clickable(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
-        MemberAvatar(member, size = 56.dp, selected = isMe)
-        Text(member.name, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(listOfNotNull(age, if (isMe) "אני" else null).joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
     }
 }
 
@@ -650,6 +588,14 @@ private fun PickDishDialog(vm: AppViewModel, data: MealData, epochDay: Long, slo
                             fontWeight = if (dish.id == current?.dishId) FontWeight.ExtraBold else FontWeight.Bold,
                             modifier = Modifier.weight(1f),
                         )
+                        // who in the family likes it (4 stars and up), from the ratings everyone keeps in sync
+                        val likers = data.members.filter { (data.rating(it.id, dish.id) ?: 0) >= 4 }
+                        if (likers.isNotEmpty()) {
+                            // slightly overlapping, as the avatars elsewhere in the app
+                            Box(Modifier.padding(end = 6.dp).semantics { contentDescription = "אוהבים: " + likers.joinToString { it.name } }) {
+                                likers.take(3).forEachIndexed { i, m -> MemberAvatar(m, size = 22.dp, modifier = Modifier.padding(start = (i * 14).dp)) }
+                            }
+                        }
                         if (score > 0) Text("+$score", style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.End)
                         if (dish.id == current?.dishId) Icon(Icons.Default.CheckCircle, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                     }
