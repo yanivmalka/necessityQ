@@ -327,7 +327,7 @@ fun ItemSheet(
                     QuantityStepper(line.quantity, onMinus = { vm.adjustQuantity(line, -1) }, onPlus = { vm.adjustQuantity(line, +1) }, onSet = { q, approved -> vm.changeQuantity(line, q, approved) },
                         itemName = line.displayName, check = { vm.quantityCheck(line, it) },
                     )
-                    UnitChooser(line.quantity?.unit, Modifier.weight(1f)) { vm.setQuantityUnit(line, it) }
+                    UnitChooser(line.quantity?.unit, app.necessityq.domain.QuantitySteps.choicesFor(line.name, line.category, line.quantity?.unit), Modifier.weight(1f)) { vm.setQuantityUnit(line, it) }
                 }
             }
             if (scrolled) HorizontalDivider()
@@ -1243,16 +1243,19 @@ private fun BranchComparison(c: app.necessityq.domain.PriceComparison, branches:
     }
 }
 
-/** Kind of quantity: none / piece / package / kilo / gram / litre (millilitres only once in use). */
+/**
+ * Kind of quantity: none and the units that fit the item ([shown], see QuantitySteps.choicesFor) — an avocado by the
+ * piece or by weight, never in litres.
+ */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun UnitChooser(
     current: app.necessityq.domain.QuantityUnit?,
+    shown: List<app.necessityq.domain.QuantityUnit>,
     modifier: Modifier = Modifier,
     onChoose: (app.necessityq.domain.QuantityUnit?) -> Unit,
 ) {
     val label = { u: app.necessityq.domain.QuantityUnit -> if (u == app.necessityq.domain.QuantityUnit.PACKAGE) "מארז" else u.label }
-    val shown = app.necessityq.domain.QuantitySteps.choices.filter { it != app.necessityq.domain.QuantityUnit.MILLILITER || current == it }
     // one line: scrolls sideways rather than wrapping
     Row(modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         androidx.compose.material3.FilterChip(selected = current == null, onClick = { onChoose(null) }, label = { Text("ללא") })

@@ -391,6 +391,35 @@ object QuantitySteps {
     /** The unit choices offered on an item, in the order shown ("ללא" = no quantity is fine too). */
     val choices: List<QuantityUnit> = listOf(QuantityUnit.PIECE, QuantityUnit.PACKAGE, QuantityUnit.KILOGRAM, QuantityUnit.GRAM, QuantityUnit.LITER, QuantityUnit.MILLILITER)
 
+    /**
+     * The unit choices that fit how [name] (in [category]) is bought, in the order of [choices]: produce, meat and fish
+     * by the piece or by weight but never in litres (an avocado), drinks by the bottle or the litre but not by weight,
+     * bread by the piece or the package. The unit in use ([current]) is always offered, so it can be seen and changed;
+     * millilitres only then. Unknown items ([Category.OTHER]) get every choice.
+     */
+    fun choicesFor(name: String, category: Category, current: QuantityUnit? = null): List<QuantityUnit> {
+        val words = HebrewText.matchKey(name).split(' ').filter { it.isNotBlank() }
+        fun any(vararg w: String) = words.any { it in w }
+        val liquid = any("שמן", "חומץ", "סילאן", "מיץ", "מים", "תרכיז", "נוזל", "סבון", "אקונומיקה", "מרכך", "שמפו", "משקה")
+        val count = setOf(QuantityUnit.PIECE, QuantityUnit.PACKAGE)
+        val weight = setOf(QuantityUnit.KILOGRAM, QuantityUnit.GRAM)
+        val volume = setOf(QuantityUnit.LITER)
+        val fit: Set<QuantityUnit> = when (category) {
+            Category.PRODUCE, Category.MEAT_FISH, Category.FROZEN -> count + weight
+            Category.DRINKS -> count + volume
+            Category.DAIRY -> count +
+                (if (words.firstOrNull() in setOf("חלב", "שמנת", "לבן", "משקה")) volume else emptySet()) +
+                (if (words.firstOrNull() == "גבינה") weight else emptySet())
+            Category.PANTRY -> count + (if (liquid) volume else weight)
+            Category.BREAKFAST_SNACKS ->
+                count + (if (any("אגוזים", "אגוזי", "שקדים", "פיצוחים", "גרעינים", "קשיו", "בוטנים", "צימוקים", "תמרים")) weight else emptySet())
+            Category.CLEANING, Category.TOILETRIES -> count + (if (liquid) volume else emptySet())
+            Category.BAKERY, Category.BABY -> count
+            Category.OTHER -> choices.toSet() - QuantityUnit.MILLILITER
+        }
+        return choices.filter { it in fit || it == current }
+    }
+
     /** A natural first amount for a unit: one piece / package / kilo / litre, half a kilo in grams. */
     fun defaultFor(unit: QuantityUnit): Quantity = when (unit) {
         QuantityUnit.GRAM, QuantityUnit.MILLILITER -> Quantity(500.0, unit)
