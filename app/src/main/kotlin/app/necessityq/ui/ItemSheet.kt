@@ -69,6 +69,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.alpha
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.ui.graphics.asImageBitmap
@@ -290,7 +291,41 @@ fun ItemSheet(
                 .verticalScroll(scroll).padding(horizontal = 16.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            // first: the products that can be bought for it and their prices, with the brand chooser
+            // first, in one row: missing (a toggle — filled while marked), remove, and the product's צ'אט פוד
+            val compact = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (line != null) {
+                    val missingContent: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
+                        Icon(Icons.Default.ReportProblem, null, Modifier.padding(end = 4.dp).size(18.dp))
+                        Text("חסר", maxLines = 1, softWrap = false)
+                    }
+                    if (line.missing) {
+                        androidx.compose.material3.FilledTonalButton(
+                            onClick = { vm.setMissing(line, false) },
+                            contentPadding = compact,
+                            modifier = Modifier.semantics { contentDescription = "מסומן כחסר — ביטול" },
+                            content = missingContent,
+                        )
+                    } else {
+                        OutlinedButton(onClick = { vm.setMissing(line, true) }, contentPadding = compact, content = missingContent)
+                    }
+                    OutlinedButton(onClick = { vm.delete(line); pageWindow.close() }, contentPadding = compact) {
+                        Icon(Icons.Default.Delete, null, Modifier.padding(end = 4.dp).size(18.dp))
+                        Text("הסרה", maxLines = 1, softWrap = false)
+                    }
+                } else {
+                    Button(onClick = { vm.addByName(itemName) }, contentPadding = compact) { Text("הוספה לרשימה", maxLines = 1, softWrap = false) }
+                }
+                OutlinedButton(
+                    onClick = { chat = itemId to (line?.displayName ?: itemName) },
+                    contentPadding = compact,
+                    modifier = Modifier.weight(1f).semantics { contentDescription = "צ'אט פוד על המוצר" },
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.Chat, null, Modifier.padding(end = 4.dp).size(18.dp))
+                    ChatFoodButtonLabel(messages = thread.size, unread = unread)
+                }
+            }
+            // then: the products that can be bought for it and their prices, with the brand chooser
             val priceInfo = rememberItemPriceInfo(vm, itemId, productName, productVariant)
             BranchPriceSection(vm, itemId = itemId, info = priceInfo)
             // the chosen product at every followed branch, like a stock ticker
@@ -305,40 +340,6 @@ fun ItemSheet(
                 }
                 app.necessityq.domain.QuantityNorms.warningFor(line, stats?.typicalQuantity)?.let { warning ->
                     LargeAmountNotice(warning.message(line.displayName)) { vm.changeQuantity(line, line.quantity, approved = true) }
-                }
-            }
-            // one row: missing (a toggle — filled while marked), remove, and the product's צ'אט פוד
-            androidx.compose.foundation.layout.FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                if (line != null) {
-                    val missingContent: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
-                        Icon(Icons.Default.ReportProblem, null, Modifier.padding(end = 4.dp).size(18.dp))
-                        Text("חסר")
-                    }
-                    if (line.missing) {
-                        androidx.compose.material3.FilledTonalButton(
-                            onClick = { vm.setMissing(line, false) },
-                            modifier = Modifier.semantics { contentDescription = "מסומן כחסר — ביטול" },
-                            content = missingContent,
-                        )
-                    } else {
-                        OutlinedButton(onClick = { vm.setMissing(line, true) }, content = missingContent)
-                    }
-                    OutlinedButton(onClick = { vm.delete(line); pageWindow.close() }) {
-                        Icon(Icons.Default.Delete, null, Modifier.padding(end = 4.dp).size(18.dp))
-                        Text("הסרה")
-                    }
-                } else {
-                    Button(onClick = { vm.addByName(itemName) }) { Text("הוספה לרשימה") }
-                }
-                OutlinedButton(
-                    onClick = { chat = itemId to (line?.displayName ?: itemName) },
-                    modifier = Modifier.semantics { contentDescription = "צ'אט פוד על המוצר" },
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Chat, null, Modifier.padding(end = 4.dp).size(18.dp))
-                    ChatFoodButtonLabel(messages = thread.size, unread = unread)
                 }
             }
             if (line?.missing == true) {
@@ -872,12 +873,11 @@ private fun BranchPriceSection(vm: AppViewModel, itemId: String, info: app.neces
     val filtered = info.candidates.filter { c ->
         (brand == null || c.brand.trim() == brand) && (pct == null || app.necessityq.domain.ItemPrices.hasPercent(c, pct!!))
     }
-    // the products in a block of their own, scrolling inside it
-    Box(
-        Modifier.fillMaxWidth().heightIn(max = 300.dp).clip(NqShapes.Panel)
-            .border(1.dp, NqTheme.colors.hairline, NqShapes.Panel),
-    ) {
-        LazyColumn(Modifier.fillMaxWidth(), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 4.dp)) {
+    // the products scroll up and down in a block of their own, with no visible frame — only the edges fade out
+    // where there is more to scroll to
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    Box(Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalFadingEdges(listState)) {
+        LazyColumn(Modifier.fillMaxWidth(), state = listState) {
             items(filtered, key = { it.code }) { c ->
                 val chosen = info.preferred?.code == c.code
                 BranchProductRow(c, chosen, onChoose = { vm.setPreferredProduct(itemId, if (chosen) null else c.code) })
@@ -1140,3 +1140,27 @@ private fun LargeAmountNotice(message: String, onConfirm: () -> Unit) {
         androidx.compose.material3.TextButton(onClick = onConfirm) { Text("כן, זו הכמות", color = fg, fontWeight = FontWeight.Bold) }
     }
 }
+
+/** Fades the top / bottom edge of a scrolling list out to nothing, each only while there is more to scroll that way. */
+private fun Modifier.verticalFadingEdges(state: androidx.compose.foundation.lazy.LazyListState, length: androidx.compose.ui.unit.Dp = 28.dp): Modifier =
+    this
+        .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            val fade = length.toPx().coerceAtMost(size.height / 3)
+            if (state.canScrollBackward) {
+                drawRect(
+                    Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black, startY = 0f, endY = fade),
+                    size = androidx.compose.ui.geometry.Size(size.width, fade),
+                    blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
+                )
+            }
+            if (state.canScrollForward) {
+                drawRect(
+                    Brush.verticalGradient(0f to Color.Black, 1f to Color.Transparent, startY = size.height - fade, endY = size.height),
+                    topLeft = androidx.compose.ui.geometry.Offset(0f, size.height - fade),
+                    size = androidx.compose.ui.geometry.Size(size.width, fade),
+                    blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
+                )
+            }
+        }

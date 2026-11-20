@@ -361,9 +361,14 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     // ---------- meal planning (conceptual) ----------
 
-    val meals: StateFlow<MealData> = householdId
-        .flatMapLatest { hid -> if (hid == null) emptyFlow() else container.meals.meals(hid) }
-        .catch { emit(MealData()) }
+    /** The household's meal data, null until it has been read (so nothing is written over it before then). */
+    private val loadedMeals: StateFlow<MealData?> = householdId
+        .flatMapLatest<String?, MealData?> { hid -> if (hid == null) emptyFlow() else container.meals.meals(hid) }
+        .catch { emit(null) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val meals: StateFlow<MealData> = loadedMeals
+        .map { it ?: MealData() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MealData())
 
     fun updateMeals(change: (MealData) -> MealData) {
@@ -1556,6 +1561,26 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         if (uid.isNotEmpty()) runCatching { container.chatPush?.unregister(uid) }
         container.household.signOut()
     }
+    /**
+     * The family and the participants are the same people: my account gets a family profile of its own. An unlinked
+     * profile with my name is linked to me; otherwise one is made with my name. Done once the family has been read
+     * from the household (never on the empty value before it loads, which would overwrite it).
+     */
+    fun ensureMyFamilyProfile() {
+        val uid = me
+        if (uid.isEmpty() || ctx() == null) return
+        val data = loadedMeals.value ?: return
+        if (data.memberFor(uid) != null) return
+        val account = members.value.firstOrNull { it.userId == uid } ?: return
+        val myName = account.displayName.trim().ifEmpty { return }
+        val same = data.members.filter { it.linkedUserId == null && it.name.trim() == myName }
+        updateMeals { d ->
+            if (d.memberFor(uid) != null) d
+            else if (same.size == 1) d.withMember(same.single().copy(linkedUserId = uid))
+            else d.withMember(app.necessityq.domain.FamilyMember(id = "account-$uid", name = myName, linkedUserId = uid))
+        }
+    }
+
     /** Only my account's name: my family profile was just saved with this name (see MemberScreen). */
     fun syncAccountName(name: String) {
         val clean = name.trim()
