@@ -363,7 +363,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     /** The household's meal data, null until it has been read (so nothing is written over it before then). */
     private val loadedMeals: StateFlow<MealData?> = householdId
-        .flatMapLatest { hid -> if (hid == null) emptyFlow() else container.meals.meals(hid) }
+        .flatMapLatest<String?, MealData?> { hid -> if (hid == null) emptyFlow() else container.meals.meals(hid) }
         .catch { emit(null) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
