@@ -76,15 +76,16 @@ data class LineCost(val low: Double, val high: Double, val estimatedWeight: Quan
 
 object LineCosts {
     /**
-     * For a line whose matching products are sold by weight (price per kg) and that has a quantity:
-     * the price times the weight — the estimated one when counted in pieces. Null otherwise
-     * (packaged products keep their per-package display).
+     * For a line whose matching products are sold by weight and that has a quantity: the price per kilo
+     * ([BranchProduct.pricePerKilo], so a price per 100 g counts ×10) times the weight — the estimated one when
+     * counted in pieces. Products whose price unit is not recognised are left out; null when none is left, and
+     * for packaged products (they keep their per-package display).
      */
     fun weighted(line: ListLine, info: ItemPriceInfo): LineCost? {
         val quantity = line.quantity ?: return null
         val (low, high) = when {
-            info.preferred != null -> if (info.preferred.soldByWeight) info.preferred.price to info.preferred.price else return null
-            else -> ItemPrices.typicalRange(info.candidates.filter { it.soldByWeight }.map { it.price }) ?: return null
+            info.preferred != null -> info.preferred.pricePerKilo?.let { it to it } ?: return null
+            else -> ItemPrices.typicalRange(info.candidates.mapNotNull { it.pricePerKilo }) ?: return null
         }
         val kilos = ListCost.packages(quantity, true, PieceWeights.gramsPerPiece(line.name)) ?: return null
         return LineCost(low * kilos, high * kilos, PieceWeights.estimate(line.name, quantity))

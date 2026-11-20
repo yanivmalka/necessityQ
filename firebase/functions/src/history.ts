@@ -42,6 +42,7 @@ export function mergeSnapshot(
       b: raw.brand,
       q: raw.qty,
       u: raw.unit,
+      m: raw.measure,
       w: raw.weighted,
       i: raw.internal,
       p: raw.price,

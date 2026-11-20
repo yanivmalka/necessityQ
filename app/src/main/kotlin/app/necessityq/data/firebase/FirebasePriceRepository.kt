@@ -166,6 +166,7 @@ class FirebasePriceRepository(
                     brand = s("b"),
                     packageSize = d("q"),
                     unit = s("u"),
+                    measure = s("m"), // missing in older snapshots → "" (falls back to unit)
                     weighted = b("w"),
                     internalCode = b("i"),
                     price = price,

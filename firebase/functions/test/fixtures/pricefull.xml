@@ -46,6 +46,18 @@
       <ItemPrice>7.90</ItemPrice>
     </Item>
     <Item>
+      <PriceUpdateDate>2026-11-15 09:12:00</PriceUpdateDate>
+      <ItemCode>2000123</ItemCode>
+      <ItemType>0</ItemType>
+      <ItemName>זיתי קלמטה במשקל</ItemName>
+      <UnitQty>גרם</UnitQty>
+      <Quantity>100.00</Quantity>
+      <bIsWeighted>1</bIsWeighted>
+      <UnitOfMeasure>100  גרם</UnitOfMeasure>
+      <ItemPrice>4.90</ItemPrice>
+      <UnitOfMeasurePrice>4.90</UnitOfMeasurePrice>
+    </Item>
+    <Item>
       <ItemCode>7290000042015</ItemCode>
       <ItemName>כפול</ItemName>
       <ItemPrice>99</ItemPrice>

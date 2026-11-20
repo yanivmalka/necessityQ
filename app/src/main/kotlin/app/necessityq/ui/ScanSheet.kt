@@ -175,10 +175,14 @@ private fun ScanContent(vm: AppViewModel, r: ScanResult) {
         if (r.elsewhere.isNotEmpty()) {
             HorizontalDivider()
             Text("בסניפים האחרים שלך", style = MaterialTheme.typography.titleSmall)
+            // in the unit of the product shown (per 100 g or per kg alike); a branch whose unit can't be matched shows its own
+            val inUnit = r.prices
             r.elsewhere.forEach { hit ->
-                Row {
+                val price = inUnit[hit.branchId]
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(title(hit.branchId), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                    Text(PriceData.formatPrice(hit.product.price), fontWeight = FontWeight.Bold)
+                    if (price == null) Text("ביחידה אחרת  ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(PriceData.formatPrice(price ?: hit.product.price), fontWeight = FontWeight.Bold)
                 }
             }
             r.range?.takeIf { it.high - it.low >= 0.005 && hereProduct != null && hereProduct.price > it.low }?.let { range ->

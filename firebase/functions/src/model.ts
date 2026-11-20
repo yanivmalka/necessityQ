@@ -45,6 +45,11 @@ export interface RawItem {
   qty: number | null;
   /** unit of the package size, e.g. "גרם" */
   unit: string;
+  /**
+   * `UnitOfMeasure` as published: what `price` is per when the item is weighted, e.g. "100 גרם" or "ק\"ג".
+   * Kept apart from `unit` (which prefers `UnitQty`) so the amount ("100") is not lost.
+   */
+  measure: string;
   weighted: boolean;
   price: number;
   unitPrice: number | null;
@@ -60,6 +65,7 @@ export interface SnapshotItem {
   b: string; // brand / manufacturer
   q: number | null; // package size
   u: string; // unit
+  m?: string; // unit of measure as published ("100 גרם"); missing in snapshots written before it was kept
   w: boolean; // weighted
   i: boolean; // internal code
   p: number; // current price

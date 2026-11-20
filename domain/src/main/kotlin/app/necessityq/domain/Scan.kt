@@ -41,13 +41,21 @@ data class ScanResult(
 ) {
     val product: BranchProduct? get() = here ?: elsewhere.firstOrNull()?.product
     val found: Boolean get() = product != null
-    val range: CrossBranchRange? get() {
-        val all = listOfNotNull(here?.let { branchId!! to it.price }) + elsewhere.map { it.branchId to it.product.price }
-        if (all.isEmpty()) return null
-        val low = all.minOf { it.second }
-        val high = all.maxOf { it.second }
-        return CrossBranchRange(low, high, all.filter { it.second == low }.map { it.first }, all.size)
+
+    /**
+     * Branch id → the price there in the price unit of [product] (per 100 g, per kg or per package; see
+     * [PriceComparisons.inUnitOf]). Branches where it can't be put in that unit are left out.
+     */
+    val prices: Map<String, Double> get() {
+        val reference = product ?: return emptyMap()
+        return all().mapNotNull { (id, p) -> PriceData.inUnitOf(reference, p)?.let { id to it } }.toMap()
     }
+
+    /** Range over the branches, in the price unit of [product]; branches whose unit can't be matched are left out. */
+    val range: CrossBranchRange? get() = product?.let { PriceData.rangeIn(it, all()) }
+
+    private fun all(): List<Pair<String, BranchProduct>> =
+        listOfNotNull(here?.let { branchId!! to it }) + elsewhere.map { it.branchId to it.product }
 }
 
 object Scan {
@@ -97,8 +105,9 @@ object Scan {
         val code = Barcodes.normalize(rawCode) ?: return null
         fun at(bp: BranchPrices) = bp.products.firstOrNull { Barcodes.same(it.code, code) }
         val here = branchId?.let { prices[it] }?.let(::at)
+        // cheapest first, per kilo for those sold by weight (4.90 per 100 g is dearer than 39 per kg); unknown units last
         val elsewhere = prices.filterKeys { it != branchId }.mapNotNull { (id, bp) -> at(bp)?.let { ScanHit(id, it) } }
-            .sortedBy { it.product.price }
+            .sortedWith(compareBy({ it.product.soldByWeight && it.product.pricePerKilo == null }, { it.product.pricePerKilo ?: it.product.price }))
         val product = here ?: elsewhere.firstOrNull()?.product
 
         val live = lines.filter { it.status == LineStatus.NEEDED || it.status == LineStatus.BOUGHT }
@@ -116,7 +125,8 @@ object Scan {
         val similar = if (here != null && branchId != null && identity != null) {
             prices[branchId]?.let { bp -> ItemPrices.candidates(ProductIndex(branchId, bp.updatedAtMillis, bp.products), identity.name, identity.variant) }
         } else null
-        val verdict = here?.let { PriceVerdicts.of(it, elsewhere.map { h -> h.product.price }, similar.orEmpty()) }
+        // the other branches' prices in this product's unit; those that can't be matched are not compared
+        val verdict = here?.let { PriceVerdicts.of(it, elsewhere.mapNotNull { h -> PriceComparisons.inUnitOf(it, h.product) }, similar.orEmpty()) }
         return ScanResult(
             verdict = verdict,
             code = code,

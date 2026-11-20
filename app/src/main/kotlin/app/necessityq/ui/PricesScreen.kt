@@ -302,7 +302,11 @@ private fun ProductsTab(vm: AppViewModel, mine: List<PriceBranch>, status: Map<S
     }
 }
 
-/** One product at each chosen branch: the cheapest marked, the others with how much dearer they are. */
+/**
+ * One product at each chosen branch: the cheapest marked, the others with how much dearer they are. Prices are in
+ * the price unit of the listed product (per 100 g or per kg alike); a branch whose unit can't be matched shows its
+ * own price, unmarked.
+ */
 @Composable
 private fun CompareCard(r: app.necessityq.domain.ProductAcross, chosen: List<PriceBranch>) {
     val p = r.product
@@ -318,7 +322,8 @@ private fun CompareCard(r: app.necessityq.domain.ProductAcross, chosen: List<Pri
             val cheapestIds = r.cheapestBranchIds
             chosen.forEach { b ->
                 val at = r.at[b.id]
-                val cheapest = at != null && b.id in cheapestIds && r.at.size > 1
+                val price = r.prices[b.id]
+                val cheapest = price != null && b.id in cheapestIds && r.prices.size > 1
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         b.title,
@@ -330,10 +335,15 @@ private fun CompareCard(r: app.necessityq.domain.ProductAcross, chosen: List<Pri
                     )
                     when {
                         at == null -> Text("לא נמכר", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        // sold there, but priced per a unit that can't be matched: its own price, not compared
+                        price == null -> {
+                            Text("ביחידה אחרת  ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(PriceData.formatPrice(at.price), style = MaterialTheme.typography.bodyMedium)
+                        }
                         else -> {
                             if (cheapest) Text("הזול  ", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                            else if (r.at.size > 1 && r.cheapest > 0) {
-                                val diff = at.price / r.cheapest - 1
+                            else if (r.prices.size > 1 && r.cheapest > 0) {
+                                val diff = price / r.cheapest - 1
                                 if (diff >= 0.005) Text(
                                     "+${app.necessityq.domain.PriceComparisons.percent(diff)}  ",
                                     style = MaterialTheme.typography.labelSmall,
@@ -341,7 +351,7 @@ private fun CompareCard(r: app.necessityq.domain.ProductAcross, chosen: List<Pri
                                 )
                             }
                             Text(
-                                PriceData.formatPrice(at.price),
+                                PriceData.formatPrice(price),
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = if (cheapest) FontWeight.ExtraBold else FontWeight.SemiBold,
                                 color = if (cheapest) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,

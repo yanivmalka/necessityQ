@@ -12,6 +12,8 @@ import { Source, parseLaibFiles, parsePublishPricePage, parseShufersalPage } fro
 import { decodePayload } from "../src/xml";
 
 const fixture = (name: string) => new Uint8Array(readFileSync(join(__dirname, "fixtures", name)));
+const raw = (code: string, price: number): RawItem => ({ code, name: code, brand: "", qty: null, unit: "", measure: "", weighted: false, price, unitPrice: null, internal: false, updated: "" });
+const meta = { file: "f", stamp: "s", now: "2026-11-16T03:00:00Z" };
 
 describe("file names", () => {
   it("reads kind, store and stamp from the common patterns", () => {
@@ -53,10 +55,28 @@ describe("decoding and parsing", () => {
   it("parses a gzipped PriceFull, tolerating an unescaped & and skipping zero prices", () => {
     const { storeId, items } = parsePrices(decodePayload(fixture("pricefull.xml.gz")));
     expect(storeId).toBe("39");
-    expect(items).toHaveLength(4);
-    expect(items[0]).toMatchObject({ code: "7290000042015", name: "חלב תנובה 3% 1 ליטר", brand: "תנובה", price: 6.2, unitPrice: 6.2, qty: 1, unit: "ליטר", weighted: false, internal: false });
+    expect(items).toHaveLength(5);
+    expect(items[0]).toMatchObject({ code: "7290000042015", name: "חלב תנובה 3% 1 ליטר", brand: "תנובה", price: 6.2, unitPrice: 6.2, qty: 1, unit: "ליטר", measure: "ליטר", weighted: false, internal: false });
     expect(items[1].name).toContain("קוטג' 5%");
-    expect(items[2]).toMatchObject({ code: "1234", weighted: true, internal: true, price: 7.9 });
+    expect(items[2]).toMatchObject({ code: "1234", weighted: true, internal: true, price: 7.9, unit: "קילו", measure: "" });
+  });
+
+  it("keeps UnitOfMeasure apart from UnitQty, so a weighted price per 100 g keeps its 100", () => {
+    const { items } = parsePrices(decodePayload(fixture("pricefull.xml")));
+    const olives = items.find((i) => i.code === "2000123");
+    // UnitQty "גרם" still fills `unit`; the price is per UnitOfMeasure, spacing collapsed
+    expect(olives).toMatchObject({ weighted: true, price: 4.9, unit: "גרם", measure: "100 גרם" });
+    const snap = mergeSnapshot("b", null, items, "2026-11-16", 90, { file: "f", stamp: "s", now: "2026-11-16T03:00:00Z" });
+    expect(snap.items.find((i) => i.c === "2000123")).toMatchObject({ u: "גרם", m: "100 גרם", w: true, p: 4.9 });
+  });
+
+  it("reads snapshots written before the unit of measure was kept", () => {
+    const old = mergeSnapshot("b", null, [raw("a", 10)], "2026-11-01", 90, meta);
+    delete old.items[0].m; // as in an older file
+    const snap = mergeSnapshot("b", old, [raw("b", 2)], "2026-11-02", 90, meta, true);
+    expect(snap.items.find((i) => i.c === "a")).toMatchObject({ p: 10, u: "" });
+    expect(snap.items.find((i) => i.c === "a")?.m).toBeUndefined();
+    expect(snap.items.find((i) => i.c === "b")?.m).toBe("");
   });
 
   it("matches city spellings", () => {
@@ -96,8 +116,6 @@ describe("listing pages", () => {
 });
 
 describe("history and ranges", () => {
-  const raw = (code: string, price: number): RawItem => ({ code, name: code, brand: "", qty: null, unit: "", weighted: false, price, unitPrice: null, internal: false, updated: "" });
-  const meta = { file: "f", stamp: "s", now: "2026-11-16T03:00:00Z" };
 
   it("records changes only and keeps the day the current price started", () => {
     let snap: Snapshot | null = null;
@@ -173,8 +191,9 @@ describe("config and scheduling", () => {
     const report = await tick({ ...DEFAULT_CONFIG, chains: ["ramilevy"] }, { store: mem, sourceFor: () => fake, now: () => new Date("2026-11-16T04:00:00Z") }, 60_000);
     expect(mem.index.branches.map((b) => b.id)).toEqual(["ramilevy_52", "ramilevy_39"]); // sorted by name: הר חוצבים, תלפיות
     expect(mem.index.branches.find((b) => b.id === "ramilevy_39")).toMatchObject({ lat: 31.75, lng: 35.21, chainName: "רמי לוי", city: "3000" });
-    expect(mem.snapshots.get("ramilevy_39")?.items).toHaveLength(3); // duplicate line dropped
-    expect(mem.status.get("ramilevy_39")).toMatchObject({ items: 3, error: null });
+    expect(mem.snapshots.get("ramilevy_39")?.items).toHaveLength(4); // duplicate line dropped
+    expect(mem.snapshots.get("ramilevy_39")?.items.find((i) => i.c === "2000123")?.m).toBe("100 גרם");
+    expect(mem.status.get("ramilevy_39")).toMatchObject({ items: 4, error: null });
     expect(mem.status.get("ramilevy_52")?.error).toContain("no PriceFull/Price file for store 52");
     expect(mem.status.get("ramilevy_52")?.error).toContain("price files for 1 stores (39)");
     expect(report.join("\n")).toContain("branches: 2");
@@ -193,7 +212,7 @@ describe("config and scheduling", () => {
     const mem = memoryStore([]);
     const branch = { id: "ramilevy_52", storeId: "52", chainKey: "ramilevy" } as Branch;
     const st = await refreshBranchPrices(branch, DEFAULT_CONFIG, { store: mem, sourceFor: () => fake, now: () => new Date("2026-11-16T04:00:00Z") });
-    expect(st).toMatchObject({ error: null, items: 3, sourceFile: "Price7290058140886-052-202611160300.gz" });
+    expect(st).toMatchObject({ error: null, items: 4, sourceFile: "Price7290058140886-052-202611160300.gz" });
   });
 });
 
