@@ -115,18 +115,24 @@ object ListRules {
         data class Merge(val lineId: String, val quantity: Quantity?) : AddDecision
     }
 
-    fun decideAdd(existing: List<ListLine>, itemId: String, quantity: Quantity?): AddDecision {
+    /** [name]: the item's name, so pieces and a weight of produce can be added up (see [combine]). */
+    fun decideAdd(existing: List<ListLine>, itemId: String, quantity: Quantity?, name: String? = null): AddDecision {
         val open = existing.firstOrNull { it.itemId == itemId && it.status == LineStatus.NEEDED }
             ?: return AddDecision.New(quantity)
-        val current = open.quantity
-        val merged: Quantity? = if (current == null) {
-            quantity
-        } else if (quantity == null) {
-            current
-        } else {
-            (current + quantity) ?: quantity // different dimensions: the newer entry wins
-        }
-        return AddDecision.Merge(open.id, merged)
+        return AddDecision.Merge(open.id, combine(name ?: open.name, open.quantity, quantity))
+    }
+
+    /**
+     * [current] and [added] together, for an item called [name]. Different dimensions are added up through the
+     * average weight of a piece when it is known ("2 בצל" and "300 גרם בצל" → 520 גרם, in the unit already on the
+     * list); otherwise the newer entry wins.
+     */
+    fun combine(name: String, current: Quantity?, added: Quantity?): Quantity? {
+        if (current == null) return added
+        if (added == null) return current
+        (current + added)?.let { return it }
+        val converted = PieceWeights.convert(name, added, current.dimension) ?: return added
+        return (current + converted) ?: added
     }
 
     /** Lines grouped by category in store-walk order, needed first, bought at the bottom. */

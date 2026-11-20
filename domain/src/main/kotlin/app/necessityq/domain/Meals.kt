@@ -388,6 +388,13 @@ object Recipes {
         return if (q.dimension == Dimension.COUNT) Quantity(amount, q.unit) else Quantity.fromBase(amount * q.unit.toBase, q.dimension)
     }
 
+    /**
+     * The amount a recipe means when its line has none: one piece of produce counted by the piece ("בצל" = one
+     * onion). Null for everything else ("שמן זית", "רסק"): a bottle or a can serves several recipes.
+     */
+    fun defaultAmount(item: ItemIdentity): Quantity? =
+        if (PieceWeights.gramsPerPiece(item.name) != null) Quantity.pieces(1) else null
+
     /** One ingredient line as shown for [servings]: "6 ביצים" for "4 ביצים" ×1.5. */
     fun display(dish: Dish, text: String, servings: Int): String {
         val parsed = QuickEntryParser.parse(text) ?: return text
@@ -520,6 +527,64 @@ object RecipeEdits {
         val parsed = QuickEntryParser.parse(typed) ?: return dish
         val stored = parsed.quantity?.let { format(toYield(it, dish, servings), nameOf(parsed)) } ?: typed.trim()
         return dish.copy(ingredients = dish.ingredients + stored)
+    }
+}
+
+/**
+ * Puts the menu's ingredients on the list so there is enough for every planned meal. Each line keeps how much of
+ * it each dish needs ([RecipePart] with fromMenu); adding the menu again sets those parts to what the meals need
+ * now and changes the line by the difference. So two dishes that share an ingredient add up ("6 עגבניות" for
+ * shakshuka and "4 עגבניות" for a salad → 10), the same dish on two days counts twice, and pressing the button
+ * again changes nothing. Amounts added by hand or from the recipe screen are kept on top.
+ */
+object MenuListSync {
+    sealed interface Change {
+        data class Add(val item: ItemIdentity, val quantity: Quantity?, val parts: List<RecipePart>) : Change
+        data class Update(val lineId: String, val quantity: Quantity?, val parts: List<RecipePart>) : Change
+    }
+
+    /** Per item: what each dish needs (summed over its meals), in the order the items first appear. */
+    fun needs(ingredients: List<Pair<ScaledIngredient, String>>): List<Pair<ItemIdentity, List<RecipePart>>> =
+        ingredients.groupBy { it.first.item.id }.values.map { group ->
+            val item = group.first().first.item
+            val parts = group.groupBy { it.second }.map { (dish, uses) ->
+                val q = uses.map { it.first.quantity ?: Recipes.defaultAmount(item) }
+                    .reduce { a, b -> ListRules.combine(item.name, a, b) }
+                RecipePart(dish, q, fromMenu = true)
+            }
+            item to parts
+        }
+
+    /** Total of [parts] for an item called [name]. */
+    fun total(name: String, parts: List<RecipePart>): Quantity? =
+        parts.map { it.quantity }.fold(null as Quantity?) { acc, q -> ListRules.combine(name, acc, q) }
+
+    fun plan(lines: List<ListLine>, ingredients: List<Pair<ScaledIngredient, String>>): List<Change> =
+        needs(ingredients).mapNotNull { (item, parts) ->
+            val open = lines.firstOrNull { it.status == LineStatus.NEEDED && it.itemId == item.id }
+                ?: return@mapNotNull Change.Add(item, total(item.name, parts), parts)
+            val dishes = parts.map { it.dish }.toSet()
+            val before = open.recipeParts.filter { it.fromMenu && it.dish in dishes }
+            val nextParts = open.recipeParts.filterNot { it.fromMenu && it.dish in dishes } + parts
+            val quantity = adjusted(item.name, open.quantity, total(item.name, before), total(item.name, parts))
+            if (quantity == open.quantity && nextParts.toSet() == open.recipeParts.toSet()) null
+            else Change.Update(open.id, quantity, nextParts)
+        }
+
+    /** [current] without what the menu asked for [before], plus what it asks for [now]. */
+    internal fun adjusted(name: String, current: Quantity?, before: Quantity?, now: Quantity?): Quantity? {
+        if (current == null) return now
+        if (now == null) return current
+        if (before == null) return ListRules.combine(name, current, now)
+        val was = PieceWeights.convert(name, before, current.dimension)
+        val target = PieceWeights.convert(name, now, current.dimension)
+        if (was == null || target == null) return ListRules.combine(name, current, now)
+        val base = current.baseAmount - was.baseAmount + target.baseAmount
+        return when {
+            base <= 1e-9 -> target
+            current.dimension == Dimension.COUNT -> Quantity(base, current.unit)
+            else -> Quantity.fromBase(base, current.dimension)
+        }
     }
 }
 

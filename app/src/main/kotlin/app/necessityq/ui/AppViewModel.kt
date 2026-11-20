@@ -436,12 +436,39 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         val items = MealPlanner.ingredientsFor(meals.value, fromEpochDay, days)
         if (items.isEmpty()) { _messages.tryEmit("אין ארוחות מתוכננות בימים האלה"); return }
         launchSafe {
-            var lines = snapshot.value?.lines.orEmpty()
-            items.forEach { (ingredient, dish) ->
-                container.service.add(hid, uid, ingredient.item, ingredient.quantity, LineSource.MENU, lines, recipe = dish)
+            // one line per ingredient with enough for every meal that needs it; pressing again changes nothing
+            var lines = container.service.snapshot(hid).first().lines
+            val changes = app.necessityq.domain.MenuListSync.plan(lines, items)
+            var added = 0
+            var updated = 0
+            changes.forEach { change ->
+                when (change) {
+                    is app.necessityq.domain.MenuListSync.Change.Add -> {
+                        container.service.add(hid, uid, change.item, change.quantity, LineSource.MENU, lines, recipe = change.parts.first().dish)
+                        lines = container.service.snapshot(hid).first().lines
+                        if (change.parts.size > 1) {
+                            lines.firstOrNull { it.itemId == change.item.id && it.status == app.necessityq.domain.LineStatus.NEEDED }
+                                ?.let { container.service.setRecipeParts(hid, it, change.parts) }
+                        }
+                        added++
+                    }
+                    is app.necessityq.domain.MenuListSync.Change.Update -> {
+                        val line = lines.firstOrNull { it.id == change.lineId } ?: return@forEach
+                        if (change.quantity != line.quantity) container.service.changeQuantity(hid, line, change.quantity)
+                        container.service.setRecipeParts(hid, line, change.parts)
+                        updated++
+                    }
+                }
                 lines = container.service.snapshot(hid).first().lines
             }
-            _messages.tryEmit("נוספו ${items.size} מרכיבים מהתפריט לרשימה")
+            _messages.tryEmit(
+                when {
+                    changes.isEmpty() -> "הרשימה כבר מספיקה לכל הארוחות בתפריט"
+                    updated == 0 -> "נוספו $added מרכיבים מהתפריט לרשימה"
+                    added == 0 -> "עודכנו $updated מרכיבים ברשימה כך שיספיקו לכל הארוחות"
+                    else -> "נוספו $added מרכיבים ועודכנו $updated, כך שיספיקו לכל הארוחות"
+                },
+            )
         }
     }
 
