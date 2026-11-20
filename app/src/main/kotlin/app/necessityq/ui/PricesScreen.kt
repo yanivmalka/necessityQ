@@ -310,6 +310,7 @@ private fun ProductsTab(vm: AppViewModel, mine: List<PriceBranch>, status: Map<S
 @Composable
 private fun CompareCard(r: app.necessityq.domain.ProductAcross, chosen: List<PriceBranch>) {
     val p = r.product
+    val unit = LocalWeightPriceUnit.current
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(verticalAlignment = Alignment.Top) {
@@ -317,7 +318,7 @@ private fun CompareCard(r: app.necessityq.domain.ProductAcross, chosen: List<Pri
                     Text(p.name, fontWeight = FontWeight.Bold)
                     productDetails(p)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 }
-                Text(PriceData.formatPrice(r.cheapest), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+                Text(shownProductPrice(p, r.cheapest, unit), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
             }
             val cheapestIds = r.cheapestBranchIds
             chosen.forEach { b ->
@@ -338,7 +339,7 @@ private fun CompareCard(r: app.necessityq.domain.ProductAcross, chosen: List<Pri
                         // sold there, but priced per a unit that can't be matched: its own price, not compared
                         price == null -> {
                             Text("ביחידה אחרת  ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(PriceData.formatPrice(at.price), style = MaterialTheme.typography.bodyMedium)
+                            Text(shownProductPrice(at, at.price, unit), style = MaterialTheme.typography.bodyMedium)
                         }
                         else -> {
                             if (cheapest) Text("הזול  ", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
@@ -351,7 +352,7 @@ private fun CompareCard(r: app.necessityq.domain.ProductAcross, chosen: List<Pri
                                 )
                             }
                             Text(
-                                PriceData.formatPrice(price),
+                                shownProductPrice(p, price, unit),
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = if (cheapest) FontWeight.ExtraBold else FontWeight.SemiBold,
                                 color = if (cheapest) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
@@ -373,6 +374,7 @@ private fun productDetails(p: BranchProduct): String? = listOfNotNull(
 
 @Composable
 private fun ProductCard(p: BranchProduct, rangeDays: Int, comparison: app.necessityq.domain.PriceComparison?, mine: List<PriceBranch>) {
+    val unit = LocalWeightPriceUnit.current
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.Top) {
@@ -380,19 +382,22 @@ private fun ProductCard(p: BranchProduct, rangeDays: Int, comparison: app.necess
                     Text(p.name, fontWeight = FontWeight.Bold)
                     productDetails(p)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 }
-                Text(PriceData.formatPrice(p.price), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+                Text(shownProductPrice(p, p.price, unit), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
             }
-            Text("טווח $rangeDays יום בסניף: ${PriceData.formatRange(p.low, p.high)}", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "טווח $rangeDays יום בסניף: " + if (p.high > p.low) "${shownProductPrice(p, p.low, unit)}–${shownProductPrice(p, p.high, unit)}" else shownProductPrice(p, p.low, unit),
+                style = MaterialTheme.typography.bodyMedium,
+            )
             p.unitPrice?.let { Text("מחיר ליחידת מידה: ${PriceData.formatPrice(it)}", style = MaterialTheme.typography.bodySmall) }
             if (p.since.isNotBlank()) Text("במחיר הזה מאז ${p.since.split('-').reversed().joinToString("/")}", style = MaterialTheme.typography.bodySmall)
             if (comparison != null) {
-                val quotes = listOf(comparison.here) + comparison.others
+                val quotes = (listOf(comparison.here) + comparison.others).map { comparison.shown(it, unit) }
                 val low = quotes.minOf { it.low }
                 val high = quotes.maxOf { it.high }
                 val cheapest = mine.firstOrNull { it.id == comparison.cheapestBranchId }?.title
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
                     Text(
-                        "בסניפים שלך (${quotes.size}): ${PriceData.formatRange(low, high)}" + if (high > low && cheapest != null) " · הזול: $cheapest" else "",
+                        "בסניפים שלך (${quotes.size}): ${PriceData.formatRange(low, high)}${if (comparison.unitKilos != null) " " + unit.label else ""}" + if (high > low && cheapest != null) " · הזול: $cheapest" else "",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.weight(1f),
