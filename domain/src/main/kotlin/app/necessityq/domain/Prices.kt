@@ -51,6 +51,11 @@ data class BranchProduct(
     val high: Double,
     /** [day, price] changes, oldest first */
     val history: List<Pair<String, Double>> = emptyList(),
+    /**
+     * The file's `UnitOfMeasure`: what [price] is per when sold by weight ("100 גרם", "ק\"ג"). Blank in
+     * snapshots written before it was kept; [unit] is used then.
+     */
+    val measure: String = "",
 ) {
     /**
      * Priced per kilo. Many chains don't set the "weighted" flag on produce; a chain-internal (or short) code
@@ -58,6 +63,43 @@ data class BranchProduct(
      */
     val soldByWeight: Boolean
         get() = weighted || (PieceWeights.isKiloUnit(unit) && (internalCode || code.length <= 7))
+
+    /** Kilos [price] is for: 0.1 for "100 גרם", 1 for "ק\"ג"; null when the unit is not recognised. */
+    val priceUnitKilos: Double?
+        get() = WeightUnits.kilos(measure.ifBlank { unit })
+
+    /**
+     * [price] per kilo for a product sold by weight (×10 when priced per 100 g). Null when not sold by weight,
+     * or when its unit is not recognised — then the price is not multiplied by a weight at all.
+     */
+    val pricePerKilo: Double?
+        get() = if (soldByWeight) priceUnitKilos?.let { price / it } else null
+}
+
+/**
+ * Weight units of the price files. A weighted item's price is per `UnitOfMeasure`, which is not always a kilo:
+ * "קילוגרם", "ק\"ג", "1קילוגרם", "100 גרם", with any spacing.
+ */
+object WeightUnits {
+    private val kilo = setOf("קג", "קילו", "קילוגרם", "kg")
+    private val gram = setOf("גרם", "גר", "ג", "g", "gr")
+    private val form = Regex("""^(?:ל\s*)?(\d+(?:\.\d+)?)?\s*(\D+)$""")
+
+    /**
+     * Kilos a price unit stands for, or null when it is not a recognised weight. Ambiguous forms are not
+     * guessed: "גרם" with no amount, or a kilo unit with an amount other than 1 (e.g. "100 ק\"ג").
+     */
+    fun kilos(unit: String): Double? {
+        val k = HebrewText.matchKey(unit)
+        val m = form.matchEntire(k) ?: return null
+        val amount = m.groupValues[1].takeIf { it.isNotEmpty() }?.toDouble()
+        val name = m.groupValues[2].replace(".", "").trim()
+        return when (name) {
+            in kilo -> if (amount == null || amount == 1.0) 1.0 else null
+            in gram -> amount?.takeIf { it > 0 }?.let { it / 1000.0 }
+            else -> null
+        }
+    }
 }
 
 data class BranchPrices(
@@ -70,8 +112,12 @@ data class BranchPrices(
 /** A branch with its distance from the user. */
 data class NearbyBranch(val branch: PriceBranch, val distanceMeters: Double?)
 
-/** One product at one branch with its previous price (null = no change on record). */
-data class BranchQuote(val branch: PriceBranch, val price: Double, val previous: Double?) {
+/**
+ * One product at one branch with its previous price (null = no change on record). Both are in the price unit of the
+ * first branch that sells it (see [PriceData.quotes]); when it can't be put in that unit ([comparable] false) they are
+ * the branch's own, and it is not compared.
+ */
+data class BranchQuote(val branch: PriceBranch, val price: Double, val previous: Double?, val comparable: Boolean = true) {
     /** positive = went up, negative = went down, null/zero = unchanged */
     val change: Double? get() = previous?.let { price - it }?.takeIf { kotlin.math.abs(it) >= 0.005 }
 }
@@ -123,26 +169,52 @@ object PriceData {
             .toList()
     }
 
-    /** Range of one barcode over several branches (internal chain codes are not compared). */
+    /**
+     * Range of one barcode over several branches (internal chain codes are not compared), in the price unit of the
+     * first branch that sells it (see [rangeIn]).
+     */
     fun acrossBranches(code: String, prices: Map<String, BranchPrices>): CrossBranchRange? {
-        val found = prices.mapNotNull { (id, bp) -> bp.products.firstOrNull { it.code == code && !it.internalCode }?.let { id to it.price } }
+        val found = prices.mapNotNull { (id, bp) -> bp.products.firstOrNull { it.code == code && !it.internalCode }?.let { id to it } }
+        return rangeIn(found.firstOrNull()?.second ?: return null, found)
+    }
+
+    /**
+     * Range of one product over branches ([at]: branch id → the product there), in the price unit of [reference]
+     * (per 100 g, per kg or per package; see [PriceComparisons.inUnitOf]). Branches where it can't be put in that unit
+     * are left out; null when none is left.
+     */
+    fun rangeIn(reference: BranchProduct, at: List<Pair<String, BranchProduct>>): CrossBranchRange? {
+        val found = at.mapNotNull { (id, p) -> inUnitOf(reference, p)?.let { id to it } }
         if (found.isEmpty()) return null
         val low = found.minOf { it.second }
         val high = found.maxOf { it.second }
         return CrossBranchRange(low, high, found.filter { it.second == low }.map { it.first }, found.size)
     }
 
+    /** [other]'s price in [reference]'s price unit; the reference itself is always its own price. */
+    internal fun inUnitOf(reference: BranchProduct, other: BranchProduct): Double? =
+        if (other == reference) other.price else PriceComparisons.inUnitOf(reference, other)
+
     /**
      * The chosen product at each of [branches] (in their order), like a stock ticker: today's price and the
      * one before its last change. Barcodes are compared across chains; a chain-internal code only within
      * [homeChain]. Branches whose prices are not loaded, or that don't sell the product, are left out.
+     * Prices are in the price unit of the first branch listed (a chain publishing it per kg next to one publishing
+     * it per 100 g); a branch where it can't be put in that unit keeps its own prices, marked not comparable.
      */
-    fun quotes(code: String, internalCode: Boolean, homeChain: String, branches: List<PriceBranch>, prices: Map<String, BranchPrices>): List<BranchQuote> =
-        branches.mapNotNull { b ->
+    fun quotes(code: String, internalCode: Boolean, homeChain: String, branches: List<PriceBranch>, prices: Map<String, BranchPrices>): List<BranchQuote> {
+        val found = branches.mapNotNull { b ->
             if (internalCode && b.chainKey != homeChain) return@mapNotNull null
-            val p = prices[b.id]?.products?.firstOrNull { it.code == code } ?: return@mapNotNull null
-            BranchQuote(b, p.price, previousPrice(p))
+            prices[b.id]?.products?.firstOrNull { it.code == code }?.let { b to it }
         }
+        val reference = found.firstOrNull()?.second ?: return emptyList()
+        return found.map { (b, p) ->
+            // the same factor turns today's and the previous price into the reference's unit
+            val scale = inUnitOf(reference, p)?.takeIf { p.price > 0 }?.let { it / p.price }
+            if (scale == null) BranchQuote(b, p.price, previousPrice(p), comparable = false)
+            else BranchQuote(b, p.price * scale, previousPrice(p)?.let { it * scale })
+        }
+    }
 
     /** The price before the current one ([BranchProduct.history] ends with the current price, or close to it). */
     fun previousPrice(p: BranchProduct): Double? =
@@ -208,13 +280,18 @@ class NoPriceRepository : PriceRepository {
 /** Price picture of a generic list item ("קוטג' 5%") at one branch. */
 data class ItemPriceInfo(
     val branchId: String,
-    /** typical range of the matching products (outliers trimmed) */
+    /** typical range of the matching products (outliers trimmed); per kilo when [perKilo] */
     val low: Double,
     val high: Double,
-    /** matching products, cheapest first */
+    /** matching products, cheapest first (per kilo for those sold by weight) */
     val candidates: List<BranchProduct>,
     /** the product the household chose for this item, when sold at this branch */
     val preferred: BranchProduct?,
+    /**
+     * [low]–[high] is a price per kilo: every candidate is sold by weight and at least one has a recognised
+     * price unit. False for packaged goods, and for products by weight whose price unit is not known.
+     */
+    val perKilo: Boolean = false,
 )
 
 /** Products of a branch with their search keys computed once (searching runs per list item). */
@@ -252,8 +329,12 @@ object ItemPrices {
         val found = leading.ifEmpty { matches }.map { index.entries[it].first }
         // produce: the fresh item sold by the kilo, not pickles or juice that share its name
         val fresh = if (PieceWeights.gramsPerPiece(name) != null) found.filter { it.soldByWeight } else emptyList()
-        return fresh.ifEmpty { found }.sortedBy { it.price }
+        // by weight, cheapest per kilo (4.90 per 100 g is dearer than 39 per kg); unknown price units last
+        return fresh.ifEmpty { found }.sortedWith(compareBy({ it.soldByWeight && it.pricePerKilo == null }, { it.pricePerKilo ?: it.price }))
     }
+
+    /** Every product is sold by weight: its price is per a weight, not per package. */
+    fun byWeight(products: List<BranchProduct>): Boolean = products.isNotEmpty() && products.all { it.soldByWeight }
 
     /** Typical range: the cheapest and dearest 10% are left out (from ten products on), otherwise min–max. */
     fun typicalRange(prices: List<Double>): Pair<Double, Double>? {
@@ -266,8 +347,11 @@ object ItemPrices {
     fun info(index: ProductIndex, name: String, variant: String?, preferredCode: String?): ItemPriceInfo? {
         val preferred = preferredCode?.let { index.byCode[it] }
         val candidates = candidates(index, name, variant)
-        val range = typicalRange(candidates.map { it.price }) ?: preferred?.let { it.price to it.price } ?: return null
-        return ItemPriceInfo(index.branchId, range.first, range.second, candidates, preferred)
+        // sold by weight: the range is per kilo (a price per 100 g counts ×10), leaving out unknown price units;
+        // when none is known, the prices as published (and perKilo = false, so nobody reads them per kilo)
+        val perKilo = if (byWeight(candidates)) candidates.mapNotNull { it.pricePerKilo } else emptyList()
+        val range = typicalRange(perKilo.ifEmpty { candidates.map { it.price } }) ?: preferred?.let { it.price to it.price } ?: return null
+        return ItemPriceInfo(index.branchId, range.first, range.second, candidates, preferred, perKilo = perKilo.isNotEmpty())
     }
 
     /** Distinct brands among the candidates (for the optional "choose exactly" filter). */
@@ -316,18 +400,29 @@ object ListCost {
             when {
                 own != null -> (own * PriceEstimate.units(line.quantity)).let { low += it; high += it }
                 info?.preferred != null -> {
-                    val n = packages(line.quantity, info.preferred.soldByWeight, grams) ?: continue
-                    (info.preferred.price * n).let { low += it; high += it }
+                    val p = info.preferred
+                    val n = packages(line.quantity, p.soldByWeight, grams) ?: continue
+                    // a weight on the list is priced per kilo; unknown unit of the price → not priced
+                    val each = if (p.soldByWeight && line.quantity != null) p.pricePerKilo ?: continue else p.price
+                    (each * n).let { low += it; high += it }
                 }
                 info != null -> {
                     val byWeight = LineCosts.weighted(line, info)
-                    if (byWeight != null) {
-                        low += byWeight.low
-                        high += byWeight.high
-                    } else {
-                        val n = packages(line.quantity, info.candidates.firstOrNull()?.soldByWeight == true, grams) ?: continue
-                        low += info.low * n
-                        high += info.high * n
+                    val firstByWeight = info.candidates.firstOrNull()?.soldByWeight == true
+                    when {
+                        byWeight != null -> {
+                            low += byWeight.low
+                            high += byWeight.high
+                        }
+                        // sold by weight, but the unit of the price is not known: don't multiply it by a weight,
+                        // nor take the published price for a kilo
+                        firstByWeight && line.quantity != null -> continue
+                        ItemPrices.byWeight(info.candidates) && !info.perKilo -> continue
+                        else -> {
+                            val n = packages(line.quantity, firstByWeight, grams) ?: continue
+                            low += info.low * n
+                            high += info.high * n
+                        }
                     }
                 }
                 else -> continue

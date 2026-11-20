@@ -74,13 +74,30 @@ object PriceComparisons {
         products.asSequence().filter { !it.internalCode && it.code.isNotBlank() }.associateBy { it.code }
 
     /**
+     * [other]'s price in the price unit of [here] (the same product at another branch). Packaged goods: as is.
+     * Sold by weight: through the price per kilo, since one chain may publish it per 100 g and another per kg
+     * (39 per kg against 4.90 per 100 g → 3.90). Null when they can't be compared: a price unit is not
+     * recognised, or one is sold by weight and the other by the package.
+     */
+    fun inUnitOf(here: BranchProduct, other: BranchProduct): Double? = when {
+        here.soldByWeight != other.soldByWeight -> null
+        !here.soldByWeight -> other.price
+        else -> {
+            val kilos = here.priceUnitKilos
+            val perKilo = other.pricePerKilo
+            if (kilos == null || perKilo == null) null else perKilo * kilos
+        }
+    }
+
+    /**
      * One product (barcode) at [branchId] against the same barcode at the other branches ([others]: branch id →
-     * products by barcode, see [byCode]). Null when no other branch sells it.
+     * products by barcode, see [byCode]), their prices given in its own price unit ([inUnitOf]). Null when no
+     * other branch sells it in a comparable unit.
      */
     fun product(product: BranchProduct, branchId: String, others: Map<String, Map<String, BranchProduct>>): PriceComparison? {
         if (product.internalCode || product.price <= 0) return null
         val quotes = others.filterKeys { it != branchId }.mapNotNull { (id, codes) ->
-            codes[product.code]?.takeIf { it.price > 0 }?.let { BranchPriceRange(id, it.price, it.price) }
+            codes[product.code]?.let { inUnitOf(product, it) }?.takeIf { it > 0 }?.let { BranchPriceRange(id, it, it) }
         }
         if (quotes.isEmpty()) return null
         val diff = product.price / median(quotes.map { it.low }) - 1
@@ -112,7 +129,14 @@ object PriceComparisons {
         val quotes = mutableListOf<BranchPriceRange>()
         for ((id, info) in others) {
             if (id == here.branchId || info == null || info.candidates.isEmpty()) continue
-            val shared = info.candidates.mapNotNull { o -> hereCodes[o.code]?.takeIf { o.price > 0 && !o.internalCode }?.let { it.price / o.price } }
+            // ranges per kilo and per package can't stand side by side
+            if (info.perKilo != here.perKilo) continue
+            // the same barcode at both branches, in the same price unit (per kilo when sold by weight)
+            val shared = info.candidates.mapNotNull { o ->
+                if (o.internalCode) return@mapNotNull null
+                val h = hereCodes[o.code] ?: return@mapNotNull null
+                inUnitOf(h, o)?.takeIf { it > 0 }?.let { h.price / it }
+            }
             val ratio = when {
                 shared.isNotEmpty() -> { basis = CompareBasis.SHARED_PRODUCTS; median(shared) }
                 hereTypical != null -> typical(info)?.let { hereTypical / it }
@@ -125,10 +149,13 @@ object PriceComparisons {
         return PriceComparison(here.branchId, median(ratios) - 1, basis, BranchPriceRange(here.branchId, here.low, here.high), quotes.sortedBy { (it.low + it.high) / 2 })
     }
 
-    /** Median price of the item's products, when there are enough of them to stand for the branch. */
+    /**
+     * Median price of the item's products, when there are enough of them to stand for the branch. Sold by weight:
+     * the median per kilo (one branch may price olives per 100 g, another per kg), unknown price units left out.
+     */
     private fun typical(info: ItemPriceInfo): Double? {
-        val prices = info.candidates.map { it.price }.filter { it > 0 }
-        val byKilo = info.candidates.isNotEmpty() && info.candidates.all { it.soldByWeight }
+        val byKilo = ItemPrices.byWeight(info.candidates)
+        val prices = (if (byKilo) info.candidates.mapNotNull { it.pricePerKilo } else info.candidates.map { it.price }).filter { it > 0 }
         if (prices.isEmpty() || (prices.size < MIN_TYPICAL && !byKilo)) return null
         return median(prices)
     }
@@ -141,10 +168,19 @@ data class ProductAcross(
     /** branch id → the product there */
     val at: Map<String, BranchProduct>,
 ) {
-    val cheapest: Double get() = at.values.minOf { it.price }
-    val dearest: Double get() = at.values.maxOf { it.price }
+    /**
+     * Branch id → the price there in the price unit of [product] (per 100 g, per kg, per package; see
+     * [PriceComparisons.inUnitOf]), so a chain that publishes it per kg and one that publishes it per 100 g compare.
+     * A branch where it can't be put in that unit (price unit not recognised, or sold by the package there) is
+     * left out: it sells the product but is not compared.
+     */
+    val prices: Map<String, Double> by lazy {
+        at.mapNotNull { (id, p) -> PriceData.inUnitOf(product, p)?.let { id to it } }.toMap()
+    }
+    val cheapest: Double get() = prices.values.minOrNull() ?: product.price
+    val dearest: Double get() = prices.values.maxOrNull() ?: product.price
     /** Branches selling it at the lowest price (several when tied). */
-    val cheapestBranchIds: Set<String> get() = at.filterValues { it.price <= cheapest + 0.005 }.keys
+    val cheapestBranchIds: Set<String> get() = prices.filterValues { it <= cheapest + 0.005 }.keys
     /** Price spread between the chosen branches: 0.25 = the dearest is 25% above the cheapest. */
     val spread: Double get() = if (cheapest > 0) dearest / cheapest - 1 else 0.0
 }
@@ -154,7 +190,7 @@ object ProductSearch {
      * Searches the products of several branches at once ([branches]: branch id → products, in display order) and
      * merges hits by barcode, so each product shows its price at every chosen branch that sells it ([codes]: branch
      * id → products by barcode, see [PriceComparisons.byCode]). Chain-internal codes stay per branch. Exact barcode
-     * first, then products sold at more of the branches (they can be compared), then shorter names.
+     * first, then products that can be compared at more of the branches ([ProductAcross.prices]), then shorter names.
      */
     fun across(
         branches: List<Pair<String, List<BranchProduct>>>,
@@ -175,7 +211,7 @@ object ProductSearch {
             }
         }
         return found.values
-            .sortedWith(compareBy<ProductAcross>({ if (it.product.code == code) 0 else 1 }, { -it.at.size }, { it.product.name.length }, { it.cheapest }))
+            .sortedWith(compareBy<ProductAcross>({ if (it.product.code == code) 0 else 1 }, { -it.prices.size }, { it.product.name.length }, { it.cheapest }))
             .take(limit)
     }
 }
