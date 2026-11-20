@@ -1,6 +1,5 @@
 package app.necessityq.ui
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -9,7 +8,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -106,10 +104,10 @@ fun StartupScreen(step: StartupStep, onDone: () -> Unit) {
                 StepRow("טוענים מחירים מהסניף", StartupStep.PRICES, step)
             }
             Spacer(Modifier.height(24.dp))
-            Box(Modifier.height(48.dp)) {
-                AnimatedVisibility(offerSkip && step != StartupStep.READY, enter = fadeIn()) {
-                    TextButton(onClick = onDone) { Text("להמשיך בלי לחכות") }
-                }
+            // fades in after a few seconds; until then it keeps its place, so nothing jumps
+            val skipAlpha by animateFloatAsState(if (offerSkip && step != StartupStep.READY) 1f else 0f, label = "skip")
+            TextButton(onClick = onDone, enabled = skipAlpha > 0.5f, modifier = Modifier.height(48.dp).graphicsLayer { alpha = skipAlpha }) {
+                Text("להמשיך בלי לחכות")
             }
         }
     }
