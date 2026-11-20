@@ -235,6 +235,7 @@ fun ListScreen(
     vm.receipts.collectAsStateWithLifecycle() // recompose ticks when receipts change
     vm.unreadTotal.collectAsStateWithLifecycle() // recompose unread counts after reading
     val names by vm.memberNames.collectAsStateWithLifecycle()
+    val members by vm.members.collectAsStateWithLifecycle()
     val pickRanks by vm.pickRanks.collectAsStateWithLifecycle()
     val collapsed by vm.collapsed.collectAsStateWithLifecycle()
     val storePrompt by vm.storePrompt.collectAsStateWithLifecycle()
@@ -451,7 +452,12 @@ fun ListScreen(
                         )
                         Text("הרשימה", style = MaterialTheme.typography.titleLarge)
                     }
-                    if (names.size > 1) MemberAvatars(names.values.toList())
+                    // with their profile pictures (as on the home page); initials only until the members load
+                    if (members.size > 1) {
+                        MemberAvatars(members.map { it.displayName }, photos = members.map { it.photo })
+                    } else if (names.size > 1) {
+                        MemberAvatars(names.values.toList())
+                    }
                     messagesButton(MaterialTheme.colorScheme.onSurface)
                     menuButton(MaterialTheme.colorScheme.onSurface)
                 }
@@ -1596,17 +1602,23 @@ fun PriceSlot(
             .background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 8.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.End,
     ) {
-        Text(main, fontWeight = FontWeight.SemiBold)
-        Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        comparison?.takeIf { it.notable }?.let { c ->
-            Text(
-                c.shortLabel,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = comparisonInk(c.level),
-                modifier = Modifier.padding(top = 1.dp).semantics { contentDescription = c.label },
-            )
+        // always two lines, so a tile with a comparison is the same height as all the others:
+        // the "▲ 12%" sits on the price's own line
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            comparison?.takeIf { it.notable }?.let { c ->
+                Text(
+                    c.shortLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = comparisonInk(c.level),
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.padding(end = 4.dp).semantics { contentDescription = c.label },
+                )
+            }
+            Text(main, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
         }
+        Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false)
     }
 }
 

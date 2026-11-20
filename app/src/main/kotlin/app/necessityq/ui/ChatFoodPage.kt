@@ -225,6 +225,8 @@ internal fun ChatFoodButtonLabel(messages: Int, unread: Int) {
             else -> "צ'אט פוד ($messages)"
         },
         fontWeight = if (unread > 0) FontWeight.Bold else FontWeight.Normal,
+        maxLines = 1,
+        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
     )
     if (unread > 0) {
         Spacer(Modifier.padding(start = 4.dp))
