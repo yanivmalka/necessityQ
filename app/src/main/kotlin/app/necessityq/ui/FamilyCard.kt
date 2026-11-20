@@ -25,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,8 +48,11 @@ import java.time.LocalDate
 @Composable
 fun FamilyCard(vm: AppViewModel, onOpenMember: (memberId: String?) -> Unit) {
     val data by vm.meals.collectAsStateWithLifecycle()
+    val participants by vm.members.collectAsStateWithLifecycle()
     val today = remember { LocalDate.now() }
     var claimMe by remember { mutableStateOf(false) }
+    // the participant and their family profile are one person: mine is linked (or made) as soon as I'm here
+    LaunchedEffect(data, participants) { vm.ensureMyFamilyProfile() }
 
     Column(
         Modifier.fillMaxWidth().clip(NqShapes.Tile).background(MaterialTheme.colorScheme.surface)
@@ -59,7 +63,8 @@ fun FamilyCard(vm: AppViewModel, onOpenMember: (memberId: String?) -> Unit) {
         LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             items(data.members, key = { it.id }) { m ->
                 val isMe = m.linkedUserId != null && m.linkedUserId == vm.me
-                MemberBubble(m, isMe = isMe, age = m.ageLabel(today)) { onOpenMember(m.id) }
+                val photo = m.linkedUserId?.let { uid -> participants.firstOrNull { it.userId == uid }?.photo }
+                MemberBubble(m, isMe = isMe, age = m.ageLabel(today), photo = photo) { onOpenMember(m.id) }
             }
             item {
                 Column(Modifier.clickable { onOpenMember(null) }, horizontalAlignment = Alignment.CenterHorizontally) {
@@ -110,9 +115,9 @@ fun FamilyCard(vm: AppViewModel, onOpenMember: (memberId: String?) -> Unit) {
 }
 
 @Composable
-private fun MemberBubble(member: FamilyMember, isMe: Boolean, age: String?, onClick: () -> Unit) {
+private fun MemberBubble(member: FamilyMember, isMe: Boolean, age: String?, photo: String?, onClick: () -> Unit) {
     Column(Modifier.width(64.dp).clickable(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
-        MemberAvatar(member, size = 56.dp, selected = isMe)
+        MemberAvatar(member, size = 56.dp, selected = isMe, photo = photo)
         Text(member.name, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(
             listOfNotNull(age, if (isMe) "אני" else null).joinToString(" · "),

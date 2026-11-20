@@ -84,9 +84,19 @@ val hebrewMonths = listOf("ינואר", "פברואר", "מרץ", "אפריל", 
 
 fun avatarColor(id: String): Color = avatarPalette[Math.floorMod(id.hashCode(), avatarPalette.size)]
 
-/** Round icon of a family member: their emoji, or the first letter of the name. */
+/**
+ * Round icon of a family member: the profile picture of the participant linked to them (so the family shows the
+ * person as they appear among the participants), else their emoji, or the first letter of the name.
+ */
 @Composable
-fun MemberAvatar(member: FamilyMember, size: Dp = 48.dp, selected: Boolean = false, modifier: Modifier = Modifier) {
+fun MemberAvatar(member: FamilyMember, size: Dp = 48.dp, selected: Boolean = false, modifier: Modifier = Modifier, photo: String? = null) {
+    if (photo != null) {
+        ProfileAvatar(
+            member.name, photo, size = size,
+            modifier = modifier.then(if (selected) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, CircleShape) else Modifier),
+        )
+        return
+    }
     Box(
         modifier
             .size(size)
@@ -193,7 +203,7 @@ fun MemberScreen(vm: AppViewModel, memberId: String?, onBack: () -> Unit, modifi
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                MemberAvatar(draft.copy(name = name.ifBlank { "?" }), size = 80.dp)
+                MemberAvatar(draft.copy(name = name.ifBlank { "?" }), size = 80.dp, photo = participants.firstOrNull { it.userId == linked }?.photo)
                 Column {
                     OutlinedTextField(name, { name = it }, label = { Text("שם") }, singleLine = true, shape = NqShapes.Field)
                     draft.ageLabel(today)?.let { Text("גיל: $it", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }

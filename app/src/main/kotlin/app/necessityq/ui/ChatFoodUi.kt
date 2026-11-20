@@ -106,6 +106,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.composed
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -464,10 +467,20 @@ private fun BubbleRow(
                                         onClick = quoted?.let { q -> { onJump(q.id) } },
                                     )
                                 }
-                                when (m.kind) {
-                                    MessageKind.IMAGE -> m.mediaId?.let { ImageAttachment(vm, it) }
-                                    MessageKind.AUDIO -> m.mediaId?.let { VoiceNote(vm, it, m.durationMs, m.waveform, accent = if (mine) MaterialTheme.colorScheme.primary else authorColor) }
-                                    MessageKind.TEXT -> Unit
+                                // a picture or a recording takes its own taps (open / play), so a long press on it
+                                // is caught here first — it selects the message, for delete and the other actions
+                                if (m.kind != MessageKind.TEXT) Box(
+                                    Modifier.longPressFirst {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        onSelect(m)
+                                        showReactions = !readOnly
+                                    },
+                                ) {
+                                    when (m.kind) {
+                                        MessageKind.IMAGE -> m.mediaId?.let { ImageAttachment(vm, it) }
+                                        MessageKind.AUDIO -> m.mediaId?.let { VoiceNote(vm, it, m.durationMs, m.waveform, accent = if (mine) MaterialTheme.colorScheme.primary else authorColor) }
+                                        MessageKind.TEXT -> Unit
+                                    }
                                 }
                                 if (m.text.isNotBlank()) {
                                     Text(mentionText(m.text, members, vm.me), style = MaterialTheme.typography.bodyLarge)
@@ -1303,4 +1316,38 @@ internal fun ArchivedChatScreen(vm: AppViewModel, thread: List<ItemMessage>, onD
         }
     }
     details?.let { MessageDetailsDialog(vm, it, onDismiss = { details = null }) }
+}
+
+/**
+ * A long press over content whose children handle their own taps: watched before the children see the touch, and once
+ * it fires the rest of that touch is taken, so the picture does not also open / the recording does not also play.
+ * A move beyond the touch slop (a scroll, a swipe to reply) or an early lift leaves the touch to the children.
+ */
+private fun Modifier.longPressFirst(onLongPress: () -> Unit): Modifier = composed {
+  val latest by androidx.compose.runtime.rememberUpdatedState(onLongPress)
+  pointerInput(Unit) {
+    val pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = pass)
+        val slop = viewConfiguration.touchSlop
+        // finishes (non-null) when the finger lifts or moves first; times out (null) when it is held: a long press
+        val leftEarly = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+            var done = false
+            while (!done) {
+                val change = awaitPointerEvent(pass).changes.firstOrNull { it.id == down.id }
+                done = change == null || !change.pressed || (change.position - down.position).getDistance() > slop
+            }
+            true
+        }
+        val fired = leftEarly == null
+        if (fired) {
+            latest()
+            // the rest of this touch is ours
+            do {
+                val event = awaitPointerEvent(pass)
+                event.changes.forEach { it.consume() }
+            } while (event.changes.any { it.pressed })
+        }
+    }
+}
 }
