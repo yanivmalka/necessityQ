@@ -294,6 +294,54 @@ data class ItemPriceInfo(
     val perKilo: Boolean = false,
 )
 
+/**
+ * The weight a price by weight is shown for, as the household chose: per kilo or per 100 grams. Every price of a
+ * product sold by weight is shown in it (the list, the item page, the comparison between branches).
+ */
+enum class WeightPriceUnit(val kilos: Double, val label: String, val title: String) {
+    KILO(1.0, "לק\"ג", "לקילוגרם"),
+    HUNDRED_GRAMS(0.1, "ל-100 ג'", "ל-100 גרם"),
+    ;
+
+    /** A price per kilo, in this unit. */
+    fun fromKilo(perKilo: Double): Double = perKilo * kilos
+
+    /** A price for [fromKilos] kilos (0.1 = per 100 g), in this unit. */
+    fun convert(price: Double, fromKilos: Double): Double = price / fromKilos * kilos
+
+    /** [p]'s price in this unit when it is sold by weight and its price unit is known; null otherwise. */
+    fun of(p: BranchProduct): Double? = p.pricePerKilo?.let(::fromKilo)
+}
+
+/**
+ * The price shown next to an item: always for the basic amount, not for the quantity on the list. Packaged goods per
+ * unit ("ליח'"), goods sold by weight per kilo or per 100 g ([WeightPriceUnit]).
+ */
+data class UnitPrice(val low: Double, val high: Double, val per: String)
+
+object UnitPrices {
+    const val PER_UNIT = "ליח'"
+
+    /**
+     * [info]'s basic price: the chosen product's, else the typical range. Null when the item is sold by weight but per
+     * what weight is not known (no price rather than a wrong one).
+     */
+    fun of(info: ItemPriceInfo, unit: WeightPriceUnit): UnitPrice? {
+        val p = info.preferred
+        return when {
+            p != null && p.soldByWeight -> unit.of(p)?.let { UnitPrice(it, it, unit.label) }
+            p != null -> UnitPrice(p.price, p.price, PER_UNIT)
+            info.perKilo -> UnitPrice(unit.fromKilo(info.low), unit.fromKilo(info.high), unit.label)
+            ItemPrices.byWeight(info.candidates) -> null
+            else -> UnitPrice(info.low, info.high, PER_UNIT)
+        }
+    }
+
+    /** One product's price as shown: by weight in [unit] (when its price unit is known), otherwise as published. */
+    fun of(p: BranchProduct, unit: WeightPriceUnit): UnitPrice =
+        unit.of(p)?.let { UnitPrice(it, it, unit.label) } ?: UnitPrice(p.price, p.price, if (p.soldByWeight) "" else PER_UNIT)
+}
+
 /** Products of a branch with their search keys computed once (searching runs per list item). */
 class ProductIndex(val branchId: String, val updatedAtMillis: Long, products: List<BranchProduct>) {
     internal val entries: List<Pair<BranchProduct, String>> = products.map { it to HebrewText.matchKey("${it.name} ${it.brand}") }

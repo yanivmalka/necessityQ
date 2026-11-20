@@ -27,6 +27,11 @@ data class PriceComparison(
     val here: BranchPriceRange,
     /** the other branches that could be compared, cheapest first */
     val others: List<BranchPriceRange>,
+    /**
+     * Kilos the prices are for when sold by weight (1 = per kilo, 0.1 = per 100 g, as the product publishes it); null
+     * for prices per package. Lets the prices be shown per the household's [WeightPriceUnit].
+     */
+    val unitKilos: Double? = null,
 ) {
     /** CHEAP / EXPENSIVE once the gap is significant ([PriceComparisons.SIGNIFICANT]), FAIR otherwise. */
     val level: PriceLevel
@@ -52,6 +57,10 @@ data class PriceComparison(
     /** Short tile marker: "▲ 12%" / "▼ 12%". */
     val shortLabel: String
         get() = (if (diff > 0) "▲ " else "▼ ") + PriceComparisons.percent(diff)
+
+    /** [r] in [unit] when the prices are by weight; as is (per package) otherwise. */
+    fun shown(r: BranchPriceRange, unit: WeightPriceUnit): BranchPriceRange =
+        unitKilos?.let { k -> BranchPriceRange(r.branchId, unit.convert(r.low, k), unit.convert(r.high, k)) } ?: r
 }
 
 object PriceComparisons {
@@ -101,7 +110,10 @@ object PriceComparisons {
         }
         if (quotes.isEmpty()) return null
         val diff = product.price / median(quotes.map { it.low }) - 1
-        return PriceComparison(branchId, diff, CompareBasis.SAME_PRODUCT, BranchPriceRange(branchId, product.price, product.price), quotes.sortedBy { it.low })
+        return PriceComparison(
+            branchId, diff, CompareBasis.SAME_PRODUCT, BranchPriceRange(branchId, product.price, product.price), quotes.sortedBy { it.low },
+            unitKilos = if (product.soldByWeight) product.priceUnitKilos else null,
+        )
     }
 
     /**
@@ -146,7 +158,10 @@ object PriceComparisons {
             quotes += BranchPriceRange(id, info.low, info.high)
         }
         if (ratios.isEmpty()) return null
-        return PriceComparison(here.branchId, median(ratios) - 1, basis, BranchPriceRange(here.branchId, here.low, here.high), quotes.sortedBy { (it.low + it.high) / 2 })
+        return PriceComparison(
+            here.branchId, median(ratios) - 1, basis, BranchPriceRange(here.branchId, here.low, here.high), quotes.sortedBy { (it.low + it.high) / 2 },
+            unitKilos = if (here.perKilo) 1.0 else null,
+        )
     }
 
     /**

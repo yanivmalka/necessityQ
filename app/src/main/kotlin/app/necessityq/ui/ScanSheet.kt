@@ -120,6 +120,7 @@ private fun ScanContent(vm: AppViewModel, r: ScanResult) {
     val mode by vm.mode.collectAsStateWithLifecycle()
     fun title(id: String?) = branches.firstOrNull { it.id == id }?.title ?: "סניף"
     val atHere = here?.branch?.id != null && here?.branch?.id == r.branchId
+    val unit = LocalWeightPriceUnit.current
 
     Text("ברקוד ${r.code}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
@@ -166,7 +167,7 @@ private fun ScanContent(vm: AppViewModel, r: ScanResult) {
                     }
                     hereProduct.unitPrice?.let { Text("ליחידת מידה: ${PriceData.formatPrice(it)}", style = MaterialTheme.typography.bodySmall) }
                 }
-                Text(PriceData.formatPrice(hereProduct.price), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
+                Text(shownProductPrice(hereProduct, hereProduct.price, unit), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
             }
         } else if (r.branchId != null) {
             Text("לא נמצא ב${title(r.branchId)}", style = MaterialTheme.typography.bodyMedium)
@@ -182,7 +183,7 @@ private fun ScanContent(vm: AppViewModel, r: ScanResult) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(title(hit.branchId), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                     if (price == null) Text("ביחידה אחרת  ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(PriceData.formatPrice(price ?: hit.product.price), fontWeight = FontWeight.Bold)
+                    Text(if (price != null) shownProductPrice(p, price, unit) else shownProductPrice(hit.product, hit.product.price, unit), fontWeight = FontWeight.Bold)
                 }
             }
             r.range?.takeIf { it.high - it.low >= 0.005 && hereProduct != null && hereProduct.price > it.low }?.let { range ->

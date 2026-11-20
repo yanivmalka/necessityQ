@@ -66,6 +66,22 @@ object PieceWeights {
     }
 
     /** "≈1.7 ק\"ג" */
+    /**
+     * [quantity] of [name] in [dimension], through the average weight of a piece: pieces → grams, grams → whole pieces
+     * (rounded up, so it is enough). Null when the piece weight is unknown or the dimensions are not count and weight.
+     */
+    fun convert(name: String, quantity: Quantity, dimension: Dimension): Quantity? {
+        if (quantity.dimension == dimension) return quantity
+        val g = gramsPerPiece(name) ?: return null
+        return when {
+            quantity.dimension == Dimension.COUNT && dimension == Dimension.WEIGHT ->
+                Quantity.fromBase(quantity.baseAmount * g, Dimension.WEIGHT)
+            quantity.dimension == Dimension.WEIGHT && dimension == Dimension.COUNT ->
+                Quantity.pieces(kotlin.math.ceil(quantity.baseAmount / g - 1e-9).coerceAtLeast(1.0))
+            else -> null
+        }
+    }
+
     fun label(estimate: Quantity): String = "≈${estimate.format()}"
 }
 

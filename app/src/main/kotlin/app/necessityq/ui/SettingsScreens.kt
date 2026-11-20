@@ -51,6 +51,19 @@ val LocalNavBack = compositionLocalOf<(() -> Unit)?> { null }
 /** New messages across the app: a badge on the "הבית" tab. */
 val LocalUnreadTotal = compositionLocalOf { 0 }
 
+/** Prices of products sold by weight are shown per kilo or per 100 g, as chosen in the display settings. */
+val LocalWeightPriceUnit = compositionLocalOf { app.necessityq.domain.WeightPriceUnit.KILO }
+
+/**
+ * A price of [p] in its own price unit ([price]: today's, the low of a range, another branch's in p's unit), as shown:
+ * by weight in the chosen unit with its label ("₪8.90 לק\"ג"); otherwise as published.
+ */
+fun shownProductPrice(p: app.necessityq.domain.BranchProduct, price: Double, unit: app.necessityq.domain.WeightPriceUnit): String {
+    val k = p.priceUnitKilos
+    return if (p.soldByWeight && k != null) "${app.necessityq.domain.PriceData.formatPrice(unit.convert(price, k))} ${unit.label}"
+    else app.necessityq.domain.PriceData.formatPrice(price)
+}
+
 /** Back arrow in a page's top bar; renders nothing on a top-level tab. */
 @Composable
 fun BackNavButton() {
@@ -126,6 +139,22 @@ fun DisplaySettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier) = Pag
     OptionRow("מחיר משוער בתחתית הרשימה", current.showTotal) { vm.setDisplay(current.copy(showTotal = it)) }
     OptionRow("מוצרי קירור והקפאה בסוף הרשימה", current.chilledLast) { vm.setDisplay(current.copy(chilledLast = it)) }
     OptionRow("מוצרים שסומנו או נמחקו (מחוקים בקו) בתחתית הרשימה", current.showBought) { vm.setDisplay(current.copy(showBought = it)) }
+
+    Text("מחיר של מוצר במשקל", style = MaterialTheme.typography.titleMedium)
+    Text(
+        "ירקות, פירות, בשר ומוצרים שנמכרים במשקל: המחיר ברשימה, בדף המוצר ובהשוואה בין הסניפים.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    app.necessityq.domain.WeightPriceUnit.entries.forEach { unit ->
+        Row(
+            Modifier.fillMaxWidth().clickable { vm.setDisplay(current.copy(weightUnit = unit)) },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RadioButton(selected = current.weightUnit == unit, onClick = { vm.setDisplay(current.copy(weightUnit = unit)) })
+            Text("מחיר " + unit.title)
+        }
+    }
 
     Text("נגיעה בפריט", style = MaterialTheme.typography.titleMedium)
     app.necessityq.platform.TapMode.entries.forEach { mode ->

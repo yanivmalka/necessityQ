@@ -72,10 +72,12 @@ class ShoppingService(
     ) {
         // far beyond any home purchase of this item (750 יח' of cheese) is a slip: made usual. A merely large
         // amount is kept and flagged on the list until someone confirms it (QuantityNorms.warningFor).
-        val quantity = QuantityNorms.homeSized(item.name, item.category, requestedQuantity)
+        // a recipe's "בצל" with no amount is one onion: two recipes then need two
+        val asked = requestedQuantity ?: if (recipe != null) Recipes.defaultAmount(item) else null
+        val quantity = QuantityNorms.homeSized(item.name, item.category, asked)
         val now = clock.nowMillis()
         val part = recipe?.let { RecipePart(it, quantity, fromMenu = source == LineSource.MENU) }
-        when (val decision = ListRules.decideAdd(current, item.id, quantity)) {
+        when (val decision = ListRules.decideAdd(current, item.id, quantity, item.name)) {
             is ListRules.AddDecision.Merge -> {
                 repository.updateLineQuantity(householdId, decision.lineId, decision.quantity, now)
                 // the existing line now also serves this dish: say so, and how much the dish needs

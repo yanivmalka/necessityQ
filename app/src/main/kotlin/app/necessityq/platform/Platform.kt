@@ -44,6 +44,8 @@ data class DisplayOptions(
     val tapMode: TapMode = TapMode.INFO,
     /** Items already checked off (struck through) at the bottom of the list. */
     val showBought: Boolean = true,
+    /** Prices of products sold by weight: per kilo or per 100 grams. */
+    val weightUnit: app.necessityq.domain.WeightPriceUnit = app.necessityq.domain.WeightPriceUnit.KILO,
 ) {
     fun tile(mode: ListMode): TileLayout = if (mode == ListMode.SHOP) shopTile else planTile
 
@@ -94,6 +96,8 @@ class AppPrefs(context: Context) {
             chilledLast = p.getBoolean("d_chilled", false),
             tapMode = runCatching { TapMode.valueOf(p.getString("d_tap", null) ?: "") }.getOrDefault(TapMode.INFO),
             showBought = p.getBoolean("d_bought", true),
+            weightUnit = runCatching { app.necessityq.domain.WeightPriceUnit.valueOf(p.getString("d_weight_unit", null) ?: "") }
+                .getOrDefault(app.necessityq.domain.WeightPriceUnit.KILO),
         )
         set(v) = p.edit()
             .putBoolean("d_reason", v.showReason).putBoolean("d_last", v.showLastBought)
@@ -102,7 +106,7 @@ class AppPrefs(context: Context) {
             .putString("tile_" + ListMode.SHOP.name, v.shopTile.encode())
             .putBoolean("d_total", v.showTotal)
             .putBoolean("d_chilled", v.chilledLast).putString("d_tap", v.tapMode.name)
-            .putBoolean("d_bought", v.showBought).apply()
+            .putBoolean("d_bought", v.showBought).putString("d_weight_unit", v.weightUnit.name).apply()
 
     /**
      * The tile of [mode]; before tiles were set per stage, one set of checkboxes covered both, so a phone
