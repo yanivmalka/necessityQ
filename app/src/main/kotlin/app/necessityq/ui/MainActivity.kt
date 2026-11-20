@@ -134,8 +134,8 @@ private enum class Dest(val title: String) {
     FAMILY_MEMBER("בן/בת משפחה"),
 }
 
-/** The bottom-bar tabs, in order (the first is on the right). */
-private val TABS = listOf(Dest.LIST, Dest.MENU, Dest.PRICES, Dest.HOME)
+/** The bottom-bar tabs, in order (the first is on the right): הבית on the right, the list on the left. */
+private val TABS = listOf(Dest.HOME, Dest.MENU, Dest.PRICES, Dest.LIST)
 
 /** The tab that is lit while a screen is open. */
 private val Dest.tab: Dest
@@ -215,7 +215,9 @@ private fun Root(vm: AppViewModel) {
             }
 
             fun back() {
-                go(backTo ?: Dest.LIST)
+                val to = backTo ?: Dest.LIST
+                // a page under "הבית" (the household, from a family member's profile) keeps its own way back
+                go(to, from = if (to !in tabs && to.tab == Dest.HOME) Dest.HOME else null)
             }
 
             // a swipe between the tabs (as between WhatsApp's chats, updates, communities and calls) selects the tab it lands on
@@ -297,7 +299,7 @@ private fun Root(vm: AppViewModel) {
                     // null = the four tabs; any other page opens over them
                     AnimatedContent(
                         targetState = dest.takeIf { it !in tabs },
-                        transitionSpec = { pageSlide(back = targetState == null) },
+                        transitionSpec = { pageSlide(back = targetState == null || (initialState == Dest.FAMILY_MEMBER && targetState == Dest.HOUSEHOLD)) },
                         label = "page",
                     ) { page ->
                         // opaque, so the page sliding over another hides it
@@ -319,13 +321,15 @@ private fun Root(vm: AppViewModel) {
                                         Dest.PRICES -> PricesScreen(vm, modifier)
                                         else -> HomeHubScreen(
                                             vm, household.name, modifier, entries = hubEntries,
-                                            onOpenFamilyMember = { id -> familyMember = id.orEmpty(); go(Dest.FAMILY_MEMBER, from = Dest.HOME) },
                                         )
                                     }
                                 }
                                 Dest.MESSAGES -> MessagesScreen(vm, modifier, onOpen = { itemId, name -> openChat = itemId to name })
                                 Dest.HISTORY -> HistoryScreen(vm, modifier)
-                                Dest.HOUSEHOLD -> HouseholdScreen(vm, household, s.account, s.userId, modifier)
+                                Dest.HOUSEHOLD -> HouseholdScreen(
+                                    vm, household, s.account, s.userId, modifier,
+                                    onOpenFamilyMember = { id -> familyMember = id.orEmpty(); go(Dest.FAMILY_MEMBER, from = Dest.HOUSEHOLD) },
+                                )
                                 Dest.ACCOUNT -> AccountScreen(vm, s.account, modifier)
                                 Dest.SETTINGS -> DisplaySettingsScreen(vm, modifier)
                                 Dest.APPEARANCE -> AppearanceScreen(vm, modifier)
@@ -374,16 +378,17 @@ private fun DownloadStrip(state: UpdateState.Downloading, onOpen: () -> Unit, on
     }
 }
 
-/** The four tabs: רשימה · תפריט · מחירים · הבית. The lit tab gets a tinted pill behind its icon. */
+/** The four tabs, in [TABS] order: הבית · תפריט · מחירים · רשימה. The lit tab gets a tinted pill behind its icon. */
 @Composable
 private fun BottomBar(current: Dest, homeBadge: String?, onSelect: (Dest) -> Unit) {
     NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
-        listOf(
+        val icons = mapOf(
             Dest.LIST to Icons.AutoMirrored.Filled.List,
             Dest.MENU to Icons.Default.Restaurant,
             Dest.PRICES to Icons.Default.Sell,
             Dest.HOME to Icons.Default.Home,
-        ).forEach { (tab, icon) ->
+        )
+        TABS.map { it to icons.getValue(it) }.forEach { (tab, icon) ->
             val selected = current == tab
             NavigationBarItem(
                 selected = selected,
