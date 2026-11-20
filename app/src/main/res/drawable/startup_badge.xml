@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One layer of the basket picture on the opening screen (StartupScreen): smart badge, sparkles. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Smart badge -->
+    <path android:fillColor="#4014451A" android:pathData="M59,70 a11,11 0 1,0 22,0 a11,11 0 1,0 -22,0 Z" />
+    <path android:fillColor="#FFFFF8E7" android:pathData="M59.5,69.5 a10.5,10.5 0 1,0 21,0 a10.5,10.5 0 1,0 -21,0 Z" />
+    <path android:pathData="M61.4,69.5 a8.6,8.6 0 1,0 17.2,0 a8.6,8.6 0 1,0 -17.2,0 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="61.4" android:startY="60.9" android:endX="78.6" android:endY="78.1">
+                <item android:offset="0" android:color="#FFFFD54F" />
+                <item android:offset="1" android:color="#FFFF8F00" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:pathData="M65.6,69.8 L68.6,72.8 L74.6,66.6"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- Sparkles -->
+    <path android:fillColor="#FFFFE082" android:pathData="M79,33 Q79.6,37.4 84,38 Q79.6,38.6 79,43 Q78.4,38.6 74,38 Q78.4,37.4 79,33 Z" />
+    <path android:fillColor="#D9FFE082" android:pathData="M30,62 Q30.3,64.2 32.5,64.5 Q30.3,64.8 30,67 Q29.7,64.8 27.5,64.5 Q29.7,64.2 30,62 Z" />
+</vector>

@@ -593,9 +593,13 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** The household's followed branches have been read at least once (until then the list above is just a placeholder). */
+    private val selectedBranchesKnown = MutableStateFlow(false)
+
     val selectedPriceBranches: StateFlow<List<String>> = householdId
         .flatMapLatest { hid -> if (hid == null) emptyFlow() else container.prices.selectedBranches(hid) }
         .catch { emit(emptyList()) }
+        .onEach { selectedBranchesKnown.value = true }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val priceStatus: StateFlow<Map<String, app.necessityq.domain.BranchPriceStatus>> = selectedPriceBranches
@@ -662,6 +666,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     /** Loaded product lists per branch. */
     val branchPrices = MutableStateFlow<Map<String, app.necessityq.domain.BranchPrices>>(emptyMap())
     val pricesLoading = MutableStateFlow<Set<String>>(emptySet())
+    /** Branches whose prices were asked for at least once and the attempt ended (loaded or failed). */
+    private val pricesTried = MutableStateFlow<Set<String>>(emptySet())
 
     fun toggleBranch(branchId: String) {
         val hid = ctx()?.first ?: return
@@ -686,6 +692,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             runCatching { container.prices.prices(branchId) }
                 .onSuccess { p -> if (p != null) branchPrices.update { it + (branchId to p) } }
                 .onFailure { _messages.tryEmit("טעינת המחירים נכשלה: ${it.message ?: ""}") }
+            pricesTried.update { it + branchId }
             pricesLoading.update { it - branchId }
         }
     }
@@ -869,6 +876,27 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         // the other followed branches too (in the background), so items can be compared with them
         viewModelScope.launch { selectedPriceBranches.collect { ids -> ids.forEach { loadPrices(it) } } }
     }
+
+    /**
+     * How far the opening load got: the app opens only once the account, the list and the prices of the household's
+     * branch are in, so the first screen already shows items with their prices rather than filling in piece by piece.
+     * A failure does not hold the opening (offline the list comes from the local copy, prices from the cached file).
+     */
+    val startupStep: StateFlow<StartupStep> = combine(
+        session, snapshot, selectedBranchesKnown,
+        combine(selectedPriceBranches, branchPrices, pricesTried) { ids, loaded, tried -> Triple(ids, loaded, tried) },
+    ) { s, snap, branchesKnown, (ids, loaded, tried) ->
+        val household = (s as? Session.SignedIn)?.household
+        when {
+            s is Session.Loading -> StartupStep.ACCOUNT
+            household == null -> StartupStep.READY // an error or a new user (onboarding): nothing to load
+            snap == null -> StartupStep.LIST
+            !branchesKnown -> StartupStep.PRICES
+            ids.isEmpty() -> StartupStep.READY
+            ids.first().let { it in loaded || it in tried } -> StartupStep.READY
+            else -> StartupStep.PRICES
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StartupStep.ACCOUNT)
 
     /** Shopping day: branches whose prices are older than 12 hours are refreshed in the background. */
     private fun refreshStalePricesForShopping() {
@@ -1669,6 +1697,9 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun createHousehold(name: String) = launchSafe { container.household.createHousehold(name) }
     fun joinHousehold(code: String) = launchSafe { container.household.joinHousehold(code) }
     fun leaveHousehold() = launchSafe { container.household.leaveHousehold() }
+
+    /** The stages of the opening load, in order. */
+    enum class StartupStep { ACCOUNT, LIST, PRICES, READY }
 
     companion object {
         const val MAX_BRANCHES = 5

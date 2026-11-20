@@ -172,6 +172,14 @@ private fun Root(vm: AppViewModel) {
         if (file.exists()) startInstall(vm, context, file)
     }
 
+    // the opening screen stays until the list and its prices are in (once per launch; kept across rotation)
+    var started by rememberSaveable { mutableStateOf(false) }
+    if (!started) {
+        val step by vm.startupStep.collectAsStateWithLifecycle()
+        StartupScreen(step) { started = true }
+        return
+    }
+
     when (val s = session) {
         Session.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         is Session.Error -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(s.message) }

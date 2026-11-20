@@ -1,14 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Single-colour silhouette for themed icons (Android 13+): basket with the check mark cut out (groceries left out: in one colour they merge into a blob). -->
+<!-- Single-colour version for themed icons (Android 13+): the same cycle and list; ticked rows are outlined circles
+     with a tick, the row about to run out is a solid dot. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path android:pathData="M38,50 Q38,30 54,30 Q70,30 70,50" android:strokeColor="#FF000000" android:strokeWidth="4" android:strokeLineCap="round" />
-    <path android:fillColor="#FF000000" android:pathData="M32.5,48.5 H75.5 a3.5,3.5 0 0,1 0,7 H32.5 a3.5,3.5 0 0,1 0,-7 Z" />
+    <path android:pathData="M68.3,33.5 A25,25 0 1,1 45.4,30.5" android:strokeColor="#FF000000" android:strokeWidth="5.5" android:strokeLineCap="round" />
+    <path android:pathData="M52.0,28.1 L46.7,37.0 L42.3,24.7 Z" android:fillColor="#FF000000" android:strokeColor="#FF000000" android:strokeWidth="1.5" android:strokeLineJoin="round" />
     <path
-        android:fillColor="#FF000000"
-        android:fillType="evenOdd"
-        android:pathData="M31.5,53 H76.5 L71.4,77.4 Q70.8,80 68.2,80 H39.8 Q37.2,80 36.6,77.4 Z M42.3,68.7 L45.8,65.2 L51,70.4 L63.2,57.2 L66.8,60.8 L51,77.4 Z" />
+        android:pathData="M61.6,45 a3.4,3.4 0 1,0 6.8,0 a3.4,3.4 0 1,0 -6.8,0 Z M61.6,55 a3.4,3.4 0 1,0 6.8,0 a3.4,3.4 0 1,0 -6.8,0 Z"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="1.2" />
+    <path
+        android:pathData="M63.1,45.1 L64.5,46.5 L67,43.7 M63.1,55.1 L64.5,56.5 L67,53.7"
+        android:strokeColor="#FF000000"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path android:fillColor="#FF000000" android:pathData="M61,65 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0 Z" />
+    <path android:pathData="M40,45 H58 M43,55 H58 M46,65 H58" android:strokeColor="#FF000000" android:strokeWidth="3.4" android:strokeLineCap="round" />
 </vector>
