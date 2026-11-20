@@ -158,7 +158,7 @@ private fun BasketLoading(ready: Boolean, size: Dp) {
     // once ready the items stay in the basket instead of fading for another round
     val clock = if (ready) CYCLE_MS - FADE_MS - 1f else t
     val drops = DROP_STARTS.map { drop(clock - it) }
-    val alpha = roundAlpha(clock)
+    val itemAlpha = roundAlpha(clock)
     // the basket gives a little as each item lands
     val give = DROP_STARTS.sumOf { landing(clock - it).toDouble() }.toFloat() * 1.5f
 
@@ -168,7 +168,7 @@ private fun BasketLoading(ready: Boolean, size: Dp) {
         val basket = layer.graphicsLayer { translationY = give * unit }
         Image(painterResource(R.drawable.startup_basket_back), null, basket)
         listOf(R.drawable.startup_item_greens, R.drawable.startup_item_milk, R.drawable.startup_item_bread).forEachIndexed { i, res ->
-            Image(painterResource(res), null, layer.graphicsLayer { translationY = (drops[i] + give) * unit; this.alpha = alpha })
+            Image(painterResource(res), null, layer.graphicsLayer { translationY = (drops[i] + give) * unit; alpha = itemAlpha })
         }
         Image(painterResource(R.drawable.startup_basket_front), null, basket)
         Image(
