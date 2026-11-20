@@ -175,7 +175,7 @@ data class ProductAcross(
      * left out: it sells the product but is not compared.
      */
     val prices: Map<String, Double> by lazy {
-        at.mapNotNull { (id, p) -> (if (p == product) p.price else PriceComparisons.inUnitOf(product, p))?.let { id to it } }.toMap()
+        at.mapNotNull { (id, p) -> PriceData.inUnitOf(product, p)?.let { id to it } }.toMap()
     }
     val cheapest: Double get() = prices.values.minOrNull() ?: product.price
     val dearest: Double get() = prices.values.maxOrNull() ?: product.price

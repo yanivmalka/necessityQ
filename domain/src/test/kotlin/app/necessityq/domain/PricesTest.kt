@@ -368,4 +368,63 @@ class WeightUnitTest {
         assertEquals(setOf("a"), r.cheapestBranchIds)
         assertEquals(0.0, r.spread, 1e-9)
     }
+
+    private fun olives(price: Double, unit: String, measure: String, history: List<Pair<String, Double>> = emptyList()) =
+        BranchProduct("2900001", "זיתי קלמטה", "", null, unit, true, false, price, null, "", price, price, history, measure = measure)
+
+    @Test
+    fun rangeAcrossBranchesIsInTheFirstBranchUnit() {
+        val prices = linkedMapOf(
+            "a" to BranchPrices("a", 0, 90, listOf(olives(4.9, "גרם", "100 גרם"))),
+            "b" to BranchPrices("b", 0, 90, listOf(olives(39.0, "ק\"ג", "קילוגרם"))),
+            "c" to BranchPrices("c", 0, 90, listOf(olives(4.5, "גרם", ""))), // unit not known: left out
+        )
+        val r = PriceData.acrossBranches("2900001", prices)!!
+        // per 100 g: 4.90 at a, 3.90 at b
+        assertEquals(3.9, r.low, 1e-9)
+        assertEquals(4.9, r.high, 1e-9)
+        assertEquals(listOf("b"), r.cheapestBranchIds)
+        assertEquals(2, r.branches)
+    }
+
+    @Test
+    fun quotesAreInTheFirstBranchUnit() {
+        fun b(id: String) = PriceBranch(id, "c$id", "c$id", id, id, "", "ירושלים", null, null)
+        val branches = listOf(b("a"), b("b"), b("c"))
+        val prices = mapOf(
+            "a" to BranchPrices("a", 0, 90, listOf(olives(4.9, "גרם", "100 גרם"))),
+            // per kg, went down from 42 to 39
+            "b" to BranchPrices("b", 0, 90, listOf(olives(39.0, "ק\"ג", "קילוגרם", listOf("2026-10-01" to 42.0, "2026-11-01" to 39.0)))),
+            "c" to BranchPrices("c", 0, 90, listOf(olives(4.5, "גרם", ""))),
+        )
+        val q = PriceData.quotes("2900001", internalCode = false, homeChain = "ca", branches = branches, prices = prices)
+        assertEquals(listOf("a", "b", "c"), q.map { it.branch.id })
+        assertEquals(4.9, q[0].price, 1e-9)
+        // b in a's unit: 3.90 per 100 g, down 0.30 from 4.20
+        assertEquals(3.9, q[1].price, 1e-9)
+        assertEquals(-0.3, q[1].change!!, 1e-9)
+        assertEquals(true, q[1].comparable)
+        // c: its own price, not compared
+        assertEquals(4.5, q[2].price, 1e-9)
+        assertEquals(false, q[2].comparable)
+    }
+
+    @Test
+    fun scanComparesOtherBranchesInThisProductUnit() {
+        val prices = mapOf(
+            "a" to BranchPrices("a", 0, 90, listOf(olives(4.9, "גרם", "100 גרם"))),
+            "b" to BranchPrices("b", 0, 90, listOf(olives(52.0, "ק\"ג", "ק\"ג"))),
+            "c" to BranchPrices("c", 0, 90, listOf(olives(39.0, "ק\"ג", "קילוגרם"))),
+            "d" to BranchPrices("d", 0, 90, listOf(olives(4.5, "גרם", ""))),
+        )
+        val r = Scan.lookup("2900001", "a", prices, emptyList(), emptyList(), emptyMap())!!
+        // cheapest per kilo first, the unknown unit last
+        assertEquals(listOf("c", "b", "d"), r.elsewhere.map { it.branchId })
+        assertEquals(mapOf("a" to 4.9, "b" to 5.2, "c" to 3.9), r.prices.mapValues { Math.round(it.value * 100) / 100.0 })
+        val range = r.range!!
+        assertEquals(3.9, range.low, 1e-9)
+        assertEquals(listOf("c"), range.cheapestBranchIds)
+        // the verdict sees 5.20 and 3.90 per 100 g, not 52 and 39
+        assertEquals(PriceLevel.FAIR, r.verdict!!.level)
+    }
 }

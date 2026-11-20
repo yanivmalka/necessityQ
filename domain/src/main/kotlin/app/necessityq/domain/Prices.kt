@@ -112,8 +112,12 @@ data class BranchPrices(
 /** A branch with its distance from the user. */
 data class NearbyBranch(val branch: PriceBranch, val distanceMeters: Double?)
 
-/** One product at one branch with its previous price (null = no change on record). */
-data class BranchQuote(val branch: PriceBranch, val price: Double, val previous: Double?) {
+/**
+ * One product at one branch with its previous price (null = no change on record). Both are in the price unit of the
+ * first branch that sells it (see [PriceData.quotes]); when it can't be put in that unit ([comparable] false) they are
+ * the branch's own, and it is not compared.
+ */
+data class BranchQuote(val branch: PriceBranch, val price: Double, val previous: Double?, val comparable: Boolean = true) {
     /** positive = went up, negative = went down, null/zero = unchanged */
     val change: Double? get() = previous?.let { price - it }?.takeIf { kotlin.math.abs(it) >= 0.005 }
 }
@@ -165,26 +169,52 @@ object PriceData {
             .toList()
     }
 
-    /** Range of one barcode over several branches (internal chain codes are not compared). */
+    /**
+     * Range of one barcode over several branches (internal chain codes are not compared), in the price unit of the
+     * first branch that sells it (see [rangeIn]).
+     */
     fun acrossBranches(code: String, prices: Map<String, BranchPrices>): CrossBranchRange? {
-        val found = prices.mapNotNull { (id, bp) -> bp.products.firstOrNull { it.code == code && !it.internalCode }?.let { id to it.price } }
+        val found = prices.mapNotNull { (id, bp) -> bp.products.firstOrNull { it.code == code && !it.internalCode }?.let { id to it } }
+        return rangeIn(found.firstOrNull()?.second ?: return null, found)
+    }
+
+    /**
+     * Range of one product over branches ([at]: branch id → the product there), in the price unit of [reference]
+     * (per 100 g, per kg or per package; see [PriceComparisons.inUnitOf]). Branches where it can't be put in that unit
+     * are left out; null when none is left.
+     */
+    fun rangeIn(reference: BranchProduct, at: List<Pair<String, BranchProduct>>): CrossBranchRange? {
+        val found = at.mapNotNull { (id, p) -> inUnitOf(reference, p)?.let { id to it } }
         if (found.isEmpty()) return null
         val low = found.minOf { it.second }
         val high = found.maxOf { it.second }
         return CrossBranchRange(low, high, found.filter { it.second == low }.map { it.first }, found.size)
     }
 
+    /** [other]'s price in [reference]'s price unit; the reference itself is always its own price. */
+    internal fun inUnitOf(reference: BranchProduct, other: BranchProduct): Double? =
+        if (other == reference) other.price else PriceComparisons.inUnitOf(reference, other)
+
     /**
      * The chosen product at each of [branches] (in their order), like a stock ticker: today's price and the
      * one before its last change. Barcodes are compared across chains; a chain-internal code only within
      * [homeChain]. Branches whose prices are not loaded, or that don't sell the product, are left out.
+     * Prices are in the price unit of the first branch listed (a chain publishing it per kg next to one publishing
+     * it per 100 g); a branch where it can't be put in that unit keeps its own prices, marked not comparable.
      */
-    fun quotes(code: String, internalCode: Boolean, homeChain: String, branches: List<PriceBranch>, prices: Map<String, BranchPrices>): List<BranchQuote> =
-        branches.mapNotNull { b ->
+    fun quotes(code: String, internalCode: Boolean, homeChain: String, branches: List<PriceBranch>, prices: Map<String, BranchPrices>): List<BranchQuote> {
+        val found = branches.mapNotNull { b ->
             if (internalCode && b.chainKey != homeChain) return@mapNotNull null
-            val p = prices[b.id]?.products?.firstOrNull { it.code == code } ?: return@mapNotNull null
-            BranchQuote(b, p.price, previousPrice(p))
+            prices[b.id]?.products?.firstOrNull { it.code == code }?.let { b to it }
         }
+        val reference = found.firstOrNull()?.second ?: return emptyList()
+        return found.map { (b, p) ->
+            // the same factor turns today's and the previous price into the reference's unit
+            val scale = inUnitOf(reference, p)?.takeIf { p.price > 0 }?.let { it / p.price }
+            if (scale == null) BranchQuote(b, p.price, previousPrice(p), comparable = false)
+            else BranchQuote(b, p.price * scale, previousPrice(p)?.let { it * scale })
+        }
+    }
 
     /** The price before the current one ([BranchProduct.history] ends with the current price, or close to it). */
     fun previousPrice(p: BranchProduct): Double? =

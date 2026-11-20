@@ -1133,7 +1133,9 @@ private fun BranchQuotesStrip(vm: AppViewModel, itemId: String, name: String, va
         app.necessityq.domain.PriceData.quotes(chosen.code, chosen.internalCode, branch.chainKey, branches, loaded)
     }
     if (quotes.isEmpty()) return
-    val cheapest = quotes.minOf { it.price }
+    // prices are in the unit of the first branch; one that can't be matched shows its own and is not compared
+    val compared = quotes.filter { it.comparable }
+    val cheapest = compared.minOfOrNull { it.price }
 
     Text(
         "${chosen.name} בסניפים שבמעקב",
@@ -1169,7 +1171,9 @@ private fun BranchQuotesStrip(vm: AppViewModel, itemId: String, name: String, va
                         Text(app.necessityq.domain.PriceData.formatPrice(kotlin.math.abs(c)), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = tint)
                     }
                 }
-                if (quotes.size > 1 && q.price == cheapest) {
+                if (!q.comparable) {
+                    Text("ביחידה אחרת", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else if (compared.size > 1 && q.price == cheapest) {
                     Text("הכי זול", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 }
             }
