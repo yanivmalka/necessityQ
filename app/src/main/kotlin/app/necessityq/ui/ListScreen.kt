@@ -155,7 +155,6 @@ import app.necessityq.domain.ListFilter
 import app.necessityq.domain.QuickEntryParser
 import app.necessityq.domain.ListReset
 import app.necessityq.domain.ListSection
-import app.necessityq.domain.PriceEstimate
 import app.necessityq.domain.ResetScope
 import app.necessityq.domain.SourceFilter
 import app.necessityq.domain.DeliveryStatus
@@ -259,7 +258,6 @@ fun ListScreen(
     var showBin by remember { mutableStateOf(false) }
     val scan = rememberBarcodeScan(vm) { vm.onScanned(it) }
     var showStoreDialog by remember { mutableStateOf(false) }
-    var openOther by remember { mutableStateOf<Pair<String, String>?>(null) }
     var addOpen by remember { mutableStateOf(false) }
     val shopping = mode == ListMode.SHOP
     // each stage of use has its own tile (set in the "תצוגה" popup)
@@ -813,14 +811,7 @@ fun ListScreen(
     if (showReset) ResetDialog(snapshot?.lines.orEmpty(), onReset = { vm.resetList(it); showReset = false }, onDismiss = { showReset = false })
 
     openItem?.let { line ->
-        ItemSheet(
-            vm, itemId = line.itemId, itemName = line.displayName, onDismiss = { openItem = null },
-            onOpenItem = { id, n -> openItem = null; openOther = id to n },
-        )
-    }
-    // another product's conversation, reached from its "typing…" banner
-    openOther?.let { (id, n) ->
-        ItemSheet(vm, itemId = id, itemName = n, onDismiss = { openOther = null }, onOpenItem = { id2, n2 -> openOther = id2 to n2 })
+        ItemSheet(vm, itemId = line.itemId, itemName = line.displayName, onDismiss = { openItem = null })
     }
     if (showBin) RecycleBinSheet(snapshot?.removed.orEmpty(), vm, onDismiss = { showBin = false })
     if (showStoreDialog) {
@@ -1242,9 +1233,8 @@ private fun ProductTile(
     // stepper: always (info mode, if on the tile) or only after a tap (controls mode)
     val showStepper = if (controlsMode) controlsOpen else TileElement.STEPPER in tile
     val showQuantityText = TileElement.QUANTITY in tile && !showStepper && line.quantity != null
-    // produce counted in pieces: estimated weight, and the price for that weight
+    // produce counted in pieces: estimated weight (the price next to it is per kilo / 100 g)
     val weight = if (TileElement.WEIGHT in tile) app.necessityq.domain.PieceWeights.estimate(line.name, line.quantity) else null
-    val weightedCost = priceInfo?.let { app.necessityq.domain.LineCosts.weighted(line, it) }
 
     Column(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) {
         SwipeableTile(left = left, right = right) {
@@ -1311,7 +1301,7 @@ private fun ProductTile(
                                 }
                             }
                             if (TileElement.PRICE in tile) {
-                                PriceSlot(price = price?.let { it * PriceEstimate.units(line.quantity) }, average = null, info = priceInfo, weighted = weightedCost, quantity = line.quantity, comparison = comparison)
+                                PriceSlot(price = price, average = null, info = priceInfo, comparison = comparison)
                             }
                         }
                         if (subline.isNotBlank() || showStepper || (controlsMode && controlsOpen)) {
@@ -1577,39 +1567,29 @@ internal fun ChatIndicator(state: ChatState) {
     }
 }
 
-/** Current price and household/market average; filled once a live price source is connected. */
+/**
+ * The item's price for its basic amount — always per unit for packaged goods, and per kilo or per 100 g (as chosen in
+ * the display settings) for goods sold by weight; never multiplied by the quantity on the list (the estimated total at
+ * the bottom of the list does that).
+ */
 @Composable
 fun PriceSlot(
     price: Double?,
     average: Double?,
     info: app.necessityq.domain.ItemPriceInfo? = null,
-    /** produce sold by weight: the cost of the quantity on the list (estimated weight when counted) */
-    weighted: app.necessityq.domain.LineCost? = null,
-    /** the amount on the list, shown instead of the number of matching products */
-    quantity: app.necessityq.domain.Quantity? = null,
     /** a notable gap with the household's other branches: "▲ 12%" (dearer) or "▼ 12%" (cheaper) under the price */
     comparison: app.necessityq.domain.PriceComparison? = null,
 ) {
+    val unit = LocalWeightPriceUnit.current
+    val none = "\u200E—\u00A0₪\u200E"
     // the household's own price wins; otherwise the branch data: chosen product, or the typical range
+    val basic = info?.let { app.necessityq.domain.UnitPrices.of(it, unit) }
     val (main, sub) = when {
-        price != null -> app.necessityq.domain.PriceData.formatPrice(price) to "ממוצע " + (average?.let { app.necessityq.domain.PriceData.formatPrice(it) } ?: "—")
-        weighted != null -> app.necessityq.domain.PriceData.formatRange(weighted.low, weighted.high) to
-            listOfNotNull(quantity?.format(), weighted.estimatedWeight?.let { app.necessityq.domain.PieceWeights.label(it) })
-                .joinToString(" ").ifEmpty { "לפי משקל" }
-        info?.preferred != null -> app.necessityq.domain.PriceData.formatPrice(info.preferred!!.price) to "המוצר שבחרת"
-        // produce priced per kilo with no amount on the list: the price is per kilo
-        info != null && info.perKilo ->
-            app.necessityq.domain.PriceData.formatRange(info.low, info.high) to "לק\"ג"
+        price != null -> app.necessityq.domain.PriceData.formatPrice(price) to app.necessityq.domain.UnitPrices.PER_UNIT
+        basic != null -> app.necessityq.domain.PriceData.formatRange(basic.low, basic.high) to basic.per
         // sold by weight, but per what weight is not known: no price rather than a wrong one
-        info != null && app.necessityq.domain.ItemPrices.byWeight(info.candidates) ->
-            "\u200E—\u00A0₪\u200E" to "במשקל"
-        info != null -> {
-            // packaged goods: the price of the amount on the list ("2 יח'"), not a count of matching products
-            val n = app.necessityq.domain.ListCost.packages(quantity, false) ?: 1.0
-            app.necessityq.domain.PriceData.formatRange(info.low * n, info.high * n) to
-                (quantity?.format() ?: if (info.candidates.size == 1) "מוצר אחד" else "${info.candidates.size} מוצרים")
-        }
-        else -> "\u200E—\u00A0₪\u200E" to "ממוצע " + (average?.let { app.necessityq.domain.PriceData.formatPrice(it) } ?: "—")
+        info != null -> none to "במשקל"
+        else -> none to "ממוצע " + (average?.let { app.necessityq.domain.PriceData.formatPrice(it) } ?: "—")
     }
     Column(
         Modifier.widthIn(min = 68.dp).clip(NqShapes.Panel)

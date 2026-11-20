@@ -258,9 +258,11 @@ private fun Root(vm: AppViewModel) {
                 ),
             )
 
+            val display by vm.display.collectAsStateWithLifecycle()
             CompositionLocalProvider(
                 LocalNavBack provides (if (backTo != null) ({ back() }) else null),
                 LocalUnreadTotal provides unread,
+                LocalWeightPriceUnit provides display.weightUnit,
             ) {
                 Scaffold(
                     snackbarHost = { SnackbarHost(snackbar) },
@@ -342,11 +344,21 @@ private fun Root(vm: AppViewModel) {
                         }
                     }
                 }
-            }
+            // a conversation opened from the messages or a notification: its own page, with the product's page a tap away
+            var openProduct by remember { mutableStateOf<Pair<String, String>?>(null) }
             openChat?.let { (itemId, name) ->
-                ItemSheet(vm, itemId = itemId, itemName = name, onDismiss = { openChat = null }, onOpenItem = { id, n -> openChat = id to n })
+                ChatFoodPage(
+                    vm, itemId = itemId, itemName = name,
+                    onDismiss = { openChat = null },
+                    onOpenItem = { id, n -> openChat = id to n },
+                    onOpenProduct = { openProduct = itemId to name },
+                )
+            }
+            openProduct?.let { (itemId, name) ->
+                ItemSheet(vm, itemId = itemId, itemName = name, onDismiss = { openProduct = null })
             }
             ScanSheet(vm)
+            }
         }
     }
 }
