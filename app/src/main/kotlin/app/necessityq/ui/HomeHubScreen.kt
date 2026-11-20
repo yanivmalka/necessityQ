@@ -50,8 +50,6 @@ fun HomeHubScreen(
     householdName: String,
     modifier: Modifier = Modifier,
     entries: List<List<HubEntry>>,
-    /** Opens a family member's profile (null = a new member). */
-    onOpenFamilyMember: (memberId: String?) -> Unit = {},
 ) {
     val names by vm.memberNames.collectAsStateWithLifecycle()
     val members by vm.members.collectAsStateWithLifecycle()
@@ -83,8 +81,6 @@ fun HomeHubScreen(
                 )
             }
         }
-        // the family's profiles live here, with the household, and not in the menu
-        FamilyCard(vm, onOpenMember = onOpenFamilyMember)
         entries.forEach { group ->
             Column(
                 Modifier.fillMaxWidth().clip(NqShapes.Tile).background(MaterialTheme.colorScheme.surface)

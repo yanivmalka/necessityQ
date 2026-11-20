@@ -92,6 +92,8 @@ fun HouseholdScreen(
     account: Account,
     userId: String,
     modifier: Modifier = Modifier,
+    /** Opens a family member's profile (null = a new member). */
+    onOpenFamilyMember: (memberId: String?) -> Unit = {},
 ) {
     val context = LocalContext.current
     val members by vm.members.collectAsStateWithLifecycle()
@@ -116,6 +118,8 @@ fun HouseholdScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             if (vm.supportsAccounts) AccountCard(vm, account)
+            // the family's profiles (who eats, tastes, ratings) are managed here, with the participants
+            FamilyCard(vm, onOpenMember = onOpenFamilyMember)
             if (vm.isShared) {
                 SectionTitle("קוד הצטרפות")
                 Row(verticalAlignment = Alignment.CenterVertically) {
