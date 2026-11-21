@@ -2,8 +2,8 @@ import { normalizeStoreId } from "./filenames";
 import { extractRecords, num, pick } from "./xml";
 
 /**
- * Promotions of one branch, from its PromoFull (or Promo) transparency file, as the app downloads them.
- * Compact keys keep the file small; a promotion lists only barcodes the branch's price file sells right now.
+ * Promotions of one branch, from its PromoFull (or Promo) transparency file, as the app downloads them: all of them,
+ * as published (compact keys keep the file small). The app leaves out what it must not offer.
  */
 export interface PromoItem {
   id: string;
@@ -131,16 +131,15 @@ export function parsePromotions(xml: string): { storeId: string | null; promos: 
 }
 
 /**
- * The promotions worth sending to the app: still running at [now] (Israel time as "yyyy-mm-ddThh:mm:ss"), with a
- * reward the app can price, and only for barcodes the branch sells now ([sold]; a product missing from the price
- * file is out of stock or no longer sold there). Whole-basket discounts carry no items and are dropped.
+ * The promotions the app may offer now (for the status count; the app applies the same rules itself): running at
+ * [nowLocal] (Israel time as "yyyy-mm-ddThh:mm:ss"), not dependent on stock, not on the whole basket, with a reward
+ * that can be priced, on at least one barcode the branch sells now ([sold]; missing from the price file = out of stock).
  */
-export function promosForApp(promos: PromoItem[], sold: Set<string>, nowLocal: string): PromoItem[] {
+export function offerable(promos: PromoItem[], sold: Set<string>, nowLocal: string): PromoItem[] {
   return promos
-    .filter((p) => !p.e || p.e >= nowLocal)
-    .filter((p) => !p.t && (p.dp !== null || p.dr !== null))
-    .map((p) => ({ ...p, c: p.c.filter((c) => sold.has(c)) }))
-    .filter((p) => p.c.length > 0);
+    .filter((p) => (!p.s || p.s <= nowLocal) && (!p.e || p.e >= nowLocal))
+    .filter((p) => !p.sl && !p.t && (p.dp !== null || p.dr !== null))
+    .filter((p) => p.c.some((c) => sold.has(c)));
 }
 
 /** "now" in Israel as "yyyy-mm-ddThh:mm:ss", to compare with the files' local times. */

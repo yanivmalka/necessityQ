@@ -91,6 +91,10 @@ class ShoppingPlanTest {
                 Promotion("1", "20%", setOf("x"), discountRate = 0.2, stockLimited = true),
                 Promotion("2", "ישן", setOf("x"), discountRate = 0.3, end = "2026-11-01T23:59:59"),
                 Promotion("3", "מועדון", setOf("x"), discountRate = 0.4, clubOnly = true),
+                Promotion("5", "עוד לא התחיל", setOf("x"), discountRate = 0.5, start = "2026-12-01T00:00:00"),
+                Promotion("6", "על כל הסל", setOf("x"), discountRate = 0.5, wholeBasket = true),
+                // on a product that is not in the branch's price file now (out of stock)
+                Promotion("7", "אזל", setOf("y"), discountRate = 0.6),
                 Promotion("4", "10%", setOf("x"), discountRate = 0.1),
             ),
         )

@@ -42,7 +42,7 @@ import kotlinx.serialization.json.jsonPrimitive
  *   priceBranches/{branchId}           { updatedAt, items, error, … }   — freshness per branch
  *   Storage prices/{branchId}.json.gz  { updatedAt, rangeDays, items[{ c, n, b, q, u, w, i, p, up, s, lo, hi, h }] }
  *   promoBranches/{branchId}           { updatedAt, promos, … }   — freshness of the promotions (checked every 30 minutes)
- *   Storage promos/{branchId}.json.gz  { updatedAt, promos[{ id, d, c[], mq, dp, dr, s, e, cl, cp, sl, mb }] }
+ *   Storage promos/{branchId}.json.gz  { updatedAt, promos[{ id, d, c[], mq, dp, dr, s, e, cl, cp, sl, mb, t }] } — every promotion
  *   households/{hid}/settings/priceBranches { kind: "priceBranches", branchIds[], preferred{itemId: barcode} } — what the server keeps fresh,
  *                                       and the product the household chose for a generic item (optional)
  * Snapshots are cached in [cacheDir] and downloaded again only when the server's updatedAt changes.
@@ -207,8 +207,8 @@ class FirebasePriceRepository(
                 fun s(k: String) = (o[k] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: ""
                 fun d(k: String) = (o[k] as? JsonPrimitive)?.doubleOrNull
                 fun b(k: String) = (o[k] as? JsonPrimitive)?.booleanOrNull ?: false
+                // every promotion is kept as published; what is not offered is decided by PromoOffers
                 val codes = (o["c"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.content }.toSet()
-                if (codes.isEmpty()) return@mapNotNull null
                 Promotion(
                     id = s("id"),
                     description = s("d"),
@@ -222,6 +222,7 @@ class FirebasePriceRepository(
                     coupon = b("cp"),
                     stockLimited = b("sl"),
                     minBasket = d("mb"),
+                    wholeBasket = b("t"),
                 )
             }
             return BranchPromotions(

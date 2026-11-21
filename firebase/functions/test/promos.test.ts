@@ -3,7 +3,7 @@ import { Chain } from "../src/chains";
 import { entry } from "../src/filenames";
 import { BranchStatus, PromoStatus, PromoStore, offersDue, refreshBranchPromos, refreshBranchStock, DEFAULT_CONFIG } from "../src/ingest";
 import { Branch, FileKind, Snapshot } from "../src/model";
-import { PromoSnapshot, israelLocal, parsePromotions, promoTime, promosForApp } from "../src/promos";
+import { PromoSnapshot, israelLocal, offerable, parsePromotions, promoTime } from "../src/promos";
 import { Source } from "../src/sources";
 
 const PROMO_XML = `<?xml version="1.0" encoding="utf-8"?>
@@ -62,12 +62,13 @@ describe("promotions", () => {
     expect(promos).toEqual([expect.objectContaining({ id: "7", c: ["111111111", "222222222"], mq: 3, dp: 20 })]);
   });
 
-  it("keeps running promotions, for products the branch sells now", () => {
+  it("counts as offerable only running, stock-independent promotions on products the branch sells", () => {
     const { promos } = parsePromotions(PROMO_XML);
-    const kept = promosForApp(promos, new Set(["7290000042015"]), "2026-11-21T12:00:00");
-    expect(kept.map((p) => p.id)).toEqual(["101", "102"]);
-    expect(kept[0].c).toEqual(["7290000042015"]);
-    expect(promosForApp(promos, new Set(["7290000042015"]), "2026-12-05T12:00:00").map((p) => p.id)).toEqual(["102"]);
+    // 102 depends on stock, 103 ended, 104 is on the whole basket
+    expect(offerable(promos, new Set(["7290000042015"]), "2026-11-21T12:00:00").map((p) => p.id)).toEqual(["101"]);
+    // out of stock: the product is not in the price file
+    expect(offerable(promos, new Set(["999"]), "2026-11-21T12:00:00")).toEqual([]);
+    expect(offerable(promos, new Set(["7290000042015"]), "2026-12-05T12:00:00")).toEqual([]);
   });
 
   it("reads the common date forms", () => {
@@ -138,7 +139,7 @@ const snap = (codes: string[], stamp: string): Snapshot => ({
 });
 
 describe("promotions and stock every half hour", () => {
-  it("writes the branch's running promotions for the products it sells, and skips an unchanged file", async () => {
+  it("writes every promotion of the file as published, and skips an unchanged file", async () => {
     const { mem, store, promoStore } = stores(snap(["7290000042015"], "202611210300"), null);
     let fetches = 0;
     const src: Source = {
@@ -152,8 +153,10 @@ describe("promotions and stock every half hour", () => {
     };
     const deps = { store, sourceFor: () => src, now: () => new Date("2026-11-21T10:30:00Z") };
     const st = await refreshBranchPromos(branch, deps, promoStore);
-    expect(st).toMatchObject({ error: null, promos: 2 });
-    expect(mem.promos?.promos.map((p) => p.id)).toEqual(["101", "102"]);
+    expect(st).toMatchObject({ error: null, promos: 4, active: 1 });
+    expect(mem.promos?.promos.map((p) => p.id)).toEqual(["101", "102", "103", "104"]);
+    // nothing is cut from a promotion: both barcodes stay, also the one the branch does not sell now
+    expect(mem.promos?.promos[0].c).toEqual(["7290000042015", "7290000000001"]);
     await refreshBranchPromos(branch, deps, promoStore);
     expect(fetches).toBe(1);
   });

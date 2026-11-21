@@ -4,7 +4,7 @@ import { GeoCache, geocode } from "./geocode";
 import { israelDay, mergeSnapshot } from "./history";
 import { Branch, FileEntry, Snapshot } from "./model";
 import { cityInScope, parsePrices, parseStores } from "./normalize";
-import { PromoSnapshot, israelLocal, parsePromotions, promosForApp } from "./promos";
+import { PromoSnapshot, israelLocal, offerable, parsePromotions } from "./promos";
 import { Source, sourceFor } from "./sources";
 import { decodePayload } from "./xml";
 
@@ -221,7 +221,10 @@ export { CHAINS };
 /** Freshness of a branch's promotions (Firestore `promoBranches/{branchId}`). */
 export interface PromoStatus {
   updatedAt: string | null; // ISO of the last successful promotions load
+  /** every promotion in the file (all are kept) */
   promos: number;
+  /** of them, those the app may offer right now: running, not stock-dependent, on products the branch sells */
+  active?: number;
   sourceFile: string;
   sourceStamp: string;
   lastAttemptAt: string | null;
@@ -239,8 +242,9 @@ export interface PromoStore {
 export const OFFERS_MINUTES = 30;
 
 /**
- * Loads the newest PromoFull (or Promo) file of a branch, keeps the promotions still running and only for products the
- * branch's price snapshot sells now (out of stock = missing from the price file), and writes them for the app.
+ * Loads the newest PromoFull (or Promo) file of a branch and writes every promotion in it for the app, as published,
+ * with its dates and flags (club, coupon, stock-dependent, whole basket). Nothing is dropped here: the app decides what
+ * not to show (ended, stock-dependent, or on a product missing from the branch's price file, i.e. out of stock).
  * Skipped when the newest file is the one already loaded (unless [force]).
  */
 export async function refreshBranchPromos(branch: Branch, deps: Deps, promoStore: PromoStore, force = false): Promise<PromoStatus> {
@@ -265,11 +269,11 @@ export async function refreshBranchPromos(branch: Branch, deps: Deps, promoStore
     const { promos } = parsePromotions(decodePayload(await src(chain).fetch(chain, file)));
     const snapshot = await deps.store.readSnapshot(branch.id);
     const sold = new Set((snapshot?.items ?? []).map((i) => i.c));
-    const kept = promosForApp(promos, sold, israelLocal(now));
-    await promoStore.writePromos({ v: 1, branchId: branch.id, updatedAt: now.toISOString(), sourceFile: file.name, sourceStamp: file.stamp, promos: kept });
+    await promoStore.writePromos({ v: 1, branchId: branch.id, updatedAt: now.toISOString(), sourceFile: file.name, sourceStamp: file.stamp, promos });
     const status: PromoStatus = {
       updatedAt: now.toISOString(),
-      promos: kept.length,
+      promos: promos.length,
+      active: offerable(promos, sold, israelLocal(now)).length,
       sourceFile: file.name,
       sourceStamp: file.stamp,
       lastAttemptAt: now.toISOString(),

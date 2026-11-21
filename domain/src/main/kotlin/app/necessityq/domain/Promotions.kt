@@ -3,8 +3,8 @@ package app.necessityq.domain
 // ---------- promotions and coupons of the household's branches (PromoFull files, refreshed every 30 minutes) ----------
 
 /**
- * One promotion at a branch, as the server keeps it: still running, and only for products the branch's price file
- * sells now (a product missing from it is out of stock or no longer sold there).
+ * One promotion at a branch, as the chain published it. The server keeps every promotion (also ended ones, those that
+ * depend on stock and those on products out of stock); [PromoOffers] decides what is offered.
  */
 data class Promotion(
     val id: String,
@@ -28,6 +28,8 @@ data class Promotion(
     val stockLimited: Boolean = false,
     /** minimum basket amount for the promotion, null when none */
     val minBasket: Double? = null,
+    /** a discount on the whole basket, not on items */
+    val wholeBasket: Boolean = false,
 ) {
     fun runningAt(nowLocal: String): Boolean = (start.isBlank() || start <= nowLocal) && (end.isBlank() || end >= nowLocal)
 
@@ -99,11 +101,12 @@ data class PromoOffer(
 
 object PromoOffers {
     /**
-     * A promotion the app may offer: running now, not dependent on stock, and (unless [includeMembers]) open to every
-     * customer, without a club, a card or a coupon.
+     * A promotion the app may offer: running now (not ended, not yet to start), not dependent on stock, on items (not
+     * the whole basket), and (unless [includeMembers]) open to every customer, without a club, a card or a coupon.
+     * Out of stock is checked by the product: offers look only at products in the branch's current price file.
      */
     fun usable(p: Promotion, nowLocal: String, includeMembers: Boolean): Boolean =
-        p.runningAt(nowLocal) && !p.stockLimited && (includeMembers || !p.forMembers)
+        p.runningAt(nowLocal) && !p.stockLimited && !p.wholeBasket && (includeMembers || !p.forMembers)
 
     /**
      * The best promotion on an item at a branch: among the item's products in stock there (the household's chosen
