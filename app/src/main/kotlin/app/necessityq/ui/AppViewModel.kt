@@ -18,6 +18,7 @@ import app.necessityq.domain.MealData
 import app.necessityq.domain.MealPlanner
 import app.necessityq.domain.PickOrder
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.filter
 import app.necessityq.domain.LineStatus
 import app.necessityq.domain.ListSort
 import app.necessityq.domain.Member
@@ -286,6 +287,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     val currentStoreId = MutableStateFlow(prefs.currentStoreId)
 
     fun setBrightTheme(on: Boolean) { prefs.brightTheme = on; brightTheme.value = on }
+    val palette = MutableStateFlow(AppPalette.of(prefs.palette))
+    fun setPalette(value: AppPalette) { prefs.palette = value.name; palette.value = value }
     fun setSort(value: ListSort) { prefs.setSortFor(mode.value, value); sort.value = value }
     fun setMode(value: ListMode) {
         prefs.mode = value
@@ -293,6 +296,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         sort.value = prefs.sortFor(value)
         descending.value = prefs.descendingFor(value)
         checkStorePrompt()
+        if (value == ListMode.PLAN) endTrip()
         if (value == ListMode.SHOP) {
             refreshStalePricesForShopping()
             locate()
@@ -668,6 +672,12 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         if (here.id !in selectedPriceBranches.value) toggleBranch(here.id)
     }
 
+    /** A stop of the planned trip the user is shopping at now (the list shows its items and prices). */
+    val activeStop = MutableStateFlow(if (prefs.mode == ListMode.SHOP) prefs.tripStops.firstOrNull() else null)
+
+    /** The branch [itemPriceInfo] was last computed for (with the list loaded): the opening waits for it. */
+    private val pricedFor = MutableStateFlow<String?>(null)
+
     /** Loaded product lists per branch. */
     val branchPrices = MutableStateFlow<Map<String, app.necessityq.domain.BranchPrices>>(emptyMap())
     val pricesLoading = MutableStateFlow<Set<String>>(emptySet())
@@ -689,14 +699,29 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    /** Downloads (or reads from cache) the products of a branch. */
+    /** Branches whose prices were checked against the server in this session (the cached copy may be shown before). */
+    private val pricesChecked = MutableStateFlow<Set<String>>(emptySet())
+
+    /**
+     * The products of a branch: the copy cached on the device first, at once (no network on the way), then the
+     * server's when it is newer. So the list has its prices as it opens, and fresh ones replace them quietly.
+     */
     fun loadPrices(branchId: String, force: Boolean = false) {
-        if (!force && (branchPrices.value.containsKey(branchId) || branchId in pricesLoading.value)) return
+        if (!force && (branchId in pricesChecked.value || branchId in pricesLoading.value)) return
         pricesLoading.update { it + branchId }
         viewModelScope.launch {
+            if (!branchPrices.value.containsKey(branchId)) {
+                runCatching { container.prices.cachedPrices(branchId) }.getOrNull()?.let { cached ->
+                    branchPrices.update { if (it.containsKey(branchId)) it else it + (branchId to cached) }
+                    pricesTried.update { it + branchId }
+                }
+            }
             runCatching { container.prices.prices(branchId) }
-                .onSuccess { p -> if (p != null) branchPrices.update { it + (branchId to p) } }
-                .onFailure { _messages.tryEmit("טעינת המחירים נכשלה: ${it.message ?: ""}") }
+                .onSuccess { p ->
+                    if (p != null && branchPrices.value[branchId]?.updatedAtMillis != p.updatedAtMillis) branchPrices.update { it + (branchId to p) }
+                }
+                .onFailure { if (!branchPrices.value.containsKey(branchId)) _messages.tryEmit("טעינת המחירים נכשלה: ${it.message ?: ""}") }
+            pricesChecked.update { it + branchId }
             pricesTried.update { it + branchId }
             pricesLoading.update { it - branchId }
         }
@@ -729,16 +754,21 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
      * The branch whose prices the list shows: the followed branch the user is standing in (by
      * coordinates), otherwise the first one the household follows.
      */
-    val primaryBranch: StateFlow<app.necessityq.domain.PriceBranch?> = combine(priceBranches, selectedPriceBranches, hereBranch) { all, ids, here ->
-        here?.branch?.takeIf { it.id in ids } ?: ids.firstNotNullOfOrNull { id -> all.firstOrNull { it.id == id } }
+    val primaryBranchId: StateFlow<String?> = combine(selectedPriceBranches, hereBranch, activeStop) { ids, here, stop ->
+        // by id only: the list's prices don't wait for the (large) index of all branches
+        here?.branch?.id?.takeIf { it in ids } ?: stop?.takeIf { it in ids } ?: ids.firstOrNull()
+    }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val primaryBranch: StateFlow<app.necessityq.domain.PriceBranch?> = combine(priceBranches, primaryBranchId, hereBranch) { all, id, here ->
+        if (id == null) null else here?.branch?.takeIf { it.id == id } ?: all.firstOrNull { it.id == id }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /**
      * Quick-add suggestions from the products of the branch (online data), as generic items
      * ("קוטג' 5%"), beyond what the household already buys. Empty without price data.
      */
-    val onlineCompletions: StateFlow<List<ItemIdentity>> = combine(searchQuery, completions, branchPrices, primaryBranch) { q, mine, loaded, branch ->
-        OnlineSearch(q, mine, branch?.let { loaded[it.id] }?.products)
+    val onlineCompletions: StateFlow<List<ItemIdentity>> = combine(searchQuery, completions, branchPrices, primaryBranchId) { q, mine, loaded, branch ->
+        OnlineSearch(q, mine, branch?.let { loaded[it] }?.products)
     }
         .mapLatest { (q, mine, products) ->
             val name = QuickEntryParser.parse(q)?.item?.displayName ?: q
@@ -769,23 +799,24 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
      * ("קוטג'" → ₪5.90–₪7.80), or the household's chosen product. Computed off the main thread.
      */
     val itemPriceInfo: StateFlow<Map<String, app.necessityq.domain.ItemPriceInfo>> =
-        combine(snapshot, branchPrices, primaryBranch, preferredProducts) { snap, loaded, primary, preferred -> PriceInputs(snap, loaded, primary, preferred) }
+        combine(snapshot, branchPrices, primaryBranchId, preferredProducts) { snap, loaded, primary, preferred -> PriceInputs(snap, loaded, primary, preferred) }
             .mapLatest { (snap, loaded, primary, preferred) ->
-                val prices = primary?.let { loaded.at(it.id) } ?: return@mapLatest emptyMap()
+                val prices = primary?.let { loaded.at(it) } ?: return@mapLatest emptyMap()
                 val index = indexFor(prices)
                 snap?.lines.orEmpty().distinctBy { it.itemId }.mapNotNull { line ->
                     app.necessityq.domain.ItemPrices.info(index, line.name, line.variant, preferred[line.itemId])?.let { line.itemId to it }
-                }.toMap()
+                }.toMap().also { if (snap != null) pricedFor.value = primary }
             }
             .flowOn(kotlinx.coroutines.Dispatchers.Default)
             .catch { emit(emptyMap()) }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+            // eager: computed while the opening screen still shows, so the list opens with its prices
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     /** Price picture of any item (also one not on the list right now, e.g. from history). Computed off the main thread. */
     suspend fun priceInfoFor(itemId: String, name: String, variant: String?): app.necessityq.domain.ItemPriceInfo? {
         itemPriceInfo.value[itemId]?.let { return it }
-        val primary = primaryBranch.value ?: return null
-        val prices = branchPrices.value.at(primary.id) ?: return null
+        val primary = primaryBranchId.value ?: return null
+        val prices = branchPrices.value.at(primary) ?: return null
         val preferred = preferredProducts.value[itemId]
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
             app.necessityq.domain.ItemPrices.info(indexFor(prices), name, variant, preferred)
@@ -875,11 +906,195 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    // ---------- promotions and coupons; where to shop (one supermarket or a split) ----------
+
+    /** Running promotions per followed branch (only products in stock there; see [app.necessityq.domain.PromoOffers]). */
+    val branchPromotions = MutableStateFlow<Map<String, app.necessityq.domain.BranchPromotions>>(emptyMap())
+
+    /** Promotions of clubs, credit cards and coupons count too (the household chooses). */
+    val includeMemberPromos = MutableStateFlow(prefs.tripMembers)
+    fun setIncludeMemberPromos(on: Boolean) { prefs.tripMembers = on; includeMemberPromos.value = on }
+
+    private fun loadPromotions(branchId: String) {
+        viewModelScope.launch {
+            runCatching { container.prices.promotions(branchId) }.getOrNull()?.let { p ->
+                if (branchPromotions.value[branchId]?.updatedAtMillis != p.updatedAtMillis) branchPromotions.update { it + (branchId to p) }
+            }
+        }
+    }
+
+    private var lastOffersRefresh = 0L
+
+    /**
+     * Promotions and stock: on every opening of the app and every half hour while it is open. The server checks the
+     * chains' newest files (it skips branches checked in the last 30 minutes); what changed is reloaded here as its
+     * status changes ([promotionsStatus] / the price status).
+     */
+    fun refreshOffers(force: Boolean = false) {
+        val ids = selectedPriceBranches.value
+        if (ids.isEmpty()) return
+        val now = System.currentTimeMillis()
+        if (!force && now - lastOffersRefresh < OFFERS_MINUTES * 60_000L - 60_000L) return
+        lastOffersRefresh = now
+        viewModelScope.launch {
+            runCatching { container.prices.requestOffersRefresh(ids) }
+            ids.forEach { loadPromotions(it) }
+            // stock and prices merged by the check: reload what changed (only downloads when the server's copy is newer)
+            ids.forEach { loadPrices(it, force = true) }
+        }
+    }
+
+    /** Each followed branch's price picture of the list's items (for the promotions and the trip plan). Off the main thread. */
+    private val branchItemInfos: StateFlow<Map<String, Map<String, app.necessityq.domain.ItemPriceInfo>>> =
+        combine(snapshot, branchPrices, selectedPriceBranches, preferredProducts) { snap, loaded, followed, preferred ->
+            BranchInfoInputs(snap?.lines.orEmpty().filter { it.status == LineStatus.NEEDED }, loaded, followed, preferred)
+        }
+            .debounce(300)
+            .mapLatest { (lines, loaded, followed, preferred) ->
+                val distinct = lines.distinctBy { it.itemId }
+                followed.mapNotNull { id -> loaded.at(id) }.associate { bp ->
+                    val index = indexFor(bp)
+                    bp.branchId to distinct.mapNotNull { line ->
+                        app.necessityq.domain.ItemPrices.info(index, line.name, line.variant, preferred[line.itemId])?.let { line.itemId to it }
+                    }.toMap()
+                }
+            }
+            .flowOn(kotlinx.coroutines.Dispatchers.Default)
+            .catch { emit(emptyMap()) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    /** "Now" in Israel as the promotion files write it ("yyyy-MM-ddTHH:mm:ss"). */
+    private fun nowLocal(): String = java.time.LocalDateTime.now(java.time.ZoneId.of("Asia/Jerusalem"))
+        .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss"))
+
+    /** "יש למוצרים אלו מבצעים ב…": promotions on the list's items at the followed branches, biggest saving first. */
+    val promoOffers: StateFlow<List<app.necessityq.domain.PromoOffer>> =
+        combine(branchItemInfos, branchPromotions, includeMemberPromos) { infos, promos, members -> Triple(infos, promos, members) }
+            .mapLatest { (infos, promos, members) ->
+                val lines = snapshot.value?.lines.orEmpty()
+                app.necessityq.domain.PromoOffers.forList(lines, infos, promos, nowLocal(), members)
+            }
+            .flowOn(kotlinx.coroutines.Dispatchers.Default)
+            .catch { emit(emptyList()) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Whole-basket promotions of the followed branches ("10 ₪ הנחה בקנייה מעל 300 ₪"), as (branch id, promotion). */
+    val basketOffers: StateFlow<List<Pair<String, app.necessityq.domain.Promotion>>> =
+        combine(branchPromotions, includeMemberPromos, selectedPriceBranches) { promos, members, followed ->
+            app.necessityq.domain.PromoOffers.basketOffers(promos.filterKeys { it in followed }, nowLocal(), members)
+        }
+            .catch { emit(emptyList()) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** What the trip sheet asks: the saving that makes a change worth it, how many stores, the regular store. */
+    data class TripSettings(val threshold: Int, val maxStores: Int, val homeBranchId: String?, val includeMembers: Boolean)
+
+    val tripSettings = MutableStateFlow(TripSettings(prefs.tripThreshold, prefs.tripMaxStores, prefs.tripHome, prefs.tripMembers))
+
+    fun setTripSettings(value: TripSettings) {
+        prefs.tripThreshold = value.threshold
+        prefs.tripMaxStores = value.maxStores
+        prefs.tripHome = value.homeBranchId
+        setIncludeMemberPromos(value.includeMembers)
+        tripSettings.value = value
+    }
+
+    /** The regular supermarket: as chosen, else the first followed branch. */
+    fun homeBranchId(settings: TripSettings = tripSettings.value): String? =
+        settings.homeBranchId?.takeIf { it in selectedPriceBranches.value } ?: selectedPriceBranches.value.firstOrNull()
+
+    /**
+     * The trip plan for the open lines: where it pays to shop by [settings] (see [app.necessityq.domain.ShoppingPlanner]).
+     * Null with fewer than two branches loaded or nothing comparable. Off the main thread.
+     */
+    val tripPlan: StateFlow<app.necessityq.domain.TripPlan?> =
+        combine(branchItemInfos, branchPromotions, tripSettings, selectedPriceBranches) { infos, promos, settings, followed ->
+            TripInputs(infos, promos, settings, followed)
+        }
+            .mapLatest { (infos, promos, settings, followed) ->
+                val home = settings.homeBranchId?.takeIf { it in followed } ?: followed.firstOrNull() ?: return@mapLatest null
+                if (infos.size < 2) return@mapLatest null
+                val lines = snapshot.value?.lines.orEmpty().filter { it.status == LineStatus.NEEDED }.distinctBy { it.itemId }
+                val now = nowLocal()
+                val quotes = infos.mapValues { (branchId, byItem) ->
+                    lines.mapNotNull { line ->
+                        byItem[line.itemId]?.let { info ->
+                            app.necessityq.domain.ShoppingPlanner.quote(line, info, promos[branchId], now, settings.includeMembers)
+                        }?.let { line.id to it }
+                    }.toMap()
+                }
+                val basket = infos.keys.associateWith { id ->
+                    app.necessityq.domain.PromoOffers.basket(promos[id], now, settings.includeMembers)
+                }
+                app.necessityq.domain.ShoppingPlanner.plan(lines, quotes, home, settings.threshold.toDouble(), settings.maxStores, basket)
+            }
+            .flowOn(kotlinx.coroutines.Dispatchers.Default)
+            .catch { emit(null) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** The split the trip follows: item id → branch; empty when not split. */
+    val tripAssignment = MutableStateFlow(prefs.tripAssignment)
+    /** The stops of the trip, in order (one stop = a single supermarket). */
+    val tripStops = MutableStateFlow(prefs.tripStops)
+
+    /**
+     * Out to shop with [plan]'s advice: a split divides the list into one list per stop (the first stop shown first);
+     * one supermarket shows its prices. Null = shop as usual, without a plan.
+     */
+    fun startTrip(plan: app.necessityq.domain.TripPlan?) {
+        val stops = plan?.chosen?.branchIds.orEmpty()
+        val assignment = if (stops.size > 1) plan!!.assignment else emptyMap()
+        prefs.tripAssignment = assignment
+        prefs.tripStops = stops
+        tripAssignment.value = assignment
+        tripStops.value = stops
+        activeStop.value = stops.firstOrNull()
+        setMode(ListMode.SHOP)
+    }
+
+    /** Shows one stop of the split (its items and prices); null = the whole list. */
+    fun selectStop(branchId: String?) { activeStop.value = branchId }
+
+    private fun endTrip() {
+        prefs.tripAssignment = emptyMap()
+        prefs.tripStops = emptyList()
+        tripAssignment.value = emptyMap()
+        tripStops.value = emptyList()
+        activeStop.value = null
+    }
+
     init {
+        // the branch the list showed last time: its cached prices are read right away, while the account and the list
+        // are still loading, so they are ready when the list is
+        prefs.lastPriceBranch?.let { loadPrices(it) }
         // the list shows ranges of the primary branch: load its prices as soon as it is known
-        viewModelScope.launch { primaryBranch.collect { b -> b?.let { loadPrices(it.id) } } }
+        viewModelScope.launch {
+            primaryBranchId.collect { id ->
+                if (id != null) {
+                    loadPrices(id)
+                    if (activeStop.value == null && hereBranch.value == null) prefs.lastPriceBranch = id
+                }
+            }
+        }
         // the other followed branches too (in the background), so items can be compared with them
         viewModelScope.launch { selectedPriceBranches.collect { ids -> ids.forEach { loadPrices(it) } } }
+        // promotions: when the followed branches are known (the opening), then whenever the server reloads them
+        viewModelScope.launch {
+            selectedPriceBranches.filter { it.isNotEmpty() }.first()
+            refreshOffers(force = true)
+        }
+        viewModelScope.launch {
+            selectedPriceBranches.flatMapLatest { ids -> container.prices.promotionsStatus(ids) }
+                .catch { emit(emptyMap()) }
+                .collect { status -> status.keys.forEach { loadPromotions(it) } }
+        }
+        // every half hour while the app is open
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(OFFERS_MINUTES * 60_000L)
+                refreshOffers()
+            }
+        }
     }
 
     /**
@@ -889,16 +1104,19 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
      */
     val startupStep: StateFlow<StartupStep> = combine(
         session, snapshot, selectedBranchesKnown,
-        combine(selectedPriceBranches, branchPrices, pricesTried) { ids, loaded, tried -> Triple(ids, loaded, tried) },
-    ) { s, snap, branchesKnown, (ids, loaded, tried) ->
+        combine(primaryBranchId, branchPrices, pricesTried, pricedFor) { id, loaded, tried, priced -> PriceReady(id, id != null && id in loaded, id != null && id in tried, priced) },
+    ) { s, snap, branchesKnown, ready ->
         val household = (s as? Session.SignedIn)?.household
         when {
             s is Session.Loading -> StartupStep.ACCOUNT
             household == null -> StartupStep.READY // an error or a new user (onboarding): nothing to load
             snap == null -> StartupStep.LIST
             !branchesKnown -> StartupStep.PRICES
-            ids.isEmpty() -> StartupStep.READY
-            ids.first().let { it in loaded || it in tried } -> StartupStep.READY
+            ready.branchId == null -> StartupStep.READY
+            // loaded and already matched to the list's items: the first screen shows the prices
+            ready.loaded && ready.pricedFor == ready.branchId -> StartupStep.READY
+            // nothing cached and the download failed: open without prices
+            !ready.loaded && ready.tried -> StartupStep.READY
             else -> StartupStep.PRICES
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), StartupStep.ACCOUNT)
@@ -1643,6 +1861,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
      * 15 minutes. The first call comes from the activity's start, so this also covers opening the app.
      */
     fun onForeground() {
+        // back in the app: promotions and stock are checked again when the last check is half an hour old
+        refreshOffers()
         if (!prefs.autoCheckUpdates) return
         if (System.currentTimeMillis() - lastUpdateCheck < 15 * 60_000L) return
         when (_update.value) {
@@ -1728,6 +1948,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     companion object {
         const val MAX_BRANCHES = 5
+        /** Promotions and stock are checked every half hour (and on every opening). */
+        const val OFFERS_MINUTES = 30
         /** Pause in typing before a search runs. */
         const val SEARCH_DELAY_MS = 350L
 
@@ -1741,9 +1963,22 @@ private data class OnlineSearch(val query: String, val mine: List<ItemIdentity>,
 private data class PriceInputs(
     val snapshot: ListSnapshot?,
     val loaded: Map<String, app.necessityq.domain.BranchPrices>,
-    val primary: app.necessityq.domain.PriceBranch?,
+    val primary: String?,
     val preferred: Map<String, String>,
 )
+private data class BranchInfoInputs(
+    val lines: List<ListLine>,
+    val loaded: Map<String, app.necessityq.domain.BranchPrices>,
+    val followed: List<String>,
+    val preferred: Map<String, String>,
+)
+private data class TripInputs(
+    val infos: Map<String, Map<String, app.necessityq.domain.ItemPriceInfo>>,
+    val promos: Map<String, app.necessityq.domain.BranchPromotions>,
+    val settings: AppViewModel.TripSettings,
+    val followed: List<String>,
+)
+private data class PriceReady(val branchId: String?, val loaded: Boolean, val tried: Boolean, val pricedFor: String?)
 private data class CompareInputs(
     val infos: Map<String, app.necessityq.domain.ItemPriceInfo>,
     val loaded: Map<String, app.necessityq.domain.BranchPrices>,

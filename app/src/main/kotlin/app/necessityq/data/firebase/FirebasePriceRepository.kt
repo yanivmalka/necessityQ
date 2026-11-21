@@ -3,6 +3,8 @@ package app.necessityq.data.firebase
 import app.necessityq.domain.BranchPriceStatus
 import app.necessityq.domain.BranchPrices
 import app.necessityq.domain.BranchProduct
+import app.necessityq.domain.BranchPromotions
+import app.necessityq.domain.Promotion
 import app.necessityq.domain.PriceBranch
 import app.necessityq.domain.PriceRepository
 import com.google.firebase.firestore.DocumentSnapshot
@@ -39,6 +41,8 @@ import kotlinx.serialization.json.jsonPrimitive
  *   prices/branchIndex                 { updatedAt, cities[], branches[{ id, chainKey, chainName, storeId, name, address, city, lat, lng, approx }] }
  *   priceBranches/{branchId}           { updatedAt, items, error, … }   — freshness per branch
  *   Storage prices/{branchId}.json.gz  { updatedAt, rangeDays, items[{ c, n, b, q, u, w, i, p, up, s, lo, hi, h }] }
+ *   promoBranches/{branchId}           { updatedAt, promos, … }   — freshness of the promotions (checked every 30 minutes)
+ *   Storage promos/{branchId}.json.gz  { updatedAt, promos[{ id, d, c[], mq, dp, dr, s, e, cl, cp, sl, mb, t }] } — every promotion
  *   households/{hid}/settings/priceBranches { kind: "priceBranches", branchIds[], preferred{itemId: barcode} } — what the server keeps fresh,
  *                                       and the product the household chose for a generic item (optional)
  * Snapshots are cached in [cacheDir] and downloaded again only when the server's updatedAt changes.
@@ -108,6 +112,50 @@ class FirebasePriceRepository(
         withContext(Dispatchers.Default) { parse(bytes) }.also { memory[branchId] = it }
     }
 
+    override suspend fun cachedPrices(branchId: String): BranchPrices? = lock.withLock {
+        memory[branchId] ?: readCache(branchId)?.second?.also { memory[branchId] = it }
+    }
+
+    private val promoMemory = mutableMapOf<String, BranchPromotions>()
+    private val promoLock = Mutex()
+
+    override fun promotionsStatus(branchIds: List<String>): Flow<Map<String, Long>> {
+        if (branchIds.isEmpty()) return flowOf(emptyMap())
+        return db.collection("promoBranches").whereIn(FieldPath.documentId(), branchIds.take(30)).observe()
+            .map { snap -> snap.documents.associate { it.id to millis(it.getString("updatedAt")) } }
+    }
+
+    override suspend fun promotions(branchId: String): BranchPromotions? = promoLock.withLock {
+        val status = runCatching { db.document("promoBranches/$branchId").get().await() }.getOrNull()
+        val serverUpdated = status?.getString("updatedAt")
+            ?: return@withLock promoMemory[branchId] ?: readPromoCache(branchId)?.second
+        promoMemory[branchId]?.takeIf { it.updatedAtMillis == millis(serverUpdated) }?.let { return@withLock it }
+        readPromoCache(branchId)?.takeIf { it.first == serverUpdated }?.let { (_, cached) ->
+            promoMemory[branchId] = cached
+            return@withLock cached
+        }
+        val bytes = storage.reference.child("promos/$branchId.json.gz").getBytes(MAX_BYTES).await()
+        withContext(Dispatchers.IO) {
+            val dir = File(cacheDir, "promos").apply { mkdirs() }
+            File(dir, "$branchId.json.gz").writeBytes(bytes)
+            File(dir, "$branchId.stamp").writeText(serverUpdated)
+        }
+        withContext(Dispatchers.Default) { parsePromos(bytes, branchId) }.also { promoMemory[branchId] = it }
+    }
+
+    override suspend fun requestOffersRefresh(branchIds: List<String>) {
+        if (branchIds.isEmpty()) return
+        functions.getHttpsCallable("refreshOffers").call(mapOf("branchIds" to branchIds)).await()
+    }
+
+    private suspend fun readPromoCache(branchId: String): Pair<String, BranchPromotions>? = withContext(Dispatchers.IO) {
+        val dir = File(cacheDir, "promos")
+        val data = File(dir, "$branchId.json.gz")
+        val stamp = File(dir, "$branchId.stamp")
+        if (!data.exists() || !stamp.exists()) return@withContext null
+        runCatching { stamp.readText() to data.readBytes() }.getOrNull()
+    }?.let { (stamp, bytes) -> withContext(Dispatchers.Default) { runCatching { stamp to parsePromos(bytes, branchId) }.getOrNull() } }
+
     override suspend fun requestRefresh(branchId: String): Boolean {
         val result = functions.getHttpsCallable("refreshBranch").call(mapOf("branchId" to branchId)).await()
         return (result.data as? Map<*, *>)?.get("refreshed") == true
@@ -149,6 +197,40 @@ class FirebasePriceRepository(
             items = d.getLong("items")?.toInt() ?: 0,
             error = d.getString("error"),
         )
+
+        /** Gzipped promotions JSON → the branch's running promotions. */
+        fun parsePromos(gz: ByteArray, branchId: String): BranchPromotions {
+            val text = GZIPInputStream(gz.inputStream()).bufferedReader(Charsets.UTF_8).use { it.readText() }
+            val root = Json.parseToJsonElement(text).jsonObject
+            val promos = root["promos"]?.jsonArray.orEmpty().mapNotNull { el ->
+                val o = el as? JsonObject ?: return@mapNotNull null
+                fun s(k: String) = (o[k] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: ""
+                fun d(k: String) = (o[k] as? JsonPrimitive)?.doubleOrNull
+                fun b(k: String) = (o[k] as? JsonPrimitive)?.booleanOrNull ?: false
+                // every promotion is kept as published; what is not offered is decided by PromoOffers
+                val codes = (o["c"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.content }.toSet()
+                Promotion(
+                    id = s("id"),
+                    description = s("d"),
+                    codes = codes,
+                    minQty = d("mq") ?: 1.0,
+                    discountedPrice = d("dp"),
+                    discountRate = d("dr"),
+                    start = s("s"),
+                    end = s("e"),
+                    clubOnly = b("cl"),
+                    coupon = b("cp"),
+                    stockLimited = b("sl"),
+                    minBasket = d("mb"),
+                    wholeBasket = b("t"),
+                )
+            }
+            return BranchPromotions(
+                branchId = (root["branchId"] as? JsonPrimitive)?.content ?: branchId,
+                updatedAtMillis = millis((root["updatedAt"] as? JsonPrimitive)?.content),
+                promotions = promos,
+            )
+        }
 
         /** Gzipped snapshot JSON → products. */
         fun parse(gz: ByteArray): BranchPrices {

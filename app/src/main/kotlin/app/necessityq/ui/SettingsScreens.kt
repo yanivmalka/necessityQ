@@ -93,6 +93,7 @@ fun PageScaffold(title: String, modifier: Modifier = Modifier, content: @Composa
 @Composable
 fun AppearanceScreen(vm: AppViewModel, modifier: Modifier = Modifier) = PageScaffold("מראה", modifier) {
     DisplayCard(vm)
+    PalettePicker(vm)
     AppIconPicker()
 }
 

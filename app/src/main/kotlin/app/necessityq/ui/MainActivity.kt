@@ -61,7 +61,6 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material3.SnackbarHostState
@@ -91,7 +90,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             val bright by vm.brightTheme.collectAsStateWithLifecycle()
-            NecessityTheme(bright) {
+            val palette by vm.palette.collectAsStateWithLifecycle()
+            NecessityTheme(bright, palette) {
                 // a themed ground for the whole app, so text everywhere (also in full-page dialogs such as a
                 // צ'אט פוד conversation) takes the theme's ink: light on the dark theme, dark on the light one
                 Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) { Root(vm) }
@@ -186,7 +186,7 @@ private fun Root(vm: AppViewModel) {
         is Session.SignedIn -> {
             val household = s.household
             if (household == null) {
-                Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
+                Scaffold(snackbarHost = { SwipeableSnackbarHost(snackbar) }) { padding ->
                     OnboardingScreen(vm, s.account, Modifier.padding(padding))
                 }
                 return
@@ -273,7 +273,7 @@ private fun Root(vm: AppViewModel) {
                 LocalWeightPriceUnit provides display.weightUnit,
             ) {
                 Scaffold(
-                    snackbarHost = { SnackbarHost(snackbar) },
+                    snackbarHost = { SwipeableSnackbarHost(snackbar) },
                     bottomBar = {
                         // shopping is a focused mode: the list takes the whole screen and has its own way back
                         if (!shoppingOnList) {

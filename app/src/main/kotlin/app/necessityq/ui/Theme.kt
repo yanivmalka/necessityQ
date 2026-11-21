@@ -87,7 +87,7 @@ private fun tagPair(kind: TagKind): Pair<Color, Color> = when (kind) {
  * swap roles (dark fill, light text), which keeps exactly the same two colours and the same contrast.
  */
 @Immutable
-class NqColors(private val dark: Boolean) {
+class NqColors(private val dark: Boolean, private val palette: AppPalette = AppPalette.MARKET) {
     /** Background and text of a tag pill. */
     fun tag(kind: TagKind): Pair<Color, Color> = tagPair(kind).let { (tint, ink) -> if (dark) ink to tint else tint to ink }
 
@@ -125,7 +125,7 @@ class NqColors(private val dark: Boolean) {
     val segmentTrack: Color = if (dark) Color(0xFF262B28) else Color(0xFFE9E6DD)
 
     /** Header of the shopping screen and the text on it. */
-    val shopHeader: Color = if (dark) Color(0xFF0F5139) else Color(0xFF0B6E4F)
+    val shopHeader: Color = if (dark) palette.darkContainer else palette.primary
     val onShopHeader: Color = Color.White
     val onShopHeaderMuted: Color = if (dark) Color(0xFFB7DCC8) else Color(0xFFCFE7DB)
     val shopProgress: Color = Color(0xFFFFD8A8)
@@ -251,14 +251,96 @@ private fun Typography.withFont(family: FontFamily) = Typography(
 )
 
 /**
- * Two looks, both in the Market palette and the Rubik typeface:
+ * The colour palettes the household can choose ("מראה" ← "ערכת צבעים"). Each has its own main colour (actions, the
+ * shopping header, chosen chips) and a matching ground, in light and in dark. Amber stays for "running out", deals and
+ * missing items, and the red/green of prices stay, in every palette, so their meaning does not change.
+ */
+enum class AppPalette(
+    val label: String,
+    val primary: Color,
+    val container: Color,
+    val onContainer: Color,
+    val background: Color,
+    val surfaceVariant: Color,
+    val outlineVariant: Color,
+    val darkPrimary: Color,
+    val onDarkPrimary: Color,
+    val darkContainer: Color,
+    val onDarkContainer: Color,
+    val darkBackground: Color,
+    val darkSurface: Color,
+    val darkSurfaceVariant: Color,
+) {
+    MARKET(
+        "שוק (ירוק)",
+        Color(0xFF0B6E4F), Color(0xFFE3F1EA), Color(0xFF08513A), Color(0xFFF6F4EE), Color(0xFFF0EEE8), Color(0xFFE4E1D8),
+        Color(0xFF7FD1A8), Color(0xFF00391F), Color(0xFF0F5139), Color(0xFFC7EBD8), Color(0xFF121513), Color(0xFF1B1F1C), Color(0xFF262B28),
+    ),
+    SEA(
+        "ים (כחול)",
+        Color(0xFF1E5AA8), Color(0xFFE1ECFA), Color(0xFF113E78), Color(0xFFF2F5F9), Color(0xFFE9EEF4), Color(0xFFDCE3EC),
+        Color(0xFF9CC3F5), Color(0xFF0B2A52), Color(0xFF163D6B), Color(0xFFD6E6FB), Color(0xFF111418), Color(0xFF1A1E23), Color(0xFF252B32),
+    ),
+    GRAPE(
+        "ענבים (סגול)",
+        Color(0xFF5B3A9E), Color(0xFFECE5F8), Color(0xFF41287A), Color(0xFFF6F3F9), Color(0xFFEEE9F3), Color(0xFFE2DBEB),
+        Color(0xFFC6B1F2), Color(0xFF2A1659), Color(0xFF3E2A6E), Color(0xFFE9DFFC), Color(0xFF141217), Color(0xFF1D1A21), Color(0xFF28242D),
+    ),
+    CITRUS(
+        "הדר (כתום)",
+        Color(0xFFC2410C), Color(0xFFFDE9DC), Color(0xFF8A2E08), Color(0xFFFAF5EF), Color(0xFFF3ECE3), Color(0xFFE9DFD2),
+        Color(0xFFFFB38A), Color(0xFF4F1A02), Color(0xFF6B2A0A), Color(0xFFFFE1CF), Color(0xFF161311), Color(0xFF201C19), Color(0xFF2C2622),
+    ),
+    OLIVE(
+        "זית",
+        Color(0xFF5F6B2E), Color(0xFFEEF0DD), Color(0xFF454E1F), Color(0xFFF6F5EC), Color(0xFFEEECDF), Color(0xFFE2E0CF),
+        Color(0xFFC8D48E), Color(0xFF2B3210), Color(0xFF3E4720), Color(0xFFE9EFC9), Color(0xFF131410), Color(0xFF1C1E18), Color(0xFF272A22),
+    ),
+    GRAPHITE(
+        "גרפיט (אפור)",
+        Color(0xFF37474F), Color(0xFFE6EBEE), Color(0xFF263238), Color(0xFFF4F5F6), Color(0xFFEBEDEF), Color(0xFFDEE2E5),
+        Color(0xFFB0C4CE), Color(0xFF1A262C), Color(0xFF2F3D44), Color(0xFFDDE7EC), Color(0xFF121314), Color(0xFF1B1D1F), Color(0xFF26292B),
+    ),
+    ;
+
+    /** The Market scheme with this palette's main colour and ground. */
+    fun scheme(dark: Boolean) = if (dark) {
+        MarketDark.copy(
+            primary = darkPrimary,
+            onPrimary = onDarkPrimary,
+            primaryContainer = darkContainer,
+            onPrimaryContainer = onDarkContainer,
+            background = darkBackground,
+            surface = darkSurface,
+            surfaceVariant = darkSurfaceVariant,
+            surfaceContainer = darkSurface,
+            surfaceContainerHighest = darkSurface,
+        )
+    } else {
+        MarketLight.copy(
+            primary = primary,
+            primaryContainer = container,
+            onPrimaryContainer = onContainer,
+            background = background,
+            surfaceVariant = surfaceVariant,
+            outlineVariant = outlineVariant,
+        )
+    }
+
+    companion object {
+        fun of(name: String?): AppPalette = entries.firstOrNull { it.name == name } ?: MARKET
+    }
+}
+
+/**
+ * Two looks, both in the chosen palette ([AppPalette]) and the Rubik typeface:
  *  - bright (default): for supermarkets and sunlight. Always light, with larger text.
  *  - system: regular text sizes, light or dark following the phone setting.
  */
 @Composable
-fun NecessityTheme(bright: Boolean, content: @Composable () -> Unit) {
+fun NecessityTheme(bright: Boolean, palette: AppPalette = AppPalette.MARKET, content: @Composable () -> Unit) {
     val dark = !bright && isSystemInDarkTheme()
-    val colors = if (dark) MarketDark else MarketLight
+    val colors = palette.scheme(dark)
     val base = Typography()
     val sized = base.copy(
         titleLarge = base.titleLarge.copy(fontWeight = FontWeight.Bold, fontSize = if (bright) 26.sp else 24.sp),
@@ -272,7 +354,7 @@ fun NecessityTheme(bright: Boolean, content: @Composable () -> Unit) {
     // The app is Hebrew-first: force RTL regardless of the device language.
     CompositionLocalProvider(
         LocalLayoutDirection provides LayoutDirection.Rtl,
-        LocalNqColors provides NqColors(dark),
+        LocalNqColors provides NqColors(dark, palette),
     ) {
         MaterialTheme(colorScheme = colors, typography = sized.withFont(Rubik), content = content)
     }

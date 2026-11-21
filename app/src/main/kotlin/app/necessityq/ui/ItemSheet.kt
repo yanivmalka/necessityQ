@@ -330,8 +330,6 @@ fun ItemSheet(
             BranchPriceSection(vm, itemId = itemId, info = priceInfo)
             // the chosen product at every followed branch, like a stock ticker
             BranchQuotesStrip(vm, chosen = priceInfo?.preferred)
-            // then: how the item compares with the household's other branches
-            BranchComparisonTile(vm, itemId = itemId, name = productName, variant = productVariant, info = priceInfo)
 
             HorizontalDivider()
             if (line != null) {
@@ -897,29 +895,6 @@ private fun BranchPriceSection(vm: AppViewModel, itemId: String, info: app.neces
     }
 }
 
-/**
- * "השוואה לסניפים שלך" on the product page, under the products: the item here against the household's other followed
- * branches (by the chosen product's barcode, the products both sell, or the typical prices).
- */
-@Composable
-private fun BranchComparisonTile(vm: AppViewModel, itemId: String, name: String, variant: String?, info: app.necessityq.domain.ItemPriceInfo?) {
-    val primary by vm.primaryBranch.collectAsStateWithLifecycle()
-    val loaded by vm.branchPrices.collectAsStateWithLifecycle()
-    val comparisons by vm.itemComparisons.collectAsStateWithLifecycle()
-    val followed by vm.selectedPriceBranches.collectAsStateWithLifecycle()
-    val allBranches by vm.priceBranches.collectAsStateWithLifecycle()
-    val branch = primary ?: return
-    val comparedFallback by produceState<app.necessityq.domain.PriceComparison?>(null, loaded, info, comparisons, itemId) {
-        value = if (comparisons[itemId] != null || info == null) null else vm.comparisonFor(itemId, name, variant)
-    }
-    val comparison = comparisons[itemId] ?: comparedFallback
-    when {
-        comparison != null -> BranchComparison(comparison, allBranches)
-        info != null && followed.size > 1 && followed.any { it != branch.id && !loaded.containsKey(it) } ->
-            Text("טוען את המחירים של הסניפים האחרים שלך להשוואה…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
 /** The item page's own window: drawn edge to edge with no dimming, status-bar icons readable on the page. */
 @Composable
 internal fun ItemPageWindow() {
@@ -1022,55 +997,6 @@ private fun BranchProductRow(c: app.necessityq.domain.BranchProduct, chosen: Boo
             Text(listOf(c.brand, range.removePrefix(" · ")).filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
         }
         Text(shownProductPrice(c, c.price, LocalWeightPriceUnit.current), fontWeight = FontWeight.Bold)
-    }
-}
-
-/**
- * The item here against the household's other followed branches: a verdict pill (significantly dearer / cheaper,
- * or about the same), then each branch's price with the cheapest marked.
- */
-@Composable
-private fun BranchComparison(c: app.necessityq.domain.PriceComparison, branches: List<app.necessityq.domain.PriceBranch>) {
-    fun title(id: String) = branches.firstOrNull { it.id == id }?.title ?: id
-    val unit = LocalWeightPriceUnit.current
-    fun price(q: app.necessityq.domain.BranchPriceRange): String {
-        val r = c.shown(q, unit)
-        return app.necessityq.domain.PriceData.formatRange(r.low, r.high) + if (c.unitKilos != null) " ${unit.label}" else ""
-    }
-    val cheapest = c.cheapestBranchId
-    Column(
-        Modifier.fillMaxWidth().clip(NqShapes.Panel).background(MaterialTheme.colorScheme.surfaceVariant).padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("השוואה לסניפים שלך", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            PriceComparisonPill(c)
-        }
-        (listOf(c.here) + c.others).forEach { q ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    title(q.branchId),
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = if (q.branchId == c.branchId) FontWeight.Bold else FontWeight.Normal,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                if (q.branchId == cheapest && c.others.isNotEmpty()) {
-                    Text("הזול  ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                }
-                Text(price(q), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
-            }
-        }
-        Text(
-            when (c.basis) {
-                app.necessityq.domain.CompareBasis.SAME_PRODUCT -> "לפי אותו מוצר (ברקוד) בכל סניף"
-                app.necessityq.domain.CompareBasis.SHARED_PRODUCTS -> "לפי המוצרים שנמכרים גם כאן וגם בסניפים האחרים"
-                app.necessityq.domain.CompareBasis.TYPICAL -> "לפי המחיר הטיפוסי של המוצרים המתאימים בכל סניף"
-            },
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 
