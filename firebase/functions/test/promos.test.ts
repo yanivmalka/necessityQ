@@ -62,13 +62,13 @@ describe("promotions", () => {
     expect(promos).toEqual([expect.objectContaining({ id: "7", c: ["111111111", "222222222"], mq: 3, dp: 20 })]);
   });
 
-  it("counts as offerable only running, stock-independent promotions on products the branch sells", () => {
+  it("counts as offerable running promotions on products the branch sells, and whole-basket ones", () => {
     const { promos } = parsePromotions(PROMO_XML);
-    // 102 depends on stock, 103 ended, 104 is on the whole basket
-    expect(offerable(promos, new Set(["7290000042015"]), "2026-11-21T12:00:00").map((p) => p.id)).toEqual(["101"]);
-    // out of stock: the product is not in the price file
-    expect(offerable(promos, new Set(["999"]), "2026-11-21T12:00:00")).toEqual([]);
-    expect(offerable(promos, new Set(["7290000042015"]), "2026-12-05T12:00:00")).toEqual([]);
+    // 102 depends on stock (shown with a warning), 103 ended, 104 is on the whole basket
+    expect(offerable(promos, new Set(["7290000042015"]), "2026-11-21T12:00:00").map((p) => p.id)).toEqual(["101", "102", "104"]);
+    // out of stock: the product is not in the price file; the basket promotion stays
+    expect(offerable(promos, new Set(["999"]), "2026-11-21T12:00:00").map((p) => p.id)).toEqual(["104"]);
+    expect(offerable(promos, new Set(["7290000042015"]), "2026-12-05T12:00:00").map((p) => p.id)).toEqual(["102", "104"]);
   });
 
   it("reads the common date forms", () => {
@@ -153,7 +153,7 @@ describe("promotions and stock every half hour", () => {
     };
     const deps = { store, sourceFor: () => src, now: () => new Date("2026-11-21T10:30:00Z") };
     const st = await refreshBranchPromos(branch, deps, promoStore);
-    expect(st).toMatchObject({ error: null, promos: 4, active: 1 });
+    expect(st).toMatchObject({ error: null, promos: 4, active: 3 });
     expect(mem.promos?.promos.map((p) => p.id)).toEqual(["101", "102", "103", "104"]);
     // nothing is cut from a promotion: both barcodes stay, also the one the branch does not sell now
     expect(mem.promos?.promos[0].c).toEqual(["7290000042015", "7290000000001"]);

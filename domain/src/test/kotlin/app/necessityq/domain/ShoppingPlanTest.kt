@@ -89,6 +89,7 @@ class ShoppingPlanTest {
             "A", 0,
             listOf(
                 Promotion("1", "20%", setOf("x"), discountRate = 0.2, stockLimited = true),
+                Promotion("1b", "70% עד גמר המלאי", setOf("x"), discountRate = 0.7, stockLimited = true, clubOnly = true),
                 Promotion("2", "ישן", setOf("x"), discountRate = 0.3, end = "2026-11-01T23:59:59"),
                 Promotion("3", "מועדון", setOf("x"), discountRate = 0.4, clubOnly = true),
                 Promotion("5", "עוד לא התחיל", setOf("x"), discountRate = 0.5, start = "2026-12-01T00:00:00"),
@@ -99,11 +100,16 @@ class ShoppingPlanTest {
             ),
         )
         val infos = mapOf("A" to mapOf("x" to info("A", "x", 10.0)))
+        // stock-dependent: offered, with its warning (the best for everyone here is 20%)
         val offers = PromoOffers.forList(listOf(line("x")), infos, mapOf("A" to promos), now, includeMembers = false)
-        assertEquals(listOf("4"), offers.map { it.promotion.id })
+        assertEquals(listOf("1"), offers.map { it.promotion.id })
+        assertEquals("עד גמר המלאי — ייתכן שייגמר", offers.single().promotion.stockWarning)
         val members = PromoOffers.forList(listOf(line("x")), infos, mapOf("A" to promos), now, includeMembers = true)
-        assertEquals(listOf("3"), members.map { it.promotion.id })
-        assertEquals(6.0, members.single().promoUnit, 0.001)
+        assertEquals(listOf("1b"), members.map { it.promotion.id })
+        assertEquals(3.0, members.single().promoUnit, 0.001)
+        // …but a plan never counts it: the quote takes the 10% that holds for everyone
+        val quote = ShoppingPlanner.quote(line("x"), info("A", "x", 10.0), promos, now, includeMembers = false)!!
+        assertEquals(9.0, quote.cost, 0.001)
     }
 
     @Test
@@ -112,5 +118,27 @@ class ShoppingPlanTest {
         // "2 ב-…" published per unit: 5 for 2 of a 12 product would be 2.5 — read as 5 a unit
         assertEquals(5.0, Promotion("1", "", setOf(), minQty = 2.0, discountedPrice = 5.0).unitPrice(20.0)!!, 0.001)
         assertNull(Promotion("1", "", setOf(), discountedPrice = 9.0).unitPrice(8.0))
+    }
+
+    @Test
+    fun wholeBasketPromotionTakesItsDiscountWhenTheStopReachesTheMinimum() {
+        val off10 = Promotion("b", "10 ₪ הנחה מעל 200", emptySet(), discountedPrice = 10.0, minBasket = 200.0, wholeBasket = true)
+        // B is 205 (reaches 200: 195 with the discount), C 187 (under 200: no discount)
+        val plan = ShoppingPlanner.plan(lines, quotes, "A", threshold = 50.0, maxStores = 1, basket = mapOf("B" to listOf(off10)))!!
+        val b = plan.singles.first { it.branchIds == listOf("B") }.stops.single()
+        assertEquals(205.0, b.itemsTotal, 0.001)
+        assertEquals(10.0, b.basketDiscount, 0.001)
+        assertEquals(195.0, b.total, 0.001)
+        assertEquals(0.0, plan.singles.first { it.branchIds == listOf("C") }.stops.single().basketDiscount, 0.001)
+        // a rate, and the minimum
+        val pct = Promotion("p", "5%", emptySet(), discountRate = 0.05, wholeBasket = true)
+        assertEquals(10.0, pct.basketDiscount(200.0)!!, 0.001)
+        assertNull(off10.basketDiscount(150.0))
+        assertNull(Promotion("i", "", setOf("x"), discountedPrice = 10.0).basketDiscount(500.0))
+        // members only, and only running ones
+        val now = "2026-11-21T10:00:00"
+        val bp = BranchPromotions("B", 0, listOf(off10, off10.copy(id = "c", coupon = true), off10.copy(id = "old", end = "2026-01-01T00:00:00")))
+        assertEquals(listOf("b"), PromoOffers.basket(bp, now, includeMembers = false).map { it.id })
+        assertEquals(listOf("b", "c"), PromoOffers.basket(bp, now, includeMembers = true).map { it.id })
     }
 }

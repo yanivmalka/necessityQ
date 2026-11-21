@@ -66,6 +66,24 @@ data class Promotion(
             }
         }
 
+    /**
+     * A whole-basket promotion's discount on a basket of [total]: a rate of the total, or the published amount off.
+     * Null when the basket is under the minimum, or when the amount makes no sense (half the basket or more).
+     */
+    fun basketDiscount(total: Double): Double? {
+        if (!wholeBasket || total <= 0) return null
+        if (minBasket != null && total + 0.005 < minBasket) return null
+        val off = when {
+            discountRate != null -> total * discountRate
+            discountedPrice != null -> discountedPrice
+            else -> null
+        }
+        return off?.takeIf { it > 0.005 && it < total * 0.5 }
+    }
+
+    /** "עד גמר המלאי — ייתכן שייגמר" for a promotion that depends on stock; null otherwise. */
+    val stockWarning: String? get() = if (stockLimited) "עד גמר המלאי — ייתכן שייגמר" else null
+
     /** "במועדון", "בקופון", "בקנייה מעל 300 ₪" — what it takes, empty for every customer. */
     val conditions: List<String>
         get() = buildList {
@@ -101,26 +119,44 @@ data class PromoOffer(
 
 object PromoOffers {
     /**
-     * A promotion the app may offer: running now (not ended, not yet to start), not dependent on stock, on items (not
-     * the whole basket), and (unless [includeMembers]) open to every customer, without a club, a card or a coupon.
+     * An item promotion the app may offer: running now (not ended, not yet to start), on items (whole-basket ones are
+     * [basket]), and (unless [includeMembers]) open to every customer, without a club, a card or a coupon. One that
+     * depends on stock is offered only with [allowStockLimited] (shown with its warning, never counted in a plan).
      * Out of stock is checked by the product: offers look only at products in the branch's current price file.
      */
-    fun usable(p: Promotion, nowLocal: String, includeMembers: Boolean): Boolean =
-        p.runningAt(nowLocal) && !p.stockLimited && !p.wholeBasket && (includeMembers || !p.forMembers)
+    fun usable(p: Promotion, nowLocal: String, includeMembers: Boolean, allowStockLimited: Boolean = false): Boolean =
+        p.runningAt(nowLocal) && (allowStockLimited || !p.stockLimited) && !p.wholeBasket && (includeMembers || !p.forMembers)
+
+    /** A branch's running whole-basket promotions ("10 ₪ הנחה בקנייה מעל 300 ₪"), members' ones with [includeMembers]. */
+    fun basket(promos: BranchPromotions?, nowLocal: String, includeMembers: Boolean): List<Promotion> =
+        promos?.promotions.orEmpty().filter { p ->
+            p.wholeBasket && p.runningAt(nowLocal) && (includeMembers || !p.forMembers) &&
+                (p.discountRate != null || p.discountedPrice != null)
+        }
+
+    /** Whole-basket promotions of every branch, as (branch id, promotion). */
+    fun basketOffers(promos: Map<String, BranchPromotions>, nowLocal: String, includeMembers: Boolean): List<Pair<String, Promotion>> =
+        promos.flatMap { (id, bp) -> basket(bp, nowLocal, includeMembers).map { id to it } }
 
     /**
      * The best promotion on an item at a branch: among the item's products in stock there (the household's chosen
      * one only, when it has one), the lowest price a unit. Products by weight take only a rate (a price "for 2" of a
      * weighed product means nothing).
      */
-    fun best(info: ItemPriceInfo, promos: BranchPromotions?, nowLocal: String, includeMembers: Boolean): Triple<BranchProduct, Promotion, Double>? {
+    fun best(
+        info: ItemPriceInfo,
+        promos: BranchPromotions?,
+        nowLocal: String,
+        includeMembers: Boolean,
+        allowStockLimited: Boolean = false,
+    ): Triple<BranchProduct, Promotion, Double>? {
         if (promos == null) return null
         val products = info.preferred?.let { listOf(it) } ?: info.candidates
         var best: Triple<BranchProduct, Promotion, Double>? = null
         for (product in products) {
             if (product.internalCode && product.code.isBlank()) continue
             for (p in promos.byCode[product.code].orEmpty()) {
-                if (!usable(p, nowLocal, includeMembers)) continue
+                if (!usable(p, nowLocal, includeMembers, allowStockLimited)) continue
                 if (product.soldByWeight && p.discountRate == null) continue
                 val unit = p.unitPrice(product.price) ?: continue
                 if (best == null || unit < best.third) best = Triple(product, p, unit)
@@ -146,7 +182,8 @@ object PromoOffers {
             val branchPromos = promos[branchId] ?: continue
             for (line in open) {
                 val info = byItem[line.itemId] ?: continue
-                val (product, promo, unit) = best(info, branchPromos, nowLocal, includeMembers) ?: continue
+                // also those that depend on stock: shown with their warning
+                val (product, promo, unit) = best(info, branchPromos, nowLocal, includeMembers, allowStockLimited = true) ?: continue
                 out += PromoOffer(line.itemId, line.displayName, branchId, promo, product, product.price, unit)
             }
         }

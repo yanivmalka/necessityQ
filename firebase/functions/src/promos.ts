@@ -131,15 +131,16 @@ export function parsePromotions(xml: string): { storeId: string | null; promos: 
 }
 
 /**
- * The promotions the app may offer now (for the status count; the app applies the same rules itself): running at
- * [nowLocal] (Israel time as "yyyy-mm-ddThh:mm:ss"), not dependent on stock, not on the whole basket, with a reward
- * that can be priced, on at least one barcode the branch sells now ([sold]; missing from the price file = out of stock).
+ * The promotions the app may show now (for the status count; the app applies the same rules itself): running at
+ * [nowLocal] (Israel time as "yyyy-mm-ddThh:mm:ss"), with a reward that can be priced, and either on the whole basket
+ * or on at least one barcode the branch sells now ([sold]; missing from the price file = out of stock). Those that
+ * depend on stock are shown too, with a warning.
  */
 export function offerable(promos: PromoItem[], sold: Set<string>, nowLocal: string): PromoItem[] {
   return promos
     .filter((p) => (!p.s || p.s <= nowLocal) && (!p.e || p.e >= nowLocal))
-    .filter((p) => !p.sl && !p.t && (p.dp !== null || p.dr !== null))
-    .filter((p) => p.c.some((c) => sold.has(c)));
+    .filter((p) => p.dp !== null || p.dr !== null)
+    .filter((p) => p.t || p.c.some((c) => sold.has(c)));
 }
 
 /** "now" in Israel as "yyyy-mm-ddThh:mm:ss", to compare with the files' local times. */

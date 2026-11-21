@@ -55,6 +55,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.necessityq.domain.PriceBranch
 import app.necessityq.domain.PriceData
 import app.necessityq.domain.PromoOffer
+import app.necessityq.domain.Promotion
 import app.necessityq.domain.TripAdvice
 import app.necessityq.domain.TripOption
 import app.necessityq.domain.TripPlan
@@ -79,6 +80,7 @@ fun TripPlanSheet(vm: AppViewModel, onDismiss: () -> Unit) {
     val settings by vm.tripSettings.collectAsStateWithLifecycle()
     val plan by vm.tripPlan.collectAsStateWithLifecycle()
     val offers by vm.promoOffers.collectAsStateWithLifecycle()
+    val basketOffers by vm.basketOffers.collectAsStateWithLifecycle()
     val followed by vm.selectedPriceBranches.collectAsStateWithLifecycle()
     val all by vm.priceBranches.collectAsStateWithLifecycle()
     val loading by vm.pricesLoading.collectAsStateWithLifecycle()
@@ -169,9 +171,9 @@ fun TripPlanSheet(vm: AppViewModel, onDismiss: () -> Unit) {
                 else -> PlanResult(p, all)
             }
 
-            if (offers.isNotEmpty()) {
+            if (offers.isNotEmpty() || basketOffers.isNotEmpty()) {
                 HorizontalDivider()
-                PromoOfferList(offers.take(12), all, title = "מבצעים לפריטים ברשימה")
+                PromoOfferList(offers.take(12), basketOffers, all, title = "מבצעים לרשימה")
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -238,6 +240,13 @@ private fun PlanResult(p: TripPlan, all: List<PriceBranch>) {
                     }
                 }
             }
+            // whole-basket promotions the chosen stops reach
+            p.chosen.stops.filter { it.basketPromo != null }.forEach { stop ->
+                Text(
+                    "כולל הנחה על הסל ב${branchName(stop.branchId, all)}: ${shekels(stop.basketDiscount)} (${stop.basketPromo!!.shortLabel})",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             // why: the items that are cheaper at the chosen stops
             if (p.reasons.isNotEmpty()) {
                 Spacer(Modifier.height(2.dp))
@@ -256,15 +265,19 @@ private fun PlanResult(p: TripPlan, all: List<PriceBranch>) {
     Text("כמה תעלה הרשימה", style = MaterialTheme.typography.labelLarge)
     p.singles.forEach { o ->
         val diff = o.total - p.home.total
+        val basket = o.stops.sumOf { it.basketDiscount }
         PlanRow(
             optionText(o, all) + if (o.branchIds.first() == p.homeBranchId) " (הרגיל)" else "",
             shekels(o.total),
-            when {
-                o.branchIds.first() == p.homeBranchId -> ""
-                diff < -0.005 -> "חוסך ${shekels(-diff)}"
-                diff > 0.005 -> "יקר ב-${shekels(diff)}"
-                else -> "אותו מחיר"
-            },
+            listOfNotNull(
+                when {
+                    o.branchIds.first() == p.homeBranchId -> null
+                    diff < -0.005 -> "חוסך ${shekels(-diff)}"
+                    diff > 0.005 -> "יקר ב-${shekels(diff)}"
+                    else -> "אותו מחיר"
+                },
+                if (basket > 0.005) "כולל ${shekels(basket)} הנחה על הסל" else null,
+            ).joinToString(" · "),
             chosen = o == p.chosen,
         )
     }
@@ -277,7 +290,7 @@ private fun PlanResult(p: TripPlan, all: List<PriceBranch>) {
         )
     }
     val note = buildList {
-        add("ההשוואה על ${p.compared} מתוך ${p.open} פריטים שיש להם מחיר בכל הסניפים, כולל מבצעים.")
+        add("ההשוואה על ${p.compared} מתוך ${p.open} פריטים שיש להם מחיר בכל הסניפים, כולל מבצעים (בלי מבצעים \"עד גמר המלאי\", שאי אפשר לסמוך עליהם).")
         if (p.notCompared.isNotEmpty()) add("לא הושוו: ${p.notCompared.take(6).joinToString(", ")}${if (p.notCompared.size > 6) "…" else ""}.")
     }.joinToString(" ")
     Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -300,21 +313,36 @@ private fun PlanRow(title: String, total: String, note: String, chosen: Boolean)
     }
 }
 
-/** "יש למוצרים אלו מבצעים ב…": the list's items with a promotion, grouped by branch. */
+/**
+ * "יש למוצרים אלו מבצעים ב…": the list's items with a promotion, and the promotions on the whole basket, grouped by
+ * branch.
+ */
 @Composable
-fun PromoOfferList(offers: List<PromoOffer>, all: List<PriceBranch>, title: String?) {
+fun PromoOfferList(offers: List<PromoOffer>, basket: List<Pair<String, Promotion>>, all: List<PriceBranch>, title: String?) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (title != null) Text(title, style = MaterialTheme.typography.labelLarge)
-        offers.groupBy { it.branchId }.forEach { (branchId, list) ->
+        val byBranch = offers.groupBy { it.branchId }
+        val basketByBranch = basket.groupBy({ it.first }, { it.second })
+        (byBranch.keys + basketByBranch.keys).distinct().forEach { branchId ->
             Text("ב${branchName(branchId, all)}:", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-            list.forEach { o -> PromoOfferRow(o) }
+            basketByBranch[branchId].orEmpty().forEach { BasketPromoRow(it) }
+            byBranch[branchId].orEmpty().forEach { o -> PromoOfferRow(o) }
         }
     }
 }
 
+/** A promotion on the whole basket: "על כל הסל: 10 ₪ הנחה · בקנייה מעל 300 ₪ · בקופון". */
 @Composable
-private fun PromoOfferRow(o: PromoOffer) {
-    val conditions = o.promotion.conditions
+private fun BasketPromoRow(p: Promotion) {
+    PromoRowFrame(
+        title = "על כל הסל: ${p.shortLabel}",
+        details = p.conditions.joinToString(" · "),
+        warning = p.stockWarning,
+    )
+}
+
+@Composable
+private fun PromoRowFrame(title: String, details: String, warning: String?) {
     Row(
         Modifier.fillMaxWidth().background(NqTheme.colors.promoBackground, NqShapes.Panel).padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -322,31 +350,41 @@ private fun PromoOfferRow(o: PromoOffer) {
         Icon(Icons.Default.LocalOffer, null, Modifier.size(16.dp), tint = NqTheme.colors.promoInk)
         Spacer(Modifier.width(6.dp))
         Column(Modifier.weight(1f)) {
-            Text(
-                "${o.itemName}: ${o.promotion.shortLabel}",
-                color = NqTheme.colors.promoInk,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                listOfNotNull(
-                    o.product.name.takeIf { it.isNotBlank() },
-                    "${shekels(o.promoUnit)} במקום ${shekels(o.regular)}",
-                    conditions.takeIf { it.isNotEmpty() }?.joinToString(" · "),
-                ).joinToString(" · "),
-                color = NqTheme.colors.promoInk.copy(alpha = 0.85f),
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Text(title, color = NqTheme.colors.promoInk, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (details.isNotBlank()) {
+                Text(
+                    details,
+                    color = NqTheme.colors.promoInk.copy(alpha = 0.85f),
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            // "עד גמר המלאי": shown, but it may be gone by the time one gets there
+            if (warning != null) {
+                Text("⚠ $warning", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+            }
         }
     }
 }
 
-/** In the list while preparing: the list's items that have a promotion at the followed branches. Collapsible. */
 @Composable
-fun PromoOffersCard(offers: List<PromoOffer>, all: List<PriceBranch>) {
+private fun PromoOfferRow(o: PromoOffer) {
+    val conditions = o.promotion.conditions
+    PromoRowFrame(
+        title = "${o.itemName}: ${o.promotion.shortLabel}",
+        details = listOfNotNull(
+            o.product.name.takeIf { it.isNotBlank() },
+            "${shekels(o.promoUnit)} במקום ${shekels(o.regular)}",
+            conditions.takeIf { it.isNotEmpty() }?.joinToString(" · "),
+        ).joinToString(" · "),
+        warning = o.promotion.stockWarning,
+    )
+}
+
+/** In the list while preparing: the list's items that have a promotion, and basket promotions, at the followed branches. */
+@Composable
+fun PromoOffersCard(offers: List<PromoOffer>, basket: List<Pair<String, Promotion>>, all: List<PriceBranch>) {
     var open by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
         Row(
@@ -355,9 +393,10 @@ fun PromoOffersCard(offers: List<PromoOffer>, all: List<PriceBranch>) {
         ) {
             Icon(Icons.Default.LocalOffer, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.secondary)
             Spacer(Modifier.width(8.dp))
-            val branches = offers.map { it.branchId }.distinct()
+            val branches = (offers.map { it.branchId } + basket.map { it.first }).distinct()
+            val items = offers.map { it.itemId }.distinct().size
             Text(
-                "יש למוצרים ברשימה מבצעים (${offers.map { it.itemId }.distinct().size})" +
+                (if (items > 0) "יש למוצרים ברשימה מבצעים ($items)" else "מבצעים על כל הסל (${basket.size})") +
                     if (branches.size == 1) " ב${branchName(branches.first(), all)}" else "",
                 style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.weight(1f),
@@ -366,7 +405,7 @@ fun PromoOffersCard(offers: List<PromoOffer>, all: List<PriceBranch>) {
             )
             Icon(if (open) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = if (open) "סגירה" else "פתיחה")
         }
-        if (open) PromoOfferList(offers, all, title = null)
+        if (open) PromoOfferList(offers, basket, all, title = null)
     }
 }
 

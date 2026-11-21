@@ -978,6 +978,14 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             .catch { emit(emptyList()) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** Whole-basket promotions of the followed branches ("10 ₪ הנחה בקנייה מעל 300 ₪"), as (branch id, promotion). */
+    val basketOffers: StateFlow<List<Pair<String, app.necessityq.domain.Promotion>>> =
+        combine(branchPromotions, includeMemberPromos, selectedPriceBranches) { promos, members, followed ->
+            app.necessityq.domain.PromoOffers.basketOffers(promos.filterKeys { it in followed }, nowLocal(), members)
+        }
+            .catch { emit(emptyList()) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     /** What the trip sheet asks: the saving that makes a change worth it, how many stores, the regular store. */
     data class TripSettings(val threshold: Int, val maxStores: Int, val homeBranchId: String?, val includeMembers: Boolean)
 
@@ -1015,7 +1023,10 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                         }?.let { line.id to it }
                     }.toMap()
                 }
-                app.necessityq.domain.ShoppingPlanner.plan(lines, quotes, home, settings.threshold.toDouble(), settings.maxStores)
+                val basket = infos.keys.associateWith { id ->
+                    app.necessityq.domain.PromoOffers.basket(promos[id], now, settings.includeMembers)
+                }
+                app.necessityq.domain.ShoppingPlanner.plan(lines, quotes, home, settings.threshold.toDouble(), settings.maxStores, basket)
             }
             .flowOn(kotlinx.coroutines.Dispatchers.Default)
             .catch { emit(null) }

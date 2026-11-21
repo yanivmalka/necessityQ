@@ -251,6 +251,8 @@ fun ListScreen(
     val tripAssignment by vm.tripAssignment.collectAsStateWithLifecycle()
     val activeStop by vm.activeStop.collectAsStateWithLifecycle()
     val promoOffers by vm.promoOffers.collectAsStateWithLifecycle()
+    val basketOffers by vm.basketOffers.collectAsStateWithLifecycle()
+    val hasOffers = promoOffers.isNotEmpty() || basketOffers.isNotEmpty()
     val followedBranches by vm.selectedPriceBranches.collectAsStateWithLifecycle()
     val allBranches by vm.priceBranches.collectAsStateWithLifecycle()
     var showTrip by remember { mutableStateOf(false) }
@@ -325,7 +327,7 @@ fun ListScreen(
     val leadingItems = snapshot?.let { snap ->
         (if (shopping && storePrompt) 1 else 0) +
             (if (showRecipes && recipesOnList.isNotEmpty()) 1 else 0) +
-            (if (showRecipes && promoOffers.isNotEmpty()) 1 else 0) +
+            (if (showRecipes && hasOffers) 1 else 0) +
             (if (showSuggestions && snap.runningLow.isNotEmpty()) 1 else 0) +
             (if (showSuggestions && snap.frequent.isNotEmpty()) 1 else 0) + 1
     } ?: 0
@@ -610,8 +612,8 @@ fun ListScreen(
             }
 
             // "יש למוצרים אלו מבצעים ב…": promotions on the list's items at the followed branches
-            if (showRecipes && promoOffers.isNotEmpty()) {
-                item(key = "promos") { PromoOffersCard(promoOffers, allBranches) }
+            if (showRecipes && hasOffers) {
+                item(key = "promos") { PromoOffersCard(promoOffers, basketOffers, allBranches) }
             }
 
             if (showSuggestions && snap.runningLow.isNotEmpty()) {

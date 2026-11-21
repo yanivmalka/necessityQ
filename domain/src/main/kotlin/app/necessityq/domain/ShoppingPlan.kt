@@ -7,8 +7,19 @@ data class LineQuote(val regular: Double, val withPromo: Double, val promotion: 
     val cost: Double get() = minOf(regular, withPromo)
 }
 
-/** One stop of a trip: a branch and the items bought there. */
-data class TripStop(val branchId: String, val itemIds: List<String>, val total: Double)
+/**
+ * One stop of a trip: a branch and the items bought there ([itemsTotal]), less the branch's best whole-basket promotion
+ * when the stop reaches its minimum ([basketPromo], [basketDiscount]).
+ */
+data class TripStop(
+    val branchId: String,
+    val itemIds: List<String>,
+    val itemsTotal: Double,
+    val basketPromo: Promotion? = null,
+    val basketDiscount: Double = 0.0,
+) {
+    val total: Double get() = itemsTotal - basketDiscount
+}
 
 /** A way to buy the list: one or more stops; [total] over the items compared at every branch. */
 data class TripOption(val stops: List<TripStop>) {
@@ -62,7 +73,8 @@ object ShoppingPlanner {
      * What [line] costs with [info] (a branch's price picture of the item): the chosen product's price, else the middle
      * of the typical range, times the packages or the weight (as in [ListCost]). The best usable promotion there
      * ([PromoOffers.best]) lowers it when the quantity reaches its minimum ("2 ב-10": three cost two at 5 and one at
-     * the regular price). Null when the line can't be priced there.
+     * the regular price). A promotion that depends on stock is not counted ("עד גמר המלאי" may be gone by then).
+     * Null when the line can't be priced there.
      */
     fun quote(line: ListLine, info: ItemPriceInfo, promos: BranchPromotions?, nowLocal: String, includeMembers: Boolean): LineQuote? {
         val grams = PieceWeights.gramsPerPiece(line.name)
@@ -110,7 +122,8 @@ object ShoppingPlanner {
      * Totals are over the lines priced at every branch, so they compare. Every store other than the regular one
      * ([homeBranchId]) has to earn [threshold]: going elsewhere needs a saving of at least [threshold], a split over
      * two other stores at least twice it, a split between the regular store and one more at least once. With
-     * [maxStores] 1 the list is not split. Null when nothing can be compared.
+     * [maxStores] 1 the list is not split. A branch's whole-basket promotions ([basket]: branch id → promotions, see
+     * [PromoOffers.basket]) take their discount off a stop that reaches their minimum. Null when nothing can be compared.
      */
     fun plan(
         lines: List<ListLine>,
@@ -118,6 +131,7 @@ object ShoppingPlanner {
         homeBranchId: String,
         threshold: Double,
         maxStores: Int,
+        basket: Map<String, List<Promotion>> = emptyMap(),
     ): TripPlan? {
         val open = lines.filter { it.status == LineStatus.NEEDED }.distinctBy { it.itemId }
         val branches = quotes.keys.toList()
@@ -135,7 +149,14 @@ object ShoppingPlanner {
                 val best = set.minWith(compareBy<String>({ cost(it, line) }, { if (it == home) 0 else 1 }))
                 byStop.getValue(best) += line
             }
-            return TripOption(byStop.map { (b, ls) -> TripStop(b, ls.map { it.itemId }, ls.sumOf { cost(b, it) }) })
+            return TripOption(
+                byStop.map { (b, ls) ->
+                    val items = ls.sumOf { cost(b, it) }
+                    // the branch's best whole-basket discount the stop qualifies for
+                    val best = basket[b].orEmpty().mapNotNull { p -> p.basketDiscount(items)?.let { p to it } }.maxByOrNull { it.second }
+                    TripStop(b, ls.map { it.itemId }, items, best?.first, best?.second ?: 0.0)
+                },
+            )
         }
 
         val singles = branches.map { option(listOf(it)) }.sortedBy { it.total }
