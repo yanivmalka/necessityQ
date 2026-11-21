@@ -247,6 +247,13 @@ fun ListScreen(
     val itemPrices by vm.itemPriceInfo.collectAsStateWithLifecycle()
     val comparisons by vm.itemComparisons.collectAsStateWithLifecycle()
     val unreadTotal by vm.unreadTotal.collectAsStateWithLifecycle()
+    val tripStops by vm.tripStops.collectAsStateWithLifecycle()
+    val tripAssignment by vm.tripAssignment.collectAsStateWithLifecycle()
+    val activeStop by vm.activeStop.collectAsStateWithLifecycle()
+    val promoOffers by vm.promoOffers.collectAsStateWithLifecycle()
+    val followedBranches by vm.selectedPriceBranches.collectAsStateWithLifecycle()
+    val allBranches by vm.priceBranches.collectAsStateWithLifecycle()
+    var showTrip by remember { mutableStateOf(false) }
     var openItem by remember { mutableStateOf<ListLine?>(null) }
     var showSortMenu by remember { mutableStateOf(false) }
     var showMore by remember { mutableStateOf(false) }
@@ -272,8 +279,17 @@ fun ListScreen(
     // the quick-add box also searches the list: what is typed narrows the open lines (on top of the filter)
     val searchText = remember(searchQuery) { if (searchQuery.isBlank()) "" else QuickEntryParser.parse(searchQuery)?.item?.displayName ?: searchQuery.trim() }
     val listFilter = remember(filter, searchText) { if (searchText.isBlank() || filter.text.isNotBlank()) filter else filter.copy(text = searchText) }
-    val sections = remember(snapshot?.lines, sort, pickRanks, descending, display.chilledLast, listFilter, chatItemIds) {
-        buildSections(snapshot?.lines.orEmpty(), sort, pickRanks, descending, display.chilledLast, listFilter, chatItemIds)
+    // a split trip: each stop shows its own list (items added since, not in the split, show at every stop)
+    val splitting = shopping && tripStops.size > 1 && tripAssignment.isNotEmpty()
+    val shownLines = remember(snapshot?.lines, splitting, tripAssignment, activeStop) {
+        val all = snapshot?.lines.orEmpty()
+        if (!splitting || activeStop == null) all else all.filter { tripAssignment[it.itemId]?.let { b -> b == activeStop } ?: true }
+    }
+    val stopCounts = remember(snapshot?.lines, tripAssignment) {
+        snapshot?.lines.orEmpty().filter { it.status == LineStatus.NEEDED }.mapNotNull { tripAssignment[it.itemId] }.groupingBy { it }.eachCount()
+    }
+    val sections = remember(shownLines, sort, pickRanks, descending, display.chilledLast, listFilter, chatItemIds) {
+        buildSections(shownLines, sort, pickRanks, descending, display.chilledLast, listFilter, chatItemIds)
     }
     val searchMatches = if (searchText.isBlank()) 0 else sections.sumOf { sec -> sec.lines.count { it.status == LineStatus.NEEDED } }
     // while filtering (by tag, group or search) every group starts open, so matches are never hidden in a
@@ -309,6 +325,7 @@ fun ListScreen(
     val leadingItems = snapshot?.let { snap ->
         (if (shopping && storePrompt) 1 else 0) +
             (if (showRecipes && recipesOnList.isNotEmpty()) 1 else 0) +
+            (if (showRecipes && promoOffers.isNotEmpty()) 1 else 0) +
             (if (showSuggestions && snap.runningLow.isNotEmpty()) 1 else 0) +
             (if (showSuggestions && snap.frequent.isNotEmpty()) 1 else 0) + 1
     } ?: 0
@@ -465,6 +482,10 @@ fun ListScreen(
             }
         }
 
+        if (splitting) {
+            TripStopsRow(tripStops, activeStop, stopCounts, allBranches, onSelect = vm::selectStop)
+        }
+
         // Quick add: always open while preparing; behind the + button while shopping
         if (!shopping || addOpen || query.isNotEmpty()) {
             QuickAddField(
@@ -586,6 +607,11 @@ fun ListScreen(
                         onRemove = { dish -> vm.removeRecipeFromList(dish.id) },
                     )
                 }
+            }
+
+            // "יש למוצרים אלו מבצעים ב…": promotions on the list's items at the followed branches
+            if (showRecipes && promoOffers.isNotEmpty()) {
+                item(key = "promos") { PromoOffersCard(promoOffers, allBranches) }
             }
 
             if (showSuggestions && snap.runningLow.isNotEmpty()) {
@@ -777,7 +803,8 @@ fun ListScreen(
                     open = open,
                     estimate = if (display.showTotal) app.necessityq.domain.ListCost.of(snap.lines, prices, itemPrices) else null,
                     storeName = storeName,
-                    onGo = { vm.setMode(ListMode.SHOP) },
+                    // with two branches or more: first where it pays to shop (one supermarket or a split)
+                    onGo = { if (followedBranches.size >= 2) showTrip = true else vm.startTrip(null) },
                 )
             }
         }
@@ -802,6 +829,7 @@ fun ListScreen(
         )
     }
     if (showGenerate) GenerateSheet(vm, onDismiss = { showGenerate = false })
+    if (showTrip) TripPlanSheet(vm, onDismiss = { showTrip = false })
     if (showEmpty) {
         val count = ListReset.linesFor(ResetScope.ALL, snapshot?.lines.orEmpty()).size
         AlertDialog(

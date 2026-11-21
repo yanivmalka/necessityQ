@@ -253,6 +253,14 @@ interface PriceRepository {
     suspend fun prices(branchId: String): BranchPrices?
     /** Asks the server to load fresh prices now (skipped by the server when they are recent). */
     suspend fun requestRefresh(branchId: String): Boolean
+    /** Running promotions of a branch (cached on the device; downloaded again when the server has newer ones). */
+    suspend fun promotions(branchId: String): BranchPromotions? = null
+    /** When each branch's promotions were last loaded by the server (millis), to reload them when they change. */
+    fun promotionsStatus(branchIds: List<String>): Flow<Map<String, Long>> = flowOf(emptyMap())
+    /** Asks the server to check promotions and stock of these branches now (skipped for those checked in the last 30 minutes). */
+    suspend fun requestOffersRefresh(branchIds: List<String>) {}
+    /** The cached products of a branch, read without asking the server (null when nothing is cached). */
+    suspend fun cachedPrices(branchId: String): BranchPrices? = null
     /** Product (barcode) the household chose for a generic item, by item id — optional precision. */
     fun preferredProducts(householdId: String): Flow<Map<String, String>>
     suspend fun setPreferredProduct(householdId: String, itemId: String, code: String?)

@@ -11,7 +11,19 @@ import { GoogleAuth } from "google-auth-library";
 import { guardConfig, parseNotification, shouldCut } from "./budget";
 import { AlertTarget, ChatMessage, alertTargets, alertText, isDeadToken } from "./chat";
 import * as logger from "firebase-functions/logger";
-import { BranchStatus, PriceConfig, PriceStore, refreshBranchPrices, refreshBranches, tick, withDefaults } from "./ingest";
+import {
+  BranchStatus,
+  OFFERS_MINUTES,
+  PriceConfig,
+  PriceStore,
+  PromoStatus,
+  PromoStore,
+  offersTick,
+  refreshBranchPrices,
+  refreshBranches,
+  tick,
+  withDefaults,
+} from "./ingest";
 import { Branch, Snapshot } from "./model";
 import { downloadTzameret, snapshotStats } from "./nutrition";
 
@@ -81,6 +93,54 @@ const firebaseStore: PriceStore = {
 };
 
 const deps = { store: firebaseStore, log: (m: string) => logger.info(m) };
+
+const promoStatusDoc = (id: string) => db.doc(`promoBranches/${id}`);
+
+/** Promotions per branch: Storage promos/{branchId}.json.gz, freshness in promoBranches/{branchId}. */
+const promoStore: PromoStore = {
+  async readPromoStatus(id) {
+    return ((await promoStatusDoc(id).get()).data() as PromoStatus | undefined) ?? null;
+  },
+  async writePromoStatus(id, status) {
+    await promoStatusDoc(id).set(status);
+  },
+  async writePromos(snapshot) {
+    const body = gzipSync(new TextEncoder().encode(JSON.stringify(snapshot)), { level: 9 });
+    await getStorage()
+      .bucket()
+      .file(`promos/${snapshot.branchId}.json.gz`)
+      .save(Buffer.from(body), {
+        contentType: "application/gzip",
+        metadata: { cacheControl: "private, max-age=300", metadata: { updatedAt: snapshot.updatedAt } },
+      });
+  },
+};
+
+/**
+ * Every 30 minutes: for each tracked branch, a price file newer than the snapshot (stock and price changes) is merged
+ * in, and the promotions are re-read when the chain has published a newer promotions file.
+ */
+export const promosTick = onSchedule(
+  { schedule: `every ${OFFERS_MINUTES} minutes`, timeZone: "Asia/Jerusalem", timeoutSeconds: 1500, memory: "1GiB" },
+  async () => {
+    const config = await loadConfig();
+    const report = await offersTick(config, deps, promoStore, 20 * 60_000);
+    logger.info("offers tick", { report });
+  },
+);
+
+/**
+ * The app opens (or comes back after half an hour): promotions and stock of the household's branches are checked
+ * now, for those not checked in the last 30 minutes.
+ */
+export const refreshOffers = onCall({ timeoutSeconds: 540, memory: "1GiB" }, async (req) => {
+  if (!req.auth) throw new HttpsError("unauthenticated", "sign in first");
+  const ids = ((req.data as { branchIds?: unknown })?.branchIds ?? []) as unknown[];
+  const branchIds = ids.map(String).filter((id) => id && !id.includes("/")).slice(0, 10);
+  if (!branchIds.length) return { report: [] };
+  const config = await loadConfig();
+  return { report: await offersTick(config, deps, promoStore, 8 * 60_000, branchIds) };
+});
 
 /**
  * Hourly tick. Whether anything is downloaded is decided by `config/prices`

@@ -61,6 +61,11 @@ class AppPrefs(context: Context) {
         get() = p.getBoolean("bright", true)
         set(v) = p.edit().putBoolean("bright", v).apply()
 
+    /** Colour palette of the app ([app.necessityq.ui.AppPalette] name). */
+    var palette: String?
+        get() = p.getString("palette", null)
+        set(v) = p.edit().putString("palette", v).apply()
+
     var mode: app.necessityq.domain.ListMode
         get() = runCatching { app.necessityq.domain.ListMode.valueOf(p.getString("mode", null) ?: "") }
             .getOrDefault(app.necessityq.domain.ListMode.PLAN)
@@ -166,6 +171,44 @@ class AppPrefs(context: Context) {
     var voiceSpeed: Float
         get() = p.getFloat("voice_speed", 1f)
         set(v) = p.edit().putFloat("voice_speed", v).apply()
+
+    /** The branch whose prices the list showed last: its cached prices are read the moment the app starts. */
+    var lastPriceBranch: String?
+        get() = p.getString("last_price_branch", null)
+        set(v) = p.edit().putString("last_price_branch", v).apply()
+
+    /** Before a trip: the saving (₪) that makes another supermarket (or one more stop) worth it. */
+    var tripThreshold: Int
+        get() = p.getInt("trip_threshold", 50)
+        set(v) = p.edit().putInt("trip_threshold", v).apply()
+
+    /** Before a trip: how many supermarkets the list may be split over (1 = no split). */
+    var tripMaxStores: Int
+        get() = p.getInt("trip_max_stores", 1)
+        set(v) = p.edit().putInt("trip_max_stores", v).apply()
+
+    /** Promotions of customer clubs, credit cards and coupons count too. */
+    var tripMembers: Boolean
+        get() = p.getBoolean("trip_members", false)
+        set(v) = p.edit().putBoolean("trip_members", v).apply()
+
+    /** The household's regular supermarket (a followed branch id); null = the first followed branch. */
+    var tripHome: String?
+        get() = p.getString("trip_home", null)
+        set(v) = p.edit().putString("trip_home", v).apply()
+
+    /** The split the trip follows: "itemId=branchId" per line, empty when the trip is not split. */
+    var tripAssignment: Map<String, String>
+        get() = p.getStringSet("trip_assignment", emptySet()).orEmpty().mapNotNull { e ->
+            val i = e.lastIndexOf('=')
+            if (i <= 0) null else e.substring(0, i) to e.substring(i + 1)
+        }.toMap()
+        set(v) = p.edit().putStringSet("trip_assignment", v.map { (k, b) -> "$k=$b" }.toSet()).apply()
+
+    /** The stops of the split, in order. */
+    var tripStops: List<String>
+        get() = p.getString("trip_stops", "").orEmpty().split(',').filter { it.isNotBlank() }
+        set(v) = p.edit().putString("trip_stops", v.joinToString(",")).apply()
 
     /** Look for a new version every time the app opens. */
     var autoCheckUpdates: Boolean

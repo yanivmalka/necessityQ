@@ -4,6 +4,7 @@ import { GeoCache, geocode } from "./geocode";
 import { israelDay, mergeSnapshot } from "./history";
 import { Branch, FileEntry, Snapshot } from "./model";
 import { cityInScope, parsePrices, parseStores } from "./normalize";
+import { PromoSnapshot, israelLocal, parsePromotions, promosForApp } from "./promos";
 import { Source, sourceFor } from "./sources";
 import { decodePayload } from "./xml";
 
@@ -214,3 +215,139 @@ export async function tick(config: PriceConfig, deps: Deps, budgetMs: number): P
 }
 
 export { CHAINS };
+
+// ---------------------------------------------------------------- promotions and stock (every 30 minutes)
+
+/** Freshness of a branch's promotions (Firestore `promoBranches/{branchId}`). */
+export interface PromoStatus {
+  updatedAt: string | null; // ISO of the last successful promotions load
+  promos: number;
+  sourceFile: string;
+  sourceStamp: string;
+  lastAttemptAt: string | null;
+  error: string | null;
+}
+
+/** Where the promotions go (Firestore + Storage in production, in-memory in tests). */
+export interface PromoStore {
+  readPromoStatus(branchId: string): Promise<PromoStatus | null>;
+  writePromoStatus(branchId: string, status: PromoStatus): Promise<void>;
+  writePromos(snapshot: PromoSnapshot): Promise<void>;
+}
+
+/** How often promotions and stock are checked (minutes). The files are listed each time; downloaded only when newer. */
+export const OFFERS_MINUTES = 30;
+
+/**
+ * Loads the newest PromoFull (or Promo) file of a branch, keeps the promotions still running and only for products the
+ * branch's price snapshot sells now (out of stock = missing from the price file), and writes them for the app.
+ * Skipped when the newest file is the one already loaded (unless [force]).
+ */
+export async function refreshBranchPromos(branch: Branch, deps: Deps, promoStore: PromoStore, force = false): Promise<PromoStatus> {
+  const src = deps.sourceFor ?? sourceFor;
+  const now = (deps.now ?? (() => new Date()))();
+  const chain = chainByKey(branch.chainKey);
+  const previous = await promoStore.readPromoStatus(branch.id);
+  const base: PromoStatus = previous ?? { updatedAt: null, promos: 0, sourceFile: "", sourceStamp: "", lastAttemptAt: null, error: null };
+  try {
+    if (!chain) throw new Error(`unknown chain ${branch.chainKey}`);
+    let files = await src(chain).list(chain, "promofull", branch.storeId);
+    const full = latest(files, "promofull", branch.storeId);
+    if (!full && !files.some((f) => f.kind === "promo")) files = files.concat(await src(chain).list(chain, "promo", branch.storeId));
+    const file = full ?? latest(files, "promo", branch.storeId);
+    if (!file) throw new Error(`no PromoFull/Promo file for store ${branch.storeId}`);
+    if (!force && previous && !previous.error && previous.sourceFile === file.name) {
+      // nothing newer published: the promotions on record stand; only the check time moves
+      const status = { ...previous, lastAttemptAt: now.toISOString() };
+      await promoStore.writePromoStatus(branch.id, status);
+      return status;
+    }
+    const { promos } = parsePromotions(decodePayload(await src(chain).fetch(chain, file)));
+    const snapshot = await deps.store.readSnapshot(branch.id);
+    const sold = new Set((snapshot?.items ?? []).map((i) => i.c));
+    const kept = promosForApp(promos, sold, israelLocal(now));
+    await promoStore.writePromos({ v: 1, branchId: branch.id, updatedAt: now.toISOString(), sourceFile: file.name, sourceStamp: file.stamp, promos: kept });
+    const status: PromoStatus = {
+      updatedAt: now.toISOString(),
+      promos: kept.length,
+      sourceFile: file.name,
+      sourceStamp: file.stamp,
+      lastAttemptAt: now.toISOString(),
+      error: null,
+    };
+    await promoStore.writePromoStatus(branch.id, status);
+    return status;
+  } catch (e) {
+    const status = { ...base, lastAttemptAt: now.toISOString(), error: (e as Error).message.slice(0, 300) };
+    await promoStore.writePromoStatus(branch.id, status);
+    return status;
+  }
+}
+
+/**
+ * Stock and price changes between the daily full loads: when the branch has published a price file (PriceFull, or a
+ * Price delta) newer than the one in its snapshot, it is merged in now. A delta only updates the products it lists.
+ */
+export async function refreshBranchStock(branch: Branch, config: PriceConfig, deps: Deps): Promise<BranchStatus | null> {
+  const src = deps.sourceFor ?? sourceFor;
+  const now = (deps.now ?? (() => new Date()))();
+  const chain = chainByKey(branch.chainKey);
+  if (!chain) return null;
+  const status = await deps.store.readStatus(branch.id);
+  if (!status?.updatedAt) return refreshBranchPrices(branch, config, deps);
+  let files = await src(chain).list(chain, "pricefull", branch.storeId);
+  if (!files.some((f) => f.kind === "price")) files = files.concat(await src(chain).list(chain, "price", branch.storeId));
+  const full = latest(files, "pricefull", branch.storeId);
+  const delta = latest(files, "price", branch.storeId);
+  const newest = [full, delta].filter((f): f is FileEntry => f !== null).sort((a, b) => (a.stamp < b.stamp ? 1 : -1))[0];
+  if (!newest || newest.stamp <= status.sourceStamp || newest.name === status.sourceFile) return null;
+  if (newest === full) return refreshBranchPrices(branch, config, deps);
+  try {
+    const { items } = parsePrices(decodePayload(await src(chain).fetch(chain, newest)));
+    if (items.length === 0) return null;
+    const previous = await deps.store.readSnapshot(branch.id);
+    const snapshot = mergeSnapshot(branch.id, previous, items, israelDay(now), config.rangeDays, { file: newest.name, stamp: newest.stamp, now: now.toISOString() }, true);
+    await deps.store.writeSnapshot(snapshot);
+    const next: BranchStatus = { ...status, updatedAt: now.toISOString(), items: snapshot.items.length, sourceFile: newest.name, sourceStamp: newest.stamp, lastAttemptAt: now.toISOString(), error: null };
+    await deps.store.writeStatus(branch.id, next);
+    return next;
+  } catch (e) {
+    const next = { ...status, lastAttemptAt: now.toISOString(), error: (e as Error).message.slice(0, 300) };
+    await deps.store.writeStatus(branch.id, next);
+    return next;
+  }
+}
+
+/** True when a branch's promotions should be checked now (every [OFFERS_MINUTES]; failures retry at the same pace). */
+export function offersDue(status: PromoStatus | null, now: Date, minutes = OFFERS_MINUTES): boolean {
+  if (!status?.lastAttemptAt) return true;
+  return now.getTime() - Date.parse(status.lastAttemptAt) >= minutes * 60_000 - 2 * 60_000;
+}
+
+/** The 30-minute tick: for every tracked branch, newer prices (stock) first, then its promotions. */
+export async function offersTick(config: PriceConfig, deps: Deps, promoStore: PromoStore, budgetMs: number, only?: string[]): Promise<string[]> {
+  const started = Date.now();
+  const now = (deps.now ?? (() => new Date()))();
+  const report: string[] = [];
+  const index = await deps.store.readIndex();
+  const byId = new Map(index.branches.map((b) => [b.id, b]));
+  const ids = only ?? (await deps.store.trackedBranchIds());
+  for (const id of ids) {
+    if (Date.now() - started > budgetMs) {
+      report.push("time budget reached; the rest continues next tick");
+      break;
+    }
+    const branch = byId.get(id);
+    if (!branch) continue;
+    if (!offersDue(await promoStore.readPromoStatus(id), now)) continue;
+    try {
+      const stock = await refreshBranchStock(branch, config, deps);
+      if (stock) report.push(`${id}: prices ${stock.error ? `error ${stock.error}` : `${stock.items} items`}`);
+    } catch (e) {
+      report.push(`${id}: stock check failed ${(e as Error).message}`);
+    }
+    const p = await refreshBranchPromos(branch, deps, promoStore);
+    report.push(`${id}: promos ${p.error ? `error ${p.error}` : p.promos}`);
+  }
+  return report;
+}
