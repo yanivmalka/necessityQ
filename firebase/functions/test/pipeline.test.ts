@@ -85,6 +85,18 @@ describe("decoding and parsing", () => {
     expect(cityInScope("מבשרת ציון", ["ירושלים"])).toBe(false);
     expect(cityInScope("בית שמש", ["ירושלים", "בית שמש"])).toBe(true);
   });
+
+  it("matches Haifa, the Krayot, Nesher and Tirat Carmel", () => {
+    const scope = ["ירושלים", "חיפה", "הקריות", "נשר", "טירת כרמל"];
+    for (const c of ["חיפה", "HAIFA", "4000", "קרית חיים", "קריית אתא", "קרית ביאליק", "Kiryat Motzkin", "קרית-ים", "9600", "נשר", "NESHER", "טירת הכרמל", "Tirat Carmel", "2100"]) {
+      expect(cityInScope(c, scope)).toBe(true);
+    }
+    for (const c of ["קריית שמונה", "קרית גת", "עכו", "יקנעם"]) {
+      expect(cityInScope(c, scope)).toBe(false);
+    }
+    expect(cityInScope("קרית ים", ["חיפה"])).toBe(false);
+    expect(cityInScope("קרית ים", ["קריית ים"])).toBe(true);
+  });
 });
 
 describe("listing pages", () => {
@@ -159,7 +171,7 @@ describe("config and scheduling", () => {
   it("fills defaults and ignores bad values", () => {
     expect(withDefaults(undefined)).toEqual(DEFAULT_CONFIG);
     const c = withDefaults({ refreshHours: -1, rangeDays: 1000, chains: ["ramilevy", "nope"], cities: [] });
-    expect(c).toMatchObject({ refreshHours: 24, rangeDays: 365, chains: ["ramilevy"], cities: ["ירושלים"] });
+    expect(c).toMatchObject({ refreshHours: 24, rangeDays: 365, chains: ["ramilevy"], cities: ["ירושלים", "חיפה", "הקריות", "נשר", "טירת כרמל"] });
   });
 
   it("is due by age; failures back off for an hour", () => {
