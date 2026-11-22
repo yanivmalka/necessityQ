@@ -61,8 +61,23 @@ export function cityKey(s: string): string {
     .replace(/יי/g, "י");
 }
 
+const KRAYOT: string[] = [
+  "קריית אתא", "קרית אתא", "kiryat ata", "6800",
+  "קריית ביאליק", "קרית ביאליק", "kiryat bialik", "9500",
+  "קריית מוצקין", "קרית מוצקין", "kiryat motzkin", "8200",
+  "קריית ים", "קרית ים", "kiryat yam", "9600",
+];
+
+/** Spellings, English names and CBS codes per configured city. A key may also name a group of cities ("הקריות"). */
 const ALIASES: Record<string, string[]> = {
   ירושלים: ["ירושלים", "ירושלם", "ים", "jerusalem", "yerushalayim", "3000"],
+  // Haifa, including neighbourhoods that some Stores files list as the city
+  חיפה: ["חיפה", "haifa", "hefa", "4000", "קריית חיים", "קרית חיים", "kiryat haim", "קריית שמואל", "קרית שמואל", "kiryat shmuel", "קריית אליעזר", "קרית אליעזר", "נווה שאנן", "הדר הכרמל"],
+  הקריות: KRAYOT,
+  "קריית אתא": KRAYOT.slice(0, 4),
+  "קריית ביאליק": KRAYOT.slice(4, 8),
+  "קריית מוצקין": KRAYOT.slice(8, 12),
+  "קריית ים": KRAYOT.slice(12, 16),
 };
 
 /** True when a Stores-file city (name or CBS code) matches one of the configured cities. */

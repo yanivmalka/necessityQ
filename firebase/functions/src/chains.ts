@@ -32,7 +32,7 @@ export const CHAINS: Chain[] = [
   { key: "mahsaneihashuk", name: "מחסני השוק", chainIds: ["7290661400001", "7290633800006"], platform: "laibcatalog" },
 ];
 
-/** Chains enabled when the admin has not configured a list (strong presence in Jerusalem). */
+/** Chains enabled when the admin has not configured a list (strong presence in Jerusalem, Haifa and the Krayot). */
 export const DEFAULT_CHAINS = ["shufersal", "ramilevy", "osherad", "yohananof", "victory", "carrefour", "superyuda", "tivtaam"];
 
 export function chainByKey(key: string): Chain | undefined {
