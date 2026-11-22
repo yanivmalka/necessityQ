@@ -28,7 +28,7 @@ export const DEFAULT_CONFIG: PriceConfig = {
   refreshHours: 24,
   storesRefreshDays: 7,
   rangeDays: 90,
-  cities: ["ירושלים", "חיפה", "הקריות"],
+  cities: ["ירושלים", "חיפה", "הקריות", "נשר", "טירת כרמל"],
   chains: DEFAULT_CHAINS,
   manualRefreshMinutes: 60,
 };

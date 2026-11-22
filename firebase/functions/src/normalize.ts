@@ -78,6 +78,8 @@ const ALIASES: Record<string, string[]> = {
   "קריית ביאליק": KRAYOT.slice(4, 8),
   "קריית מוצקין": KRAYOT.slice(8, 12),
   "קריית ים": KRAYOT.slice(12, 16),
+  נשר: ["נשר", "nesher", "2500"],
+  "טירת כרמל": ["טירת כרמל", "טירת הכרמל", "tirat carmel", "tirat karmel", "2100"],
 };
 
 /** True when a Stores-file city (name or CBS code) matches one of the configured cities. */
