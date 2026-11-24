@@ -403,6 +403,8 @@ fun ListScreen(
         listOf(ListSort.GROUPS, ListSort.ALPHA, ListSort.ADDED, ListSort.CART_LOAD)
     }
     val storeName = stores.firstOrNull { it.id == currentStoreId }?.name
+    // moving an item by hand only makes sense in the grouped order, with nothing filtered out
+    val dragAvailable = sort == ListSort.GROUPS && !filter.isActive
 
     val messagesButton: @Composable (Color) -> Unit = { tint ->
         // new messages, visible from the list itself
@@ -556,26 +558,37 @@ fun ListScreen(
             Box {
                 AssistChip(
                     onClick = { showSortMenu = true },
-                    label = { Text(sort.label + if (descending) " ↓" else " ↑", maxLines = 1) },
+                    label = { Text(sort.label + if (!sort.hasDirection) "" else if (descending) " ↓" else " ↑", maxLines = 1) },
                     leadingIcon = { Icon(Icons.AutoMirrored.Filled.Sort, null, Modifier.size(18.dp)) },
                 )
                 DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
                     sortOptions.forEach { option ->
                         val recommended = shopping && option == ListSort.CART_LOAD
                         DropdownMenuItem(
-                            text = { Text((if (option == sort) "✓ " else "") + option.label + if (recommended) " (מומלץ)" else "") },
+                            text = {
+                                Column {
+                                    Text((if (option == sort) "✓ " else "") + option.label + if (recommended) " (מומלץ)" else "")
+                                    // what the order does, in a line under it
+                                    option.hint?.let {
+                                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            },
                             onClick = { vm.setSort(option); showSortMenu = false },
                         )
                     }
-                    HorizontalDivider()
-                    DropdownMenuItem(
-                        text = { Text((if (!descending) "✓ " else "") + "סדר עולה ↑") },
-                        onClick = { vm.setDescending(false); showSortMenu = false },
-                    )
-                    DropdownMenuItem(
-                        text = { Text((if (descending) "✓ " else "") + "סדר יורד ↓") },
-                        onClick = { vm.setDescending(true); showSortMenu = false },
-                    )
+                    // ascending / descending only where it means something: by name and by the order of adding
+                    if (sort.hasDirection) {
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text((if (!descending) "✓ " else "") + "סדר עולה ↑") },
+                            onClick = { vm.setDescending(false); showSortMenu = false },
+                        )
+                        DropdownMenuItem(
+                            text = { Text((if (descending) "✓ " else "") + "סדר יורד ↓") },
+                            onClick = { vm.setDescending(true); showSortMenu = false },
+                        )
+                    }
                 }
             }
             FilterChip(
@@ -605,6 +618,15 @@ fun ListScreen(
         }
         // what is filtered, one removable chip per criterion
         if (filter.isActive) ActiveFilterRow(filter, onChange = vm::setFilter)
+        // the drag handle is on the tile, but dragging works only in the grouped order (unfiltered)
+        if (TileElement.DRAG in tile && !dragAvailable) {
+            Text(
+                "גרירה זמינה במיון לפי קבוצות" + if (filter.isActive) " ובלי סינון" else "",
+                Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
 
         val snap = snapshot
         LazyColumn(
@@ -772,7 +794,7 @@ fun ListScreen(
                                 comparison = comparisons[line.itemId]?.takeIf { it.notable },
                                 controlsOpen = line.id in expanded,
                                 lifted = isDragging,
-                                dragHandle = if (sort == ListSort.GROUPS && !descending && !filter.isActive && TileElement.DRAG in tile) {
+                                dragHandle = if (dragAvailable && TileElement.DRAG in tile) {
                                     {
                                         Icon(
                                             Icons.Default.DragIndicator,
