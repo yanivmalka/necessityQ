@@ -1,6 +1,5 @@
 package app.necessityq.ui
 
-import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -33,19 +32,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import app.necessityq.R
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.necessityq.platform.AppIcon
 import app.necessityq.platform.AppIcons
 
-/** "סמל האפליקציה": the icons to choose from, the current one ringed. Choosing one switches the launcher icon. */
+/**
+ * "סמל האפליקציה": the icon shapes to choose from, each in the app's colour palette, the current one ringed. Choosing
+ * one switches the launcher icon; choosing another palette recolours it ([PalettePicker]).
+ */
 @Composable
-fun AppIconPicker() {
+fun AppIconPicker(vm: AppViewModel) {
     val context = LocalContext.current
+    val palette by vm.palette.collectAsStateWithLifecycle()
     var current by remember { mutableStateOf(AppIcons.current(context)) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("סמל האפליקציה", style = MaterialTheme.typography.titleMedium)
         Text(
-            "הסמל שמופיע במסך הבית של הטלפון. אחרי ההחלפה ייתכן שיעברו כמה שניות עד שהסמל יתעדכן, " +
+            "הסמל שמופיע במסך הבית של הטלפון, בצבע של ערכת הצבעים. אחרי ההחלפה ייתכן שיעברו כמה שניות עד שהסמל יתעדכן, " +
                 "ובחלק מהטלפונים צריך להוסיף את קיצור הדרך למסך הבית מחדש.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -58,7 +61,7 @@ fun AppIconPicker() {
                 val selected = icon == current
                 Column(
                     Modifier.width(76.dp).clip(RoundedCornerShape(12.dp)).clickable {
-                        if (!selected) { AppIcons.set(context, icon); current = icon }
+                        if (!selected) { AppIcons.set(context, icon, palette); current = icon }
                     }.padding(vertical = 6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
@@ -68,7 +71,7 @@ fun AppIconPicker() {
                             if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.background,
                             CircleShape,
                         ).padding(4.dp),
-                    ) { LauncherIcon(icon.foreground, 56.dp) }
+                    ) { LauncherIcon(icon, palette, 56.dp) }
                     Text(
                         icon.label + if (icon == AppIcon.DEFAULT) "\n(ברירת מחדל)" else "",
                         style = MaterialTheme.typography.labelSmall,
@@ -82,12 +85,12 @@ fun AppIconPicker() {
     }
 }
 
-/** A launcher icon as the phone shows it: the green background and [foreground] layer, cropped to the visible 72 of 108 units. */
+/** A launcher icon as the phone shows it: [icon] in [palette], cropped to the visible 72 of 108 units. */
 @Composable
-fun LauncherIcon(@DrawableRes foreground: Int, size: Dp) {
+fun LauncherIcon(icon: AppIcon, palette: AppPalette, size: Dp) {
     Box(Modifier.size(size).clip(CircleShape), contentAlignment = Alignment.Center) {
         val layer = Modifier.requiredSize(size * 1.5f)
-        Image(painterResource(R.drawable.ic_launcher_background), null, layer)
-        Image(painterResource(foreground), null, layer)
+        Image(painterResource(launcherBackground(palette)), null, layer)
+        Image(painterResource(launcherForeground(icon, palette)), null, layer)
     }
 }

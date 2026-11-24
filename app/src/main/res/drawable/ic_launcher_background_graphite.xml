@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Graphite radial background, lit from the top-left. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M0,0 H108 V108 H0 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="radial" android:centerX="32.4" android:centerY="23.8" android:gradientRadius="102.6">
+                <item android:offset="0" android:color="#FF5B707B" />
+                <item android:offset="0.55" android:color="#FF37474F" />
+                <item android:offset="1" android:color="#FF1B252A" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

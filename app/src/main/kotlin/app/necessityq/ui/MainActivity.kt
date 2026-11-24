@@ -176,7 +176,8 @@ private fun Root(vm: AppViewModel) {
     var started by rememberSaveable { mutableStateOf(false) }
     if (!started) {
         val step by vm.startupStep.collectAsStateWithLifecycle()
-        StartupScreen(step) { started = true }
+        val palette by vm.palette.collectAsStateWithLifecycle()
+        StartupScreen(step, palette) { started = true }
         return
     }
 
