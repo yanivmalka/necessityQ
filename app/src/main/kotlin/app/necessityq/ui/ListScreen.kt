@@ -54,7 +54,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.UnfoldLess
 import androidx.compose.material.icons.filled.UnfoldMore
 import androidx.compose.material.icons.outlined.Info
@@ -267,7 +266,6 @@ fun ListScreen(
     var showFilter by remember { mutableStateOf(false) }
     var showGenerate by remember { mutableStateOf(false) }
     var showReset by remember { mutableStateOf(false) }
-    var showEmpty by remember { mutableStateOf(false) }
     /** Tiles whose controls are open (tap mode "controls"). */
     var expanded by remember { mutableStateOf(emptySet<String>()) }
     var showBin by remember { mutableStateOf(false) }
@@ -440,14 +438,10 @@ fun ListScreen(
                     onClick = { showBin = true; showMore = false },
                 )
                 HorizontalDivider()
+                // one way to clear the list: the whole list, or only what was added automatically / by hand
                 DropdownMenuItem(
-                    text = { Text("ריקון הרשימה") },
+                    text = { Text("ניקוי הרשימה…") },
                     leadingIcon = { Icon(Icons.Default.DeleteSweep, null) },
-                    onClick = { showEmpty = true; showMore = false },
-                )
-                DropdownMenuItem(
-                    text = { Text("איפוס הרשימה") },
-                    leadingIcon = { Icon(Icons.Default.RestartAlt, null) },
                     onClick = { showReset = true; showMore = false },
                 )
                 DropdownMenuItem(
@@ -880,18 +874,6 @@ fun ListScreen(
     }
     if (showGenerate) GenerateSheet(vm, onDismiss = { showGenerate = false })
     if (showTrip) TripPlanSheet(vm, onDismiss = { showTrip = false })
-    if (showEmpty) {
-        val count = ListReset.linesFor(ResetScope.ALL, snapshot?.lines.orEmpty()).size
-        AlertDialog(
-            onDismissRequest = { showEmpty = false },
-            title = { Text("לרוקן את כל הרשימה?") },
-            text = { Text(if (count == 0) "הרשימה כבר ריקה." else "$count פריטים (גם אלה שסומנו כנקנו) יעברו לסל המחזור, ואפשר לבטל מיד אחרי הפעולה.") },
-            confirmButton = {
-                TextButton(enabled = count > 0, onClick = { vm.resetList(ResetScope.ALL); showEmpty = false }) { Text("ריקון") }
-            },
-            dismissButton = { TextButton(onClick = { showEmpty = false }) { Text("ביטול") } },
-        )
-    }
     if (showReset) ResetDialog(snapshot?.lines.orEmpty(), onReset = { vm.resetList(it); showReset = false }, onDismiss = { showReset = false })
 
     openItem?.let { line ->
@@ -1584,8 +1566,8 @@ private fun ResetDialog(lines: List<ListLine>, onReset: (ResetScope) -> Unit, on
     var scope by remember { mutableStateOf(ResetScope.ALL) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Default.RestartAlt, null) },
-        title = { Text("איפוס הרשימה") },
+        icon = { Icon(Icons.Default.DeleteSweep, null) },
+        title = { Text("ניקוי הרשימה") },
         text = {
             Column {
                 ResetScope.entries.forEach { option ->
@@ -1607,7 +1589,7 @@ private fun ResetDialog(lines: List<ListLine>, onReset: (ResetScope) -> Unit, on
             }
         },
         confirmButton = {
-            TextButton(enabled = ListReset.linesFor(scope, lines).isNotEmpty(), onClick = { onReset(scope) }) { Text("איפוס") }
+            TextButton(enabled = ListReset.linesFor(scope, lines).isNotEmpty(), onClick = { onReset(scope) }) { Text("ניקוי") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("ביטול") } },
     )

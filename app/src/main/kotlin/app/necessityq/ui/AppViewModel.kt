@@ -255,7 +255,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         launchSafe {
             val moved = container.service.resetList(hid, scope, lines)
             if (moved.isEmpty()) {
-                _messages.tryEmit("אין מה לאפס")
+                _messages.tryEmit("אין מה לנקות")
             } else {
                 val movedIds = moved.map { it.id }.toSet()
                 val undoChats = archiveChats(moved.map { it.itemId }, lines.filter { it.id !in movedIds })
