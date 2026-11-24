@@ -94,11 +94,16 @@ fun HouseholdScreen(
     modifier: Modifier = Modifier,
     /** Opens a family member's profile (null = a new member). */
     onOpenFamilyMember: (memberId: String?) -> Unit = {},
+    /** Opens the account page ("הבית" ← "חשבון"). */
+    onOpenAccount: () -> Unit = {},
+    /** Opens the settings (who is notified lives there, under "התראות"). */
+    onOpenSettings: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val members by vm.members.collectAsStateWithLifecycle()
     val isOwner = household.isOwner(userId)
     var confirmLeave by remember { mutableStateOf(false) }
+    var confirmSample by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
     var memberToRemove by remember { mutableStateOf<Member?>(null) }
     var confirmNewCode by remember { mutableStateOf(false) }
@@ -117,7 +122,24 @@ fun HouseholdScreen(
             Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (vm.supportsAccounts) AccountCard(vm, account)
+            // the account has its own page; here only a small row that leads to it
+            if (vm.supportsAccounts) {
+                Row(
+                    Modifier.fillMaxWidth().clip(NqShapes.Panel).clickable(onClickLabel = "לדף החשבון", onClick = onOpenAccount)
+                        .padding(vertical = 6.dp, horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "החשבון שלי" + (account.displayName?.takeIf { it.isNotBlank() }?.let { ": $it" } ?: ""),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                    Text("לדף החשבון ›", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+                }
+            }
             // the family's profiles (who eats, tastes, ratings) are managed here, with the participants
             FamilyCard(vm, onOpenMember = onOpenFamilyMember)
             if (vm.isShared) {
@@ -125,7 +147,8 @@ fun HouseholdScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(household.joinCode, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
                     IconButton(onClick = {
-                        val text = "הצטרפו לרשימת הקניות של \"${household.name}\" ב-necessityQ עם הקוד: ${household.joinCode}"
+                        // a link that opens the app and joins in one tap; the code stays in the text as a fallback
+                        val text = app.necessityq.domain.JoinLinks.shareText(household.name, household.joinCode)
                         val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
                         context.startActivity(Intent.createChooser(send, "שיתוף קוד"))
                     }) { Icon(Icons.Default.Share, contentDescription = "שיתוף") }
@@ -154,9 +177,17 @@ fun HouseholdScreen(
                 Text("מצב מכשיר יחיד: הנתונים נשמרים במכשיר בלבד.", style = MaterialTheme.typography.bodyMedium)
             }
 
+            // who is notified about a missing item is chosen in the settings, with the other notifications
             if (vm.isShared) {
                 HorizontalDivider()
-                NotifyCard(vm, members, userId)
+                Row(
+                    Modifier.fillMaxWidth().clip(NqShapes.Panel).clickable(onClickLabel = "להגדרות ההתראות", onClick = onOpenSettings)
+                        .padding(vertical = 8.dp, horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("מי מקבל התראות", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                    Text("הגדרות ›", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+                }
             }
 
             HorizontalDivider()
@@ -165,13 +196,32 @@ fun HouseholdScreen(
                 "טוען לבית את היסטוריית הקניות מ-Microsoft To Do: מה שסומן כ\"נקנה\" הופך להיסטוריה, והשאר לרשימה הנוכחית. אפשר ללחוץ שוב בלי ליצור כפילויות.",
                 style = MaterialTheme.typography.bodySmall,
             )
-            Button(onClick = vm::importSample) { Text("טעינת נתוני דוגמה") }
+            Button(onClick = { confirmSample = true }) { Text("טעינת נתוני דוגמה") }
 
             if (vm.isShared) {
                 Spacer(Modifier.height(12.dp))
                 OutlinedButton(onClick = { confirmLeave = true }) { Text("יציאה מהבית") }
             }
         }
+    }
+
+    // sample data changes the household's history for good, so it is explained before anything is loaded
+    if (confirmSample) {
+        AlertDialog(
+            onDismissRequest = { confirmSample = false },
+            title = { Text("לטעון נתוני דוגמה?") },
+            text = {
+                Text(
+                    "ייטענו לבית היסטוריית קניות לדוגמה (מה שסומן שם כ\"נקנה\") ופריטים לרשימה הנוכחית (השאר). " +
+                        "ההיסטוריה הזאת משפיעה מעכשיו על ההצעות (\"כנראה נגמר בקרוב\", \"קונים בדרך כלל\") ועל הסטטיסטיקה, " +
+                        "כאילו הבית קנה את המוצרים האלה. טעינה חוזרת לא יוצרת כפילויות.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { confirmSample = false; vm.importSample() }) { Text("טעינה") }
+            },
+            dismissButton = { TextButton(onClick = { confirmSample = false }) { Text("ביטול") } },
+        )
     }
 
     if (confirmLeave) {
@@ -529,7 +579,7 @@ fun DisplayCard(vm: AppViewModel) {
 // ---------- who is notified ----------
 
 @Composable
-private fun NotifyCard(vm: AppViewModel, members: List<Member>, userId: String) {
+fun NotifyCard(vm: AppViewModel, members: List<Member>, userId: String) {
     val settings by vm.notifySettings.collectAsStateWithLifecycle()
     // nobody chosen yet = everyone
     val chosen = settings.missingRecipients.ifEmpty { members.map { it.userId }.toSet() }

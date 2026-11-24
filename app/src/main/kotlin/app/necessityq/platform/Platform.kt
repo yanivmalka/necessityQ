@@ -20,18 +20,33 @@ import app.necessityq.domain.TileLayout
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 
-/** What a tap on a product tile does. */
+/** How a product tile opens the item's page. The quantity controls are a part of the tile ("תצוגה"). */
 enum class TapMode(val label: String, val hint: String) {
-    INFO("נגיעה פותחת דף מידע", "פקדי הכמות מוצגים קבוע על כל פריט"),
-    CONTROLS("נגיעה מציגה פקדים", "הפקדים מופיעים רק בנגיעה; דף המידע בכפתור ⓘ"),
+    SINGLE("נגיעה אחת", "נגיעה בפריט פותחת את דף הפריט"),
+    DOUBLE("נגיעה כפולה", "רק נגיעה כפולה פותחת את דף הפריט, כך שנגיעה בטעות לא פותחת אותו"),
+    ;
+
+    companion object {
+        /** Stored names, including the older "נגיעה פותחת דף מידע / מציגה פקדים". */
+        fun of(name: String?): TapMode = when (name) {
+            "DOUBLE", "CONTROLS" -> DOUBLE
+            else -> SINGLE
+        }
+    }
+}
+
+/** What a recommendation card says under the product's name: one choice. */
+enum class RecommendationDetail(val label: String) {
+    REASON("הסיבה (מומלץ)"),
+    HISTORY("מתי נקנה ובאיזו תדירות"),
+    NONE("כלום"),
 }
 
 /** Display toggles for the list and the recommendations. */
 data class DisplayOptions(
-    /** Recommendation cards: why it is suggested, when last bought, how often, the ★. */
-    val showReason: Boolean = true,
-    val showLastBought: Boolean = true,
-    val showFrequency: Boolean = true,
+    /** Recommendation cards: the reason, or when last bought and how often, or nothing. */
+    val recommendationDetail: RecommendationDetail = RecommendationDetail.REASON,
+    /** The ★ of favourites on the recommendation cards (a toggle of its own). */
     val showFavorite: Boolean = true,
     /** What a product tile shows while making the list. */
     val planTile: TileLayout = TileLayout.defaultFor(ListMode.PLAN),
@@ -41,7 +56,7 @@ data class DisplayOptions(
     val showTotal: Boolean = true,
     /** Dairy, meat/fish and frozen grouped at the end of the list. */
     val chilledLast: Boolean = false,
-    val tapMode: TapMode = TapMode.INFO,
+    val tapMode: TapMode = TapMode.SINGLE,
     /** Items already checked off (struck through) at the bottom of the list. */
     val showBought: Boolean = true,
     /** Prices of products sold by weight: per kilo or per 100 grams. */
@@ -57,8 +72,34 @@ data class DisplayOptions(
 class AppPrefs(context: Context) {
     private val p = context.getSharedPreferences("necessityq-prefs", Context.MODE_PRIVATE)
 
+    /** Nothing was stored before this run: a new install (an update keeps what was stored). */
+    private val freshInstall: Boolean = p.all.isEmpty()
+
+    /** The order of the bottom-bar tabs (the first on the right). */
+    var tabOrder: List<app.necessityq.domain.AppTab>
+        get() = app.necessityq.domain.TabOrder.decode(p.getString("tab_order", null))
+        set(v) = p.edit().putString("tab_order", app.necessityq.domain.TabOrder.encode(v)).apply()
+
+    /** The tab the app opens on (the list, unless chosen otherwise). */
+    var startTab: app.necessityq.domain.AppTab
+        get() = app.necessityq.domain.AppTab.entries.firstOrNull { it.name == p.getString("start_tab", null) } ?: app.necessityq.domain.AppTab.LIST
+        set(v) = p.edit().putString("start_tab", v.name).apply()
+
+    /** Which features are on ("הגדרות" ← "פיצ'רים"). */
+    var features: app.necessityq.domain.Features
+        get() = app.necessityq.domain.Features.decodeOff(p.getString("features_off", null))
+        set(v) = p.edit().putString("features_off", v.encodeOff()).putBoolean("features_chosen", true).apply()
+
+    /**
+     * Whether the first-run question ("רשימה פשוטה" or "הכול") was answered. Someone who used the app before the
+     * question existed is not asked: everything stays on for them.
+     */
+    val featuresChosen: Boolean
+        get() = p.getBoolean("features_chosen", false) || !freshInstall
+
+    /** "תצוגה בהירה במיוחד": off by default, so the app follows the phone (light or dark). */
     var brightTheme: Boolean
-        get() = p.getBoolean("bright", true)
+        get() = p.getBoolean("bright", false)
         set(v) = p.edit().putBoolean("bright", v).apply()
 
     /** Colour palette of the app ([app.necessityq.ui.AppPalette] name). */
@@ -91,27 +132,34 @@ class AppPrefs(context: Context) {
 
     var display: DisplayOptions
         get() = DisplayOptions(
-            showReason = p.getBoolean("d_reason", true),
-            showLastBought = p.getBoolean("d_last", true),
-            showFrequency = p.getBoolean("d_freq", true),
+            recommendationDetail = recommendationDetail(),
             showFavorite = p.getBoolean("d_fav", true),
             planTile = tileLayout(ListMode.PLAN),
             shopTile = tileLayout(ListMode.SHOP),
             showTotal = p.getBoolean("d_total", true),
             chilledLast = p.getBoolean("d_chilled", false),
-            tapMode = runCatching { TapMode.valueOf(p.getString("d_tap", null) ?: "") }.getOrDefault(TapMode.INFO),
+            tapMode = TapMode.of(p.getString("d_tap", null)),
             showBought = p.getBoolean("d_bought", true),
             weightUnit = runCatching { app.necessityq.domain.WeightPriceUnit.valueOf(p.getString("d_weight_unit", null) ?: "") }
                 .getOrDefault(app.necessityq.domain.WeightPriceUnit.KILO),
         )
         set(v) = p.edit()
-            .putBoolean("d_reason", v.showReason).putBoolean("d_last", v.showLastBought)
-            .putBoolean("d_freq", v.showFrequency).putBoolean("d_fav", v.showFavorite)
+            .putString("d_rec_detail", v.recommendationDetail.name).putBoolean("d_fav", v.showFavorite)
             .putString("tile_" + ListMode.PLAN.name, v.planTile.encode())
             .putString("tile_" + ListMode.SHOP.name, v.shopTile.encode())
             .putBoolean("d_total", v.showTotal)
             .putBoolean("d_chilled", v.chilledLast).putString("d_tap", v.tapMode.name)
             .putBoolean("d_bought", v.showBought).putString("d_weight_unit", v.weightUnit.name).apply()
+
+    /** Before it was one choice, three checkboxes: the reason won when it was on. */
+    private fun recommendationDetail(): RecommendationDetail {
+        p.getString("d_rec_detail", null)?.let { name -> RecommendationDetail.entries.firstOrNull { it.name == name }?.let { return it } }
+        return when {
+            p.getBoolean("d_reason", true) -> RecommendationDetail.REASON
+            p.getBoolean("d_last", true) || p.getBoolean("d_freq", true) -> RecommendationDetail.HISTORY
+            else -> RecommendationDetail.NONE
+        }
+    }
 
     /**
      * The tile of [mode]; before tiles were set per stage, one set of checkboxes covered both, so a phone
@@ -139,16 +187,18 @@ class AppPrefs(context: Context) {
     fun descendingFor(mode: app.necessityq.domain.ListMode): Boolean = p.getBoolean("desc_" + mode.name, false)
     fun setDescendingFor(mode: app.necessityq.domain.ListMode, v: Boolean) = p.edit().putBoolean("desc_" + mode.name, v).apply()
 
-    /** Scanned products to be reminded of later ("code\tname\tprice\tbranch\tat" per entry, newest last). */
-    val remindLater: List<String>
-        get() = p.getString("remind_later", null)?.split('\n')?.filter { it.isNotBlank() }.orEmpty()
+    /** Scanned products to be reminded of later ([app.necessityq.domain.ScanReminder] lines, newest last). */
+    val remindLater: List<app.necessityq.domain.ScanReminder>
+        get() = p.getString("remind_later", null)?.split('\n')?.mapNotNull { app.necessityq.domain.ScanReminder.decode(it) }.orEmpty()
 
-    fun addRemindLater(code: String, name: String, price: Double?, branchId: String?) {
-        val entry = listOf(code, name.replace('\t', ' ').replace('\n', ' '), price?.toString().orEmpty(), branchId.orEmpty(), System.currentTimeMillis().toString())
-            .joinToString("\t")
-        val next = (remindLater.filterNot { it.startsWith(code + "\t") } + entry).takeLast(100)
-        p.edit().putString("remind_later", next.joinToString("\n")).apply()
+    fun addRemindLater(reminder: app.necessityq.domain.ScanReminder) {
+        saveRemindLater((remindLater.filterNot { it.code == reminder.code } + reminder).takeLast(100))
     }
+
+    fun removeRemindLater(code: String) = saveRemindLater(remindLater.filterNot { it.code == code })
+
+    private fun saveRemindLater(list: List<app.necessityq.domain.ScanReminder>) =
+        p.edit().putString("remind_later", list.joinToString("\n") { it.encode() }).apply()
 
     /** Play a sound when a new message arrives. */
     var chatSound: Boolean
@@ -219,6 +269,11 @@ class AppPrefs(context: Context) {
     var autoInstallUpdates: Boolean
         get() = p.getBoolean("upd_auto_install", false)
         set(v) = p.edit().putBoolean("upd_auto_install", v).apply()
+
+    /** How many times the swipe hint above the list was shown (it stops after three). */
+    var swipeHintSeen: Int
+        get() = p.getInt("swipe_hint_seen", 0)
+        set(v) = p.edit().putInt("swipe_hint_seen", v).apply()
 
     /** When the user last opened the conversation of [itemId] (millis). */
     fun readAt(itemId: String): Long = p.getLong("read_$itemId", 0L)

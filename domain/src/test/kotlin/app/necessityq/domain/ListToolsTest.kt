@@ -60,6 +60,17 @@ class ListToolsTest {
         assertEquals(listOf("גזר", "אורז"), alpha[0].lines.map { it.name })
     }
 
+    @Test fun `only name and time orders can be turned around`() {
+        val lines = listOf(
+            line("a", "אורז", Category.PANTRY), line("b", "חלב", Category.DAIRY), line("c", "גזר", Category.PRODUCE),
+        )
+        assertEquals(
+            ListOrdering.arrange(lines, ListSort.GROUPS).map { it.category },
+            ListOrdering.arrange(lines, ListSort.GROUPS, descending = true).map { it.category },
+        )
+        assertEquals(listOf(ListSort.ALPHA, ListSort.ADDED), ListSort.entries.filter { it.hasDirection })
+    }
+
     @Test fun `generate from due items skips what is already on the list`() {
         val milk = (0 until 5).map { purchase("חלב 3%", start.plusDays(it * 7L)) }
         val bread = (0 until 5).map { purchase("לחם", start.plusDays(it * 7L)) }

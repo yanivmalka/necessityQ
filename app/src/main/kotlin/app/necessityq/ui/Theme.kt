@@ -334,8 +334,8 @@ enum class AppPalette(
 
 /**
  * Two looks, both in the chosen palette ([AppPalette]) and the Rubik typeface:
- *  - bright (default): for supermarkets and sunlight. Always light, with larger text.
- *  - system: regular text sizes, light or dark following the phone setting.
+ *  - system (default): regular text sizes, light or dark following the phone setting.
+ *  - bright ("תצוגה בהירה במיוחד", chosen in the settings): for supermarkets and sunlight. Always light, with larger text.
  */
 @Composable
 fun NecessityTheme(bright: Boolean, palette: AppPalette = AppPalette.MARKET, content: @Composable () -> Unit) {

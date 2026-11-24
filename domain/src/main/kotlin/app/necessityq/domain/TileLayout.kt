@@ -47,10 +47,12 @@ data class TileLayout(val shown: Set<TileElement>) {
     companion object {
         val ALL = TileLayout(TileElement.entries.toSet())
 
-        fun defaultFor(mode: ListMode): TileLayout = when (mode) {
-            ListMode.PLAN -> TileLayout(ALL.shown - TileElement.ADDED_BY)
-            ListMode.SHOP -> TileLayout(ALL.shown - TileElement.LAST_BOUGHT - TileElement.FREQUENCY - TileElement.ADDED_BY)
-        }
+        /** A simple tile: the check circle, the name, the amount and the price. Everything else is in "תצוגה". */
+        val SIMPLE = TileLayout(setOf(TileElement.CHECK, TileElement.QUANTITY, TileElement.PRICE))
+
+        /** Both stages start from the simple tile; each can then be changed on its own. */
+        @Suppress("UNUSED_PARAMETER")
+        fun defaultFor(mode: ListMode): TileLayout = SIMPLE
 
         /** Null when nothing was stored; unknown names (from a newer version) are ignored. */
         fun decode(text: String?): TileLayout? {
