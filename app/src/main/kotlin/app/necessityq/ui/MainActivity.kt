@@ -148,10 +148,20 @@ private fun Root(vm: AppViewModel) {
     LaunchedEffect(Unit) { vm.messages.collect { systemMessages.show(it) } }
     LaunchedEffect(Unit) { vm.undo.collect { event -> systemMessages.show(event.text, event.undo) } }
 
-    // notifications (Android 13+) — asked once
+    // notifications (Android 13+) — asked in context (a second member, the first "חסר" or tag), once per run
     val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val permissionContext = LocalContext.current
+    var notificationsAsked by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= 33) notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        vm.wantNotifications.collect {
+            val granted = Build.VERSION.SDK_INT < 33 || androidx.core.content.ContextCompat.checkSelfPermission(
+                permissionContext, Manifest.permission.POST_NOTIFICATIONS,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!granted && !notificationsAsked) {
+                notificationsAsked = true
+                notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
     }
 
     // "install automatically when the download finishes": collected only while the app is on screen,

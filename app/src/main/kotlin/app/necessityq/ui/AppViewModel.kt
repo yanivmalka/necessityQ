@@ -1263,6 +1263,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setMissing(line: ListLine, missing: Boolean) {
         val (hid, uid, _) = ctx() ?: return
+        if (missing) askNotificationsInContext()
         launchSafe { container.service.setMissing(hid, uid, line, missing) }
         if (missing) _undo.tryEmit(UndoEvent("${line.displayName} סומן כחסר") { setMissing(line, false) })
     }
@@ -1601,6 +1602,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             java.util.UUID.randomUUID().toString(), itemId, itemName, uid, authorName(uid), clean,
             System.currentTimeMillis(), replyToId = replyToId, mentions = mentionsIn(clean, uid),
         )
+        if (message.mentions.isNotEmpty()) askNotificationsInContext()
         launchSafe {
             container.collab.sendMessage(hid, message)
             pushAlerts(hid, message)
@@ -1688,6 +1690,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             System.currentTimeMillis(), kind = kind, mediaId = mediaId, durationMs = durationMs, replyToId = replyToId, waveform = waveform,
             mentions = mentionsIn(caption, uid),
         )
+        if (message.mentions.isNotEmpty()) askNotificationsInContext()
         launchSafe {
             container.collab.saveMedia(hid, mediaId, uid, media)
             container.collab.sendMessage(hid, message)
@@ -1844,6 +1847,20 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     val members: StateFlow<List<Member>> = namedMembers
         .catch { emit(emptyList()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * Notifications are asked for in context, not when the app first opens: when the household is shared with
+     * someone else, on the first "חסר", or when tagging someone in צ'אט פוד.
+     */
+    private val _wantNotifications = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val wantNotifications: SharedFlow<Unit> = _wantNotifications
+    private fun askNotificationsInContext() { _wantNotifications.tryEmit(Unit) }
+
+    init {
+        viewModelScope.launch {
+            members.map { it.size > 1 }.distinctUntilChanged().collect { shared -> if (shared) askNotificationsInContext() }
+        }
+    }
 
     fun signInWithGoogle(idToken: String) = launchSafe {
         container.household.signInWithGoogle(idToken)
