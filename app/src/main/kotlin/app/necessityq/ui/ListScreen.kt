@@ -274,7 +274,12 @@ fun ListScreen(
     var addOpen by remember { mutableStateOf(false) }
     val shopping = mode == ListMode.SHOP
     // each stage of use has its own tile (set in the "תצוגה" popup)
-    val tile = display.tile(mode)
+    // features turned off (הגדרות ← פיצ'רים) leave the list: their cards, buttons and parts of the tile
+    val features by vm.features.collectAsStateWithLifecycle()
+    val tile = features.tile(display.tile(mode))
+    val showTotal = display.showTotal && app.necessityq.domain.Feature.PRICES in features
+    val chatOn = app.necessityq.domain.Feature.CHAT in features
+    val tripPlanOn = app.necessityq.domain.Feature.TRIP_PLAN in features
     var showTileEditor by remember { mutableStateOf(false) }
 
     // Local copy of the rows so a drag can move items immediately; re-synced from the live data when idle.
@@ -314,6 +319,8 @@ fun ListScreen(
 
     // suggestion sections: collapsed by default, hidden while typing so the list itself stays visible
     val showSuggestions = !shopping && searchText.isBlank()
+    val showLow = showSuggestions && app.necessityq.domain.Feature.RUNNING_LOW in features
+    val showFrequent = showSuggestions && app.necessityq.domain.Feature.FREQUENT in features
     // "כנראה נגמר בקרוב" opens by itself only while the list is empty; with items on the list it is one folded
     // line ("5 מוצרים כנראה נגמרים · הוספה ›") so the list starts near the top. Once tapped, the choice holds.
     var lowExpandedChoice by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<Boolean?>(null) }
@@ -323,7 +330,8 @@ fun ListScreen(
 
     // recipes whose ingredients are on the list: their servings can be changed (or the recipe removed) from here
     val mealData by vm.meals.collectAsStateWithLifecycle()
-    val showRecipes = !shopping && searchText.isBlank()
+    val showRecipes = !shopping && searchText.isBlank() && app.necessityq.domain.Feature.RECIPES_ON_LIST in features
+    val showPromos = !shopping && searchText.isBlank() && app.necessityq.domain.Feature.PROMOS in features
     val recipesOnList = remember(mealData.dishes, snapshot?.lines) {
         val lines = snapshot?.lines.orEmpty()
         mealData.dishes.mapNotNull { d -> RecipeListSync.onList(lines, d).size.takeIf { it > 0 }?.let { d to it } }
@@ -351,9 +359,9 @@ fun ListScreen(
         (if (shopping && storePrompt) 1 else 0) +
             (if (showReminders) 1 else 0) +
             (if (showRecipes && recipesOnList.isNotEmpty()) 1 else 0) +
-            (if (showRecipes && hasOffers) 1 else 0) +
-            (if (showSuggestions && snap.runningLow.isNotEmpty()) 1 else 0) +
-            (if (showSuggestions && snap.frequent.isNotEmpty()) 1 else 0) + 1
+            (if (showPromos && hasOffers) 1 else 0) +
+            (if (showLow && snap.runningLow.isNotEmpty()) 1 else 0) +
+            (if (showFrequent && snap.frequent.isNotEmpty()) 1 else 0) + 1
     } ?: 0
     val currentLeading by androidx.compose.runtime.rememberUpdatedState(leadingItems)
     val currentSections by androidx.compose.runtime.rememberUpdatedState(sections)
@@ -427,7 +435,7 @@ fun ListScreen(
                     leadingIcon = { Icon(Icons.Default.AutoAwesome, null) },
                     onClick = { showGenerate = true; showMore = false },
                 )
-                if (!shopping && followedBranches.size >= 2) {
+                if (!shopping && tripPlanOn && followedBranches.size >= 2) {
                     DropdownMenuItem(
                         text = { Text("איפה הכי משתלם לקנות?") },
                         leadingIcon = { Icon(Icons.Default.Storefront, null) },
@@ -478,7 +486,7 @@ fun ListScreen(
                 storeName = storeName,
                 done = headerSnap?.bought?.size ?: 0,
                 open = headerSnap?.lines?.count { it.status == LineStatus.NEEDED } ?: 0,
-                remaining = if (display.showTotal && headerSnap != null) {
+                remaining = if (showTotal && headerSnap != null) {
                     app.necessityq.domain.ListCost.of(headerSnap.lines, prices, itemPrices)
                 } else null,
                 onBack = { vm.setMode(ListMode.PLAN) },
@@ -487,7 +495,7 @@ fun ListScreen(
                 IconButton(onClick = { addOpen = !addOpen }) {
                     Icon(Icons.Default.Add, contentDescription = "הוספת פריט", tint = NqTheme.colors.onShopHeader)
                 }
-                messagesButton(NqTheme.colors.onShopHeader)
+                if (chatOn) messagesButton(NqTheme.colors.onShopHeader)
                 menuButton(NqTheme.colors.onShopHeader)
             }
         } else {
@@ -507,7 +515,7 @@ fun ListScreen(
                 )
                 Spacer(Modifier.width(8.dp))
                 ModeSwitch(shopping = false, onSelect = vm::setMode, modifier = Modifier.weight(1f), compact = true)
-                messagesButton(MaterialTheme.colorScheme.onSurface)
+                if (chatOn) messagesButton(MaterialTheme.colorScheme.onSurface)
                 menuButton(MaterialTheme.colorScheme.onSurface)
             }
         }
@@ -660,11 +668,11 @@ fun ListScreen(
             }
 
             // "יש למוצרים אלו מבצעים ב…": promotions on the list's items at the followed branches
-            if (showRecipes && hasOffers) {
+            if (showPromos && hasOffers) {
                 item(key = "promos") { PromoOffersCard(promoOffers, basketOffers, allBranches) }
             }
 
-            if (showSuggestions && snap.runningLow.isNotEmpty()) {
+            if (showLow && snap.runningLow.isNotEmpty()) {
                 item(key = "low") {
                     if (!lowExpanded) {
                         RunningLowLine(snap.runningLow.size, onOpen = { lowExpandedChoice = true })
@@ -695,7 +703,7 @@ fun ListScreen(
                 }
             }
 
-            if (showSuggestions && snap.frequent.isNotEmpty()) {
+            if (showFrequent && snap.frequent.isNotEmpty()) {
                 item(key = "frequent") {
                     Column {
                         SuggestionHeader(
@@ -847,7 +855,7 @@ fun ListScreen(
             if (open > 0) {
                 GoShoppingBar(
                     open = open,
-                    estimate = if (display.showTotal) app.necessityq.domain.ListCost.of(snap.lines, prices, itemPrices) else null,
+                    estimate = if (showTotal) app.necessityq.domain.ListCost.of(snap.lines, prices, itemPrices) else null,
                     storeName = storeName,
                     resume = tripStops.isNotEmpty(),
                     // a trip that was left with "back" (not finished) goes on as it was, split included;
@@ -857,7 +865,7 @@ fun ListScreen(
                         val plan = tripPlan
                         when {
                             tripStops.isNotEmpty() -> vm.setMode(ListMode.SHOP)
-                            followedBranches.size < 2 -> vm.startTrip(null)
+                            !tripPlanOn || followedBranches.size < 2 -> vm.startTrip(null)
                             plan != null && plan.advice == app.necessityq.domain.TripAdvice.STAY -> {
                                 vm.startTrip(plan)
                                 vm.showMessage("הסופר הרגיל שלך הוא הזול לרשימה הזאת")
@@ -883,7 +891,8 @@ fun ListScreen(
     if (showTileEditor) {
         TileEditorSheet(
             mode = mode,
-            layout = tile,
+            // the stored tile (a feature turned off hides parts of it, but does not erase them)
+            layout = display.tile(mode),
             onSave = { vm.setDisplay(vm.display.value.withTile(mode, it)); showTileEditor = false },
             onDismiss = { showTileEditor = false },
             onMoreSettings = { showTileEditor = false; onOpenDisplaySettings() },

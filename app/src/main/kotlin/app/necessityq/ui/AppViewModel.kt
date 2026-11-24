@@ -572,6 +572,15 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setDisplay(value: DisplayOptions) { prefs.display = value; display.value = value }
 
+    /** Which features are on; the first run asks once ("רשימה פשוטה" or "הכול"). */
+    val features = MutableStateFlow(prefs.features)
+    val featuresChosen = MutableStateFlow(prefs.featuresChosen)
+    fun setFeatures(value: app.necessityq.domain.Features) {
+        prefs.features = value
+        features.value = value
+        featuresChosen.value = true
+    }
+
     /** The swipe hint ("משכו שמאלה…") is shown the first three times the list opens with items. */
     fun swipeHintDue(): Boolean = prefs.swipeHintSeen < 3
     fun countSwipeHint() { prefs.swipeHintSeen = prefs.swipeHintSeen + 1 }

@@ -197,8 +197,18 @@ private fun Root(vm: AppViewModel) {
                 chatRequest?.let { openChat = it; vm.consumeOpenChatRequest() }
             }
 
-            val tabs = TABS
-            val pager = rememberPagerState(initialPage = tabs.indexOf(dest.tab)) { tabs.size }
+            // the "תפריט" and "מחירים" tabs can be turned off (הגדרות ← פיצ'רים): with both off, two tabs are left
+            val features by vm.features.collectAsStateWithLifecycle()
+            val tabs = remember(features) {
+                TABS.filter { t ->
+                    when (t) {
+                        Dest.MENU -> app.necessityq.domain.Feature.MENU_TAB in features
+                        Dest.PRICES -> app.necessityq.domain.Feature.PRICES_TAB in features
+                        else -> true
+                    }
+                }
+            }
+            val pager = rememberPagerState(initialPage = maxOf(0, tabs.indexOf(dest.tab))) { tabs.size }
             val scope = rememberCoroutineScope()
             /** A recipe or other page is open inside the menu tab: swiping there belongs to that page, not to the tabs. */
             var menuInnerPage by remember { mutableStateOf(false) }
@@ -221,10 +231,15 @@ private fun Root(vm: AppViewModel) {
             }
 
             // a swipe between the tabs (as between WhatsApp's chats, updates, communities and calls) selects the tab it lands on
-            LaunchedEffect(pager) {
+            LaunchedEffect(pager, tabs) {
                 snapshotFlow { pager.settledPage }.collect { page ->
-                    if (dest in tabs && dest != tabs[page]) go(tabs[page])
+                    val landed = tabs.getOrNull(page) ?: return@collect
+                    if (dest in tabs && dest != landed) go(landed)
                 }
+            }
+            // a tab that was turned off is not where the app stays
+            LaunchedEffect(tabs) {
+                if (dest in TABS && dest !in tabs) go(Dest.LIST)
             }
 
             val shoppingOnList = dest == Dest.LIST && mode == ListMode.SHOP
@@ -237,9 +252,9 @@ private fun Root(vm: AppViewModel) {
                     HubEntry(Dest.HOUSEHOLD.title, Icons.Default.Group) { go(Dest.HOUSEHOLD, from = Dest.HOME) },
                     HubEntry(Dest.MESSAGES.title, Icons.AutoMirrored.Filled.Chat, badge = unread.takeIf { it > 0 }?.toString()) {
                         go(Dest.MESSAGES, from = Dest.HOME)
-                    },
+                    }.takeIf { app.necessityq.domain.Feature.CHAT in features },
                     HubEntry(Dest.HISTORY.title, Icons.Default.History) { go(Dest.HISTORY, from = Dest.HOME) },
-                ),
+                ).filterNotNull(),
                 listOf(
                     HubEntry(Dest.ACCOUNT.title, Icons.Default.AccountCircle) { go(Dest.ACCOUNT, from = Dest.HOME) },
                     HubEntry(Dest.SETTINGS.title, Icons.Default.Tune) { go(Dest.SETTINGS, from = Dest.HOME) },
@@ -284,7 +299,8 @@ private fun Root(vm: AppViewModel) {
                                 }
                                 BottomBar(
                                     // while swiping, the tab lights up as soon as the swipe would land on it
-                                    current = if (dest in tabs) tabs[pager.targetPage] else dest.tab,
+                                    current = if (dest in tabs) tabs.getOrNull(pager.targetPage) ?: dest else dest.tab,
+                                    tabs = tabs,
                                     homeBadge = when {
                                         unread > 0 -> "$unread"
                                         update is UpdateState.Available || update is UpdateState.Ready -> "חדש"
@@ -311,8 +327,9 @@ private fun Root(vm: AppViewModel) {
                                     key = { tabs[it] },
                                     // no swiping away from the list: a quick swipe on a tile (meant to change tab)
                                     // would mark it bought; the tabs below move between pages there
-                                    userScrollEnabled = tabs[pager.currentPage] != Dest.LIST &&
-                                        !(menuInnerPage && tabs[pager.currentPage] == Dest.MENU),
+                                    userScrollEnabled = tabs.getOrNull(pager.currentPage).let { onPage ->
+                                        onPage != Dest.LIST && !(menuInnerPage && onPage == Dest.MENU)
+                                    },
                                     modifier = Modifier.fillMaxSize(),
                                 ) { index ->
                                     when (tabs[index]) {
@@ -348,6 +365,10 @@ private fun Root(vm: AppViewModel) {
                         }
                     }
                 }
+            // the first run asks once how much of the app to show; everything can be turned on again in the settings
+            val featuresChosen by vm.featuresChosen.collectAsStateWithLifecycle()
+            if (!featuresChosen) FeaturesQuestion(onChoose = vm::setFeatures)
+
             // a conversation opened from the messages or a notification: its own page, with the product's page a tap away
             var openProduct by remember { mutableStateOf<Pair<String, String>?>(null) }
             openChat?.let { (itemId, name) ->
@@ -365,6 +386,28 @@ private fun Root(vm: AppViewModel) {
             }
         }
     }
+}
+
+/** First run: "רשימה פשוטה" (only the list) or "הכול". Each feature is a switch in "הגדרות" ← "פיצ'רים". */
+@Composable
+private fun FeaturesQuestion(onChoose: (app.necessityq.domain.Features) -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = {},
+        properties = androidx.compose.ui.window.DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+        title = { Text("איך להתחיל?") },
+        text = {
+            Text(
+                "רשימה פשוטה: רק הרשימה והבית, בלי מחירים, תפריט, צ'אט והצעות. הכול: כל מה שהאפליקציה יודעת לעשות. " +
+                    "אפשר תמיד להדליק או לכבות כל דבר ב\"הגדרות\" ← \"פיצ'רים\".",
+            )
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = { onChoose(app.necessityq.domain.Features.ALL) }) { Text("הכול") }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = { onChoose(app.necessityq.domain.Features.SIMPLE) }) { Text("רשימה פשוטה") }
+        },
+    )
 }
 
 /** The background download, shown above the tabs on every screen: animated icon, progress, stop. */
@@ -394,9 +437,9 @@ private fun DownloadStrip(state: UpdateState.Downloading, onOpen: () -> Unit, on
     }
 }
 
-/** The four tabs, in [TABS] order: הבית · תפריט · מחירים · רשימה. The lit tab gets a tinted pill behind its icon. */
+/** The tabs, in [TABS] order: הבית · תפריט · מחירים · רשימה (those turned on). The lit tab gets a tinted pill behind its icon. */
 @Composable
-private fun BottomBar(current: Dest, homeBadge: String?, onSelect: (Dest) -> Unit) {
+private fun BottomBar(current: Dest, tabs: List<Dest>, homeBadge: String?, onSelect: (Dest) -> Unit) {
     NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
         val icons = mapOf(
             Dest.LIST to Icons.AutoMirrored.Filled.List,
@@ -404,7 +447,7 @@ private fun BottomBar(current: Dest, homeBadge: String?, onSelect: (Dest) -> Uni
             Dest.PRICES to Icons.Default.Sell,
             Dest.HOME to Icons.Default.Home,
         )
-        TABS.map { it to icons.getValue(it) }.forEach { (tab, icon) ->
+        tabs.map { it to icons.getValue(it) }.forEach { (tab, icon) ->
             val selected = current == tab
             NavigationBarItem(
                 selected = selected,

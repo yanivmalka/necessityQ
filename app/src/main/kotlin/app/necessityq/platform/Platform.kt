@@ -72,6 +72,21 @@ data class DisplayOptions(
 class AppPrefs(context: Context) {
     private val p = context.getSharedPreferences("necessityq-prefs", Context.MODE_PRIVATE)
 
+    /** Nothing was stored before this run: a new install (an update keeps what was stored). */
+    private val freshInstall: Boolean = p.all.isEmpty()
+
+    /** Which features are on ("הגדרות" ← "פיצ'רים"). */
+    var features: app.necessityq.domain.Features
+        get() = app.necessityq.domain.Features.decodeOff(p.getString("features_off", null))
+        set(v) = p.edit().putString("features_off", v.encodeOff()).putBoolean("features_chosen", true).apply()
+
+    /**
+     * Whether the first-run question ("רשימה פשוטה" or "הכול") was answered. Someone who used the app before the
+     * question existed is not asked: everything stays on for them.
+     */
+    val featuresChosen: Boolean
+        get() = p.getBoolean("features_chosen", false) || !freshInstall
+
     var brightTheme: Boolean
         get() = p.getBoolean("bright", true)
         set(v) = p.edit().putBoolean("bright", v).apply()

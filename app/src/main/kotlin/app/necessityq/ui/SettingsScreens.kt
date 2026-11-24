@@ -113,7 +113,7 @@ private fun SettingsSection(title: String) {
 
 /**
  * One settings screen, in parts: the list and its tiles · appearance (theme, colours, icon) · notifications
- * (צ'אט פוד, and who hears about a missing item).
+ * (צ'אט פוד, and who hears about a missing item) · features (each can be turned off and on).
  */
 @Composable
 fun SettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier) = PageScaffold("הגדרות", modifier) {
@@ -222,6 +222,28 @@ fun SettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier) = PageScaffo
     if (vm.isShared) {
         val members by vm.members.collectAsStateWithLifecycle()
         NotifyCard(vm, members, vm.me)
+    }
+
+    SettingsSection("פיצ'רים")
+    val features by vm.features.collectAsStateWithLifecycle()
+    Text(
+        "כל פיצ'ר אפשר לכבות ולהדליק בחזרה בכל זמן. כששתי הלשוניות \"תפריט\" ו\"מחירים\" כבויות, נשארות למטה שתי לשוניות: הרשימה והבית.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(onClick = { vm.setFeatures(app.necessityq.domain.Features.SIMPLE) }) { Text("רשימה פשוטה") }
+        OutlinedButton(onClick = { vm.setFeatures(app.necessityq.domain.Features.ALL) }) { Text("הכול") }
+    }
+    app.necessityq.domain.Feature.entries.forEach { feature ->
+        val on = feature in features
+        Row(
+            Modifier.fillMaxWidth().clickable { vm.setFeatures(features.with(feature, !on)) }.padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(feature.label, modifier = Modifier.weight(1f))
+            androidx.compose.material3.Switch(checked = on, onCheckedChange = { vm.setFeatures(features.with(feature, it)) })
+        }
     }
 }
 

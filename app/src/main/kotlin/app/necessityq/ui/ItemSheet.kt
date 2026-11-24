@@ -289,13 +289,17 @@ fun ItemSheet(
                 } else {
                     Button(onClick = { vm.addByName(itemName) }, contentPadding = compact) { Text("הוספה לרשימה", maxLines = 1, softWrap = false) }
                 }
-                OutlinedButton(
-                    onClick = { chat = itemId to (line?.displayName ?: itemName) },
-                    contentPadding = compact,
-                    modifier = Modifier.weight(1f).semantics { contentDescription = "צ'אט פוד על המוצר" },
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Chat, null, Modifier.padding(end = 4.dp).size(18.dp))
-                    ChatFoodButtonLabel(messages = thread.size, unread = unread)
+                // צ'אט פוד can be turned off (הגדרות ← פיצ'רים)
+                val features by vm.features.collectAsStateWithLifecycle()
+                if (app.necessityq.domain.Feature.CHAT in features) {
+                    OutlinedButton(
+                        onClick = { chat = itemId to (line?.displayName ?: itemName) },
+                        contentPadding = compact,
+                        modifier = Modifier.weight(1f).semantics { contentDescription = "צ'אט פוד על המוצר" },
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Chat, null, Modifier.padding(end = 4.dp).size(18.dp))
+                        ChatFoodButtonLabel(messages = thread.size, unread = unread)
+                    }
                 }
             }
             // then: the products that can be bought for it and their prices, with the brand chooser
