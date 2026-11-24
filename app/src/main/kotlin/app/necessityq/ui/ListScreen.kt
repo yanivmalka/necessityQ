@@ -1356,7 +1356,7 @@ private fun ProductTile(
                 Row {
                     // the category is shown by the group header's dot; auto-generated lines carry an "אוטומטי" tag
                     val open = if (tapMode == TapMode.DOUBLE) {
-                        Modifier.combinedClickable(onClickLabel = null, onDoubleClickLabel = "פתיחת דף הפריט", onClick = {}, onDoubleClick = onOpen)
+                        Modifier.combinedClickable(onClick = {}, onDoubleClick = onOpen)
                     } else {
                         Modifier.clickable(onClickLabel = "פתיחת דף הפריט", onClick = onOpen)
                     }
