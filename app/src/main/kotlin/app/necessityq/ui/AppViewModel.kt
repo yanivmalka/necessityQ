@@ -211,14 +211,15 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         _undo.tryEmit(UndoEvent("${line.displayName} הועבר לסל המחזור") { restore(line, line.status) })
     }
 
-    fun clearBought() {
+    /** [text]: the message shown with "ביטול" (by default, how many went to the recycle bin). */
+    fun clearBought(text: String? = null) {
         val (hid, _, lines) = ctx() ?: return
         val bought = lines.filter { it.status == LineStatus.BOUGHT }
         launchSafe { container.service.clearBought(hid, lines) }
         if (bought.isNotEmpty()) {
             val undoChats = archiveChats(bought.map { it.itemId }, lines.filter { it.status == LineStatus.NEEDED })
             _undo.tryEmit(
-                UndoEvent("${bought.size} פריטים שנקנו עברו לסל המחזור") {
+                UndoEvent(text ?: "${bought.size} פריטים שנקנו עברו לסל המחזור") {
                     bought.forEach { restore(it, LineStatus.BOUGHT) }
                     undoChats?.invoke()
                 },
@@ -296,7 +297,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         sort.value = prefs.sortFor(value)
         descending.value = prefs.descendingFor(value)
         checkStorePrompt()
-        if (value == ListMode.PLAN) endTrip()
+        // back to preparing (the arrow or the system back) keeps the trip and its split: only "סיום קנייה" ends it
         if (value == ListMode.SHOP) {
             refreshStalePricesForShopping()
             locate()
@@ -1054,6 +1055,18 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         tripStops.value = stops
         activeStop.value = stops.firstOrNull()
         setMode(ListMode.SHOP)
+    }
+
+    /**
+     * "סיום קנייה": the only way a trip ends. Says in one line what happened (bought · missing, which stay on
+     * the list · not bought), moves what was bought to the recycle bin (with "ביטול"), ends the split and
+     * goes back to preparing the list.
+     */
+    fun finishShopping() {
+        val summary = app.necessityq.domain.TripSummary.of(snapshot.value?.lines.orEmpty())
+        endTrip()
+        setMode(ListMode.PLAN)
+        if (summary.bought > 0) clearBought(summary.text()) else _messages.tryEmit(summary.text())
     }
 
     /** Shows one stop of the split (its items and prices); null = the whole list. */

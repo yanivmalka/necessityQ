@@ -794,7 +794,7 @@ fun ListScreen(
                 item(key = "bought_header") {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("נקנו (${snap.bought.size})", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                        TextButton(onClick = vm::clearBought) { Text("נקה לסל המחזור") }
+                        TextButton(onClick = { vm.clearBought() }) { Text("נקה לסל המחזור") }
                     }
                 }
                 items(snap.bought, key = { "b_" + it.id }) { line ->
@@ -804,7 +804,7 @@ fun ListScreen(
         }
 
         if (shopping) {
-            ShopBottomBar(onScan = scan, onFinish = { vm.setMode(ListMode.PLAN) })
+            ShopBottomBar(onScan = scan, onFinish = vm::finishShopping)
         } else if (snap != null) {
             // one clear way into the store, with the estimated total of the open lines
             val open = snap.lines.count { it.status == LineStatus.NEEDED }
@@ -813,8 +813,16 @@ fun ListScreen(
                     open = open,
                     estimate = if (display.showTotal) app.necessityq.domain.ListCost.of(snap.lines, prices, itemPrices) else null,
                     storeName = storeName,
-                    // with two branches or more: first where it pays to shop (one supermarket or a split)
-                    onGo = { if (followedBranches.size >= 2) showTrip = true else vm.startTrip(null) },
+                    resume = tripStops.isNotEmpty(),
+                    // a trip that was left with "back" (not finished) goes on as it was, split included;
+                    // otherwise, with two branches or more: first where it pays to shop (one supermarket or a split)
+                    onGo = {
+                        when {
+                            tripStops.isNotEmpty() -> vm.setMode(ListMode.SHOP)
+                            followedBranches.size >= 2 -> showTrip = true
+                            else -> vm.startTrip(null)
+                        }
+                    },
                 )
             }
         }
@@ -2182,7 +2190,13 @@ private fun RunningLowCard(s: Suggestion, info: String, onAdd: () -> Unit, onDis
 
 /** Bottom of the list while preparing: one button into the store, with the count and the estimated total. */
 @Composable
-private fun GoShoppingBar(open: Int, estimate: app.necessityq.domain.ListCostEstimate?, storeName: String?, onGo: () -> Unit) {
+private fun GoShoppingBar(
+    open: Int,
+    estimate: app.necessityq.domain.ListCostEstimate?,
+    storeName: String?,
+    resume: Boolean = false,
+    onGo: () -> Unit,
+) {
     val details = listOfNotNull(
         if (open == 1) "פריט אחד" else "$open פריטים",
         estimate?.takeIf { it.pricedLines > 0 }?.let { costText(it) },
@@ -2198,7 +2212,7 @@ private fun GoShoppingBar(open: Int, estimate: app.necessityq.domain.ListCostEst
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text("יוצאים לקנות", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.SemiBold)
+                Text(if (resume) "חזרה לקנייה" else "יוצאים לקנות", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.SemiBold)
                 Text(
                     details,
                     color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f),
