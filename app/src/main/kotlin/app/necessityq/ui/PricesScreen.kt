@@ -12,10 +12,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -296,8 +299,8 @@ private fun ProductsTab(vm: AppViewModel, mine: List<PriceBranch>, status: Map<S
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         items(results, key = { r -> "${r.product.internalCode}:${r.at.keys.first()}:${r.product.code}" }) { r ->
-            if (comparing) CompareCard(r, chosen)
-            else ProductCard(r.product, all[ids.first()]?.rangeDays ?: 90, singleComparisons[r.product.code], mine)
+            if (comparing) CompareCard(r, chosen, onAdd = { vm.addProductToList(r.product) })
+            else ProductCard(r.product, all[ids.first()]?.rangeDays ?: 90, singleComparisons[r.product.code], mine, onAdd = { vm.addProductToList(r.product) })
         }
     }
 }
@@ -308,7 +311,7 @@ private fun ProductsTab(vm: AppViewModel, mine: List<PriceBranch>, status: Map<S
  * own price, unmarked.
  */
 @Composable
-private fun CompareCard(r: app.necessityq.domain.ProductAcross, chosen: List<PriceBranch>) {
+private fun CompareCard(r: app.necessityq.domain.ProductAcross, chosen: List<PriceBranch>, onAdd: () -> Unit) {
     val p = r.product
     val unit = LocalWeightPriceUnit.current
     Card(Modifier.fillMaxWidth()) {
@@ -362,6 +365,7 @@ private fun CompareCard(r: app.necessityq.domain.ProductAcross, chosen: List<Pri
                 }
             }
             if (p.internalCode) Text("קוד פנימי של הרשת — לא מושווה לרשתות אחרות", style = MaterialTheme.typography.labelSmall)
+            AddToListButton(onAdd)
         }
     }
 }
@@ -373,7 +377,7 @@ private fun productDetails(p: BranchProduct): String? = listOfNotNull(
 ).takeIf { it.isNotEmpty() }?.joinToString(" · ")
 
 @Composable
-private fun ProductCard(p: BranchProduct, rangeDays: Int, comparison: app.necessityq.domain.PriceComparison?, mine: List<PriceBranch>) {
+private fun ProductCard(p: BranchProduct, rangeDays: Int, comparison: app.necessityq.domain.PriceComparison?, mine: List<PriceBranch>, onAdd: () -> Unit) {
     val unit = LocalWeightPriceUnit.current
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -406,7 +410,21 @@ private fun ProductCard(p: BranchProduct, rangeDays: Int, comparison: app.necess
                 }
             }
             if (p.internalCode) Text("קוד פנימי של הרשת — לא מושווה לרשתות אחרות", style = MaterialTheme.typography.labelSmall)
+            AddToListButton(onAdd)
         }
+    }
+}
+
+/** "לרשימה": adds the generic item ("קוטג' 5%"), and the exact product is remembered for it. */
+@Composable
+private fun AddToListButton(onAdd: () -> Unit) {
+    androidx.compose.material3.FilledTonalButton(
+        onClick = onAdd,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+        modifier = Modifier.padding(top = 4.dp).height(36.dp),
+    ) {
+        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+        Text(" לרשימה")
     }
 }
 

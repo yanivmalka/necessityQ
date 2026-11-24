@@ -1385,6 +1385,21 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     /** Scanned from an item's page: that exact product becomes the item's chosen product. */
+    /**
+     * "לרשימה" on a product found on the prices tab: the list gets the generic item ("קוטג' 5%"), and the exact
+     * product is remembered for it, so its price is the one shown.
+     */
+    fun addProductToList(product: app.necessityq.domain.BranchProduct) {
+        val (hid, uid, lines) = ctx() ?: return
+        val item = app.necessityq.domain.Scan.genericIdentity(product)
+        launchSafe {
+            container.service.add(hid, uid, item, null, LineSource.MANUAL, lines)
+            setPreferredProduct(item.id, product.code)
+            _added.tryEmit(item.id)
+            _messages.tryEmit("${item.displayName} נוסף לרשימה (${product.name})")
+        }
+    }
+
     fun linkScannedProduct(itemId: String, raw: String?) {
         if (raw == null) return
         scanBusy.value = true
