@@ -29,7 +29,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.ui.unit.dp
@@ -60,10 +59,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material.icons.filled.Restaurant
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -98,11 +94,20 @@ class MainActivity : ComponentActivity() {
             }
         }
         openChatFrom(intent)
+        joinFrom(intent)
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         openChatFrom(intent)
+        joinFrom(intent)
+    }
+
+    /** A join link (necessityq://join?code=…) offers to join that household, in one tap. */
+    private fun joinFrom(intent: android.content.Intent?) {
+        val code = app.necessityq.domain.JoinLinks.codeFrom(intent?.dataString) ?: return
+        intent?.data = null
+        vm.requestJoin(code)
     }
 
     /** A tapped צ'אט פוד notification opens its conversation. */
@@ -130,12 +135,20 @@ class MainActivity : ComponentActivity() {
 private enum class Dest(val title: String) {
     LIST("רשימה"), MENU("תפריט"), PRICES("מחירים"), HOME("הבית"),
     HOUSEHOLD("הבית ומשתתפים"), MESSAGES("צ'אט פוד"), HISTORY("היסטוריה"), ACCOUNT("חשבון"),
-    SETTINGS("הגדרות תצוגה"), APPEARANCE("מראה"), UPDATES("עדכונים"), ABOUT("אודות"),
+    SETTINGS("הגדרות"), APPEARANCE("הגדרות"), UPDATES("עדכונים"), ABOUT("אודות"),
     FAMILY_MEMBER("בן/בת משפחה"),
 }
 
-/** The bottom-bar tabs, in order (the first is on the right): הבית on the right, the list on the left. */
+/** The bottom-bar tabs (their order, and the one the app opens on, are chosen in the settings). */
 private val TABS = listOf(Dest.HOME, Dest.MENU, Dest.PRICES, Dest.LIST)
+
+private val app.necessityq.domain.AppTab.dest: Dest
+    get() = when (this) {
+        app.necessityq.domain.AppTab.HOME -> Dest.HOME
+        app.necessityq.domain.AppTab.MENU -> Dest.MENU
+        app.necessityq.domain.AppTab.PRICES -> Dest.PRICES
+        app.necessityq.domain.AppTab.LIST -> Dest.LIST
+    }
 
 /** The tab that is lit while a screen is open. */
 private val Dest.tab: Dest
@@ -147,19 +160,25 @@ private val Dest.tab: Dest
 @Composable
 private fun Root(vm: AppViewModel) {
     val session by vm.session.collectAsStateWithLifecycle()
-    val snackbar = remember { SnackbarHostState() }
-    LaunchedEffect(Unit) { vm.messages.collect { snackbar.showSnackbar(it) } }
-    LaunchedEffect(Unit) {
-        vm.undo.collect { event ->
-            val result = snackbar.showSnackbar(event.text, actionLabel = "ביטול", duration = SnackbarDuration.Long)
-            if (result == SnackbarResult.ActionPerformed) event.undo()
-        }
-    }
+    // system messages lie in layers: a new one does not hide (or drop) the previous one and its "ביטול"
+    val systemMessages = remember { SystemMessagesState() }
+    LaunchedEffect(Unit) { vm.messages.collect { systemMessages.show(it) } }
+    LaunchedEffect(Unit) { vm.undo.collect { event -> systemMessages.show(event.text, event.undo) } }
 
-    // notifications (Android 13+) — asked once
+    // notifications (Android 13+) — asked in context (a second member, the first "חסר" or tag), once per run
     val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val permissionContext = LocalContext.current
+    var notificationsAsked by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= 33) notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        vm.wantNotifications.collect {
+            val granted = Build.VERSION.SDK_INT < 33 || androidx.core.content.ContextCompat.checkSelfPermission(
+                permissionContext, Manifest.permission.POST_NOTIFICATIONS,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!granted && !notificationsAsked) {
+                notificationsAsked = true
+                notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
     }
 
     // "install automatically when the download finishes": collected only while the app is on screen,
@@ -187,15 +206,31 @@ private fun Root(vm: AppViewModel) {
         is Session.SignedIn -> {
             val household = s.household
             if (household == null) {
-                Scaffold(snackbarHost = { SwipeableSnackbarHost(snackbar) }) { padding ->
+                Scaffold(snackbarHost = { SystemMessagesHost(systemMessages) }) { padding ->
                     OnboardingScreen(vm, s.account, Modifier.padding(padding))
+                }
+                // opened from a join link: one tap joins (the code can still be typed by hand)
+                val pendingJoin by vm.pendingJoin.collectAsStateWithLifecycle()
+                pendingJoin?.let { code ->
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = vm::consumeJoin,
+                        title = { Text("הצטרפות לבית") },
+                        text = { Text("להצטרף לרשימת הקניות של הבית שהזמין אתכם (קוד $code)?") },
+                        confirmButton = {
+                            androidx.compose.material3.TextButton(onClick = { vm.joinHousehold(code); vm.consumeJoin() }) { Text("הצטרפות") }
+                        },
+                        dismissButton = { androidx.compose.material3.TextButton(onClick = vm::consumeJoin) { Text("לא עכשיו") } },
+                    )
                 }
                 return
             }
             val mode by vm.mode.collectAsStateWithLifecycle()
-            var dest by rememberSaveable { mutableStateOf(Dest.LIST) }
+            // the app opens on the tab chosen in the settings (the list, unless changed)
+            var dest by rememberSaveable { mutableStateOf(vm.startTab.value.dest) }
             /** Where the back arrow of a secondary page leads; null on the tabs. */
             var backTo by rememberSaveable { mutableStateOf<Dest?>(null) }
+            // the settings tab to open on: notifications when coming from the household's notification row
+            var settingsTab by rememberSaveable { mutableStateOf(SettingsTab.LIST) }
             /** The family member whose profile is open ("" = a new member). */
             var familyMember by rememberSaveable { mutableStateOf("") }
             val unread by vm.unreadTotal.collectAsStateWithLifecycle()
@@ -206,8 +241,22 @@ private fun Root(vm: AppViewModel) {
                 chatRequest?.let { openChat = it; vm.consumeOpenChatRequest() }
             }
 
-            val tabs = TABS
-            val pager = rememberPagerState(initialPage = tabs.indexOf(dest.tab)) { tabs.size }
+            // the "תפריט" and "מחירים" tabs can be turned off (הגדרות ← פיצ'רים): with both off, two tabs are left
+            val features by vm.features.collectAsStateWithLifecycle()
+            val tabOrder by vm.tabOrder.collectAsStateWithLifecycle()
+            val tabs = remember(features, tabOrder) {
+                tabOrder.map { it.dest }.filter { t ->
+                    when (t) {
+                        Dest.MENU -> app.necessityq.domain.Feature.MENU_TAB in features
+                        Dest.PRICES -> app.necessityq.domain.Feature.PRICES_TAB in features
+                        else -> true
+                    }
+                }
+            }
+            val startTab by vm.startTab.collectAsStateWithLifecycle()
+            /** Where "back" from the other tabs leads, and where back leaves the app. */
+            val startDest = startTab.dest.takeIf { it in tabs } ?: Dest.LIST
+            val pager = rememberPagerState(initialPage = maxOf(0, tabs.indexOf(dest.tab))) { tabs.size }
             val scope = rememberCoroutineScope()
             /** A recipe or other page is open inside the menu tab: swiping there belongs to that page, not to the tabs. */
             var menuInnerPage by remember { mutableStateOf(false) }
@@ -224,20 +273,25 @@ private fun Root(vm: AppViewModel) {
             }
 
             fun back() {
-                val to = backTo ?: Dest.LIST
+                val to = backTo ?: startDest
                 // a page under "הבית" (the household, from a family member's profile) keeps its own way back
                 go(to, from = if (to !in tabs && to.tab == Dest.HOME) Dest.HOME else null)
             }
 
             // a swipe between the tabs (as between WhatsApp's chats, updates, communities and calls) selects the tab it lands on
-            LaunchedEffect(pager) {
+            LaunchedEffect(pager, tabs) {
                 snapshotFlow { pager.settledPage }.collect { page ->
-                    if (dest in tabs && dest != tabs[page]) go(tabs[page])
+                    val landed = tabs.getOrNull(page) ?: return@collect
+                    if (dest in tabs && dest != landed) go(landed)
                 }
+            }
+            // a tab that was turned off is not where the app stays
+            LaunchedEffect(tabs) {
+                if (dest in TABS && dest !in tabs) go(startDest)
             }
 
             val shoppingOnList = dest == Dest.LIST && mode == ListMode.SHOP
-            BackHandler(enabled = dest != Dest.LIST || shoppingOnList) {
+            BackHandler(enabled = dest != startDest || shoppingOnList) {
                 if (shoppingOnList) vm.setMode(ListMode.PLAN) else back()
             }
 
@@ -246,13 +300,12 @@ private fun Root(vm: AppViewModel) {
                     HubEntry(Dest.HOUSEHOLD.title, Icons.Default.Group) { go(Dest.HOUSEHOLD, from = Dest.HOME) },
                     HubEntry(Dest.MESSAGES.title, Icons.AutoMirrored.Filled.Chat, badge = unread.takeIf { it > 0 }?.toString()) {
                         go(Dest.MESSAGES, from = Dest.HOME)
-                    },
+                    }.takeIf { app.necessityq.domain.Feature.CHAT in features },
                     HubEntry(Dest.HISTORY.title, Icons.Default.History) { go(Dest.HISTORY, from = Dest.HOME) },
-                ),
+                ).filterNotNull(),
                 listOf(
                     HubEntry(Dest.ACCOUNT.title, Icons.Default.AccountCircle) { go(Dest.ACCOUNT, from = Dest.HOME) },
-                    HubEntry(Dest.SETTINGS.title, Icons.Default.Tune) { go(Dest.SETTINGS, from = Dest.HOME) },
-                    HubEntry(Dest.APPEARANCE.title, Icons.Default.Palette) { go(Dest.APPEARANCE, from = Dest.HOME) },
+                    HubEntry(Dest.SETTINGS.title, Icons.Default.Tune) { settingsTab = SettingsTab.LIST; go(Dest.SETTINGS, from = Dest.HOME) },
                 ),
                 listOf(
                     HubEntry(
@@ -274,7 +327,7 @@ private fun Root(vm: AppViewModel) {
                 LocalWeightPriceUnit provides display.weightUnit,
             ) {
                 Scaffold(
-                    snackbarHost = { SwipeableSnackbarHost(snackbar) },
+                    snackbarHost = { SystemMessagesHost(systemMessages) },
                     bottomBar = {
                         // shopping is a focused mode: the list takes the whole screen and has its own way back
                         if (!shoppingOnList) {
@@ -294,7 +347,8 @@ private fun Root(vm: AppViewModel) {
                                 }
                                 BottomBar(
                                     // while swiping, the tab lights up as soon as the swipe would land on it
-                                    current = if (dest in tabs) tabs[pager.targetPage] else dest.tab,
+                                    current = if (dest in tabs) tabs.getOrNull(pager.targetPage) ?: dest else dest.tab,
+                                    tabs = tabs,
                                     homeBadge = when {
                                         unread > 0 -> "$unread"
                                         update is UpdateState.Available || update is UpdateState.Ready -> "חדש"
@@ -319,14 +373,18 @@ private fun Root(vm: AppViewModel) {
                                 null -> HorizontalPager(
                                     state = pager,
                                     key = { tabs[it] },
-                                    userScrollEnabled = !shoppingOnList && !(menuInnerPage && tabs[pager.currentPage] == Dest.MENU),
+                                    // no swiping away from the list: a quick swipe on a tile (meant to change tab)
+                                    // would mark it bought; the tabs below move between pages there
+                                    userScrollEnabled = tabs.getOrNull(pager.currentPage).let { onPage ->
+                                        onPage != Dest.LIST && !(menuInnerPage && onPage == Dest.MENU)
+                                    },
                                     modifier = Modifier.fillMaxSize(),
                                 ) { index ->
                                     when (tabs[index]) {
                                         Dest.LIST -> ListScreen(
                                             vm, household.name, modifier,
                                             onOpenMessages = { go(Dest.MESSAGES, from = Dest.LIST) },
-                                            onOpenDisplaySettings = { go(Dest.SETTINGS, from = Dest.LIST) },
+                                            onOpenDisplaySettings = { settingsTab = SettingsTab.LIST; go(Dest.SETTINGS, from = Dest.LIST) },
                                         )
                                         Dest.MENU -> MenuScreen(vm, modifier, onInnerPage = { menuInnerPage = it })
                                         Dest.PRICES -> PricesScreen(vm, modifier)
@@ -340,10 +398,13 @@ private fun Root(vm: AppViewModel) {
                                 Dest.HOUSEHOLD -> HouseholdScreen(
                                     vm, household, s.account, s.userId, modifier,
                                     onOpenFamilyMember = { id -> familyMember = id.orEmpty(); go(Dest.FAMILY_MEMBER, from = Dest.HOUSEHOLD) },
+                                    onOpenAccount = { go(Dest.ACCOUNT, from = Dest.HOUSEHOLD) },
+                                    onOpenSettings = { settingsTab = SettingsTab.NOTIFY; go(Dest.SETTINGS, from = Dest.HOUSEHOLD) },
                                 )
                                 Dest.ACCOUNT -> AccountScreen(vm, s.account, modifier)
-                                Dest.SETTINGS -> DisplaySettingsScreen(vm, modifier)
-                                Dest.APPEARANCE -> AppearanceScreen(vm, modifier)
+                                // "מראה" is a part of the settings' "האפליקציה" tab now
+                                Dest.SETTINGS -> SettingsScreen(vm, modifier, settingsTab)
+                                Dest.APPEARANCE -> SettingsScreen(vm, modifier, SettingsTab.APP)
                                 Dest.UPDATES -> UpdatesScreen(vm, modifier)
                                 Dest.ABOUT -> AboutScreen(modifier)
                                 Dest.FAMILY_MEMBER -> MemberScreen(vm, familyMember.ifEmpty { null }, onBack = { back() }, modifier = modifier)
@@ -353,6 +414,26 @@ private fun Root(vm: AppViewModel) {
                         }
                     }
                 }
+            // a join link while already in a household: joining another one means leaving this one first
+            val pendingJoin by vm.pendingJoin.collectAsStateWithLifecycle()
+            pendingJoin?.let { code ->
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = vm::consumeJoin,
+                    title = { Text(if (code == household.joinCode) "כבר בבית הזה" else "כבר יש לך בית") },
+                    text = {
+                        Text(
+                            if (code == household.joinCode) "הקישור הוא לבית \"${household.name}\", שכבר הצטרפת אליו."
+                            else "כדי להצטרף לבית אחר צריך קודם לצאת מ\"${household.name}\" (הבית ← הבית ומשתתפים ← יציאה מהבית), ואז לפתוח שוב את הקישור.",
+                        )
+                    },
+                    confirmButton = { androidx.compose.material3.TextButton(onClick = vm::consumeJoin) { Text("הבנתי") } },
+                )
+            }
+
+            // the first run asks once how much of the app to show; everything can be turned on again in the settings
+            val featuresChosen by vm.featuresChosen.collectAsStateWithLifecycle()
+            if (!featuresChosen) FeaturesQuestion(onChoose = vm::setFeatures)
+
             // a conversation opened from the messages or a notification: its own page, with the product's page a tap away
             var openProduct by remember { mutableStateOf<Pair<String, String>?>(null) }
             openChat?.let { (itemId, name) ->
@@ -370,6 +451,28 @@ private fun Root(vm: AppViewModel) {
             }
         }
     }
+}
+
+/** First run: "רשימה פשוטה" (only the list) or "הכול". Each feature is a switch in "הגדרות" ← "פיצ'רים". */
+@Composable
+private fun FeaturesQuestion(onChoose: (app.necessityq.domain.Features) -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = {},
+        properties = androidx.compose.ui.window.DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+        title = { Text("איך להתחיל?") },
+        text = {
+            Text(
+                "רשימה פשוטה: רק הרשימה והבית, בלי מחירים, תפריט, צ'אט והצעות. הכול: כל מה שהאפליקציה יודעת לעשות. " +
+                    "אפשר תמיד להדליק או לכבות כל דבר ב\"הגדרות\" ← \"פיצ'רים\".",
+            )
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = { onChoose(app.necessityq.domain.Features.ALL) }) { Text("הכול") }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = { onChoose(app.necessityq.domain.Features.SIMPLE) }) { Text("רשימה פשוטה") }
+        },
+    )
 }
 
 /** The background download, shown above the tabs on every screen: animated icon, progress, stop. */
@@ -399,9 +502,9 @@ private fun DownloadStrip(state: UpdateState.Downloading, onOpen: () -> Unit, on
     }
 }
 
-/** The four tabs, in [TABS] order: הבית · תפריט · מחירים · רשימה. The lit tab gets a tinted pill behind its icon. */
+/** The tabs, in [TABS] order: הבית · תפריט · מחירים · רשימה (those turned on). The lit tab gets a tinted pill behind its icon. */
 @Composable
-private fun BottomBar(current: Dest, homeBadge: String?, onSelect: (Dest) -> Unit) {
+private fun BottomBar(current: Dest, tabs: List<Dest>, homeBadge: String?, onSelect: (Dest) -> Unit) {
     NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
         val icons = mapOf(
             Dest.LIST to Icons.AutoMirrored.Filled.List,
@@ -409,7 +512,7 @@ private fun BottomBar(current: Dest, homeBadge: String?, onSelect: (Dest) -> Uni
             Dest.PRICES to Icons.Default.Sell,
             Dest.HOME to Icons.Default.Home,
         )
-        TABS.map { it to icons.getValue(it) }.forEach { (tab, icon) ->
+        tabs.map { it to icons.getValue(it) }.forEach { (tab, icon) ->
             val selected = current == tab
             NavigationBarItem(
                 selected = selected,

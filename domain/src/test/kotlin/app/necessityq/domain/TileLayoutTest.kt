@@ -28,13 +28,12 @@ class TileLayoutTest {
     }
 
     @Test
-    fun `each stage has its own default`() {
-        val plan = TileLayout.defaultFor(ListMode.PLAN)
-        val shop = TileLayout.defaultFor(ListMode.SHOP)
-        assertTrue(TileElement.LAST_BOUGHT in plan)
-        assertFalse(TileElement.LAST_BOUGHT in shop)
-        assertFalse(TileElement.ADDED_BY in plan)
-        assertTrue(TileElement.PRICE in shop)
+    fun `the default tile is simple - check, name, amount, price`() {
+        val expected = setOf(TileElement.CHECK, TileElement.QUANTITY, TileElement.PRICE)
+        assertEquals(expected, TileLayout.defaultFor(ListMode.PLAN).shown)
+        assertEquals(expected, TileLayout.defaultFor(ListMode.SHOP).shown)
+        assertFalse(TileElement.LAST_BOUGHT in TileLayout.defaultFor(ListMode.PLAN))
+        assertFalse(TileElement.STEPPER in TileLayout.defaultFor(ListMode.PLAN))
     }
 
     @Test

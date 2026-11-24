@@ -4,20 +4,19 @@ on:
   push:
     branches: [main]
   pull_request:
-  workflow_dispatch:
 
 permissions:
   contents: write
 
+# the APK is built by its own workflow, "Build APK" (build-apk.yml), started by hand
 concurrency:
-  group: android-${{ github.ref }}
+  group: android-${{ github.ref }}-check
   cancel-in-progress: true
 
 jobs:
-  build:
+  # Fast check on every push and PR: the domain unit tests only (a minute or two, no APK).
+  tests:
     runs-on: ubuntu-latest
-    env:
-      VERSION_CODE: ${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
 
@@ -28,73 +27,15 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      # Optional: shared realtime mode. Without the secret the app is built in single-device mode.
-      - name: Firebase config
-        env:
-          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
-        run: |
-          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
-            echo "$GOOGLE_SERVICES_JSON" > app/google-services.json
-            echo "Firebase: configured"
-          else
-            echo "Firebase: not configured (single-device build)"
-          fi
-
-      # Optional: production signing key. Without it the committed dev keystore is used.
-      - name: Signing key
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-        run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > keystore/release.keystore
-            echo "SIGNING_STORE_FILE=keystore/release.keystore" >> "$GITHUB_ENV"
-            echo "RELEASE_SIGNED=true" >> "$GITHUB_ENV"
-          else
-            echo "::warning::KEYSTORE_BASE64 is not set: this APK is signed with the public dev keystore and will not be published as a release."
-          fi
-
       - name: Unit tests (domain)
         run: ./gradlew :domain:test --stacktrace
 
-      - name: Lint + build release APK
-        env:
-          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
-          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
-          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
-        run: ./gradlew :app:lintRelease :app:assembleRelease --stacktrace
-
-      - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk necessityQ-${{ github.run_number }}.apk
-
       - uses: actions/upload-artifact@v4
+        if: failure()
         with:
-          name: necessityQ-apk
-          path: necessityQ-${{ github.run_number }}.apk
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: reports
-          path: |
-            domain/build/reports/tests
-            app/build/reports/lint-results-release.html
+          name: test-reports
+          path: domain/build/reports/tests
           if-no-files-found: ignore
-
-      - name: Publish GitHub Release
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # Never publish an APK signed with the committed (public) dev keystore.
-          if [ "$RELEASE_SIGNED" != "true" ]; then
-            echo "::error::Refusing to publish a release signed with the dev keystore. Set KEYSTORE_BASE64, SIGNING_STORE_PASSWORD, SIGNING_KEY_ALIAS and SIGNING_KEY_PASSWORD in the repository secrets."
-            exit 1
-          fi
-          TAG="v0.1.${{ github.run_number }}"
-          gh release create "$TAG" "necessityQ-${{ github.run_number }}.apk" \
-            --title "necessityQ $TAG" \
-            --notes "בנייה אוטומטית מ-${GITHUB_SHA::7}. להתקנה: הורידו את קובץ ה-APK בטלפון ופתחו אותו." \
-            --latest
 
   # Security-rules tests against the Firestore emulator. Runs on every PR and push,
   # and the rules deploy below waits for it.
@@ -125,7 +66,7 @@ jobs:
   firestore-rules:
     runs-on: ubuntu-latest
     needs: firestore-rules-test
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
       - name: Deploy Firestore rules and indexes

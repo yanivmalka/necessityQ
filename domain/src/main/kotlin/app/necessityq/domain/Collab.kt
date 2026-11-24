@@ -273,12 +273,16 @@ class InMemoryCollabRepository : CollabRepository {
 
 // ---------- ordering, sorting, quantity steps ----------
 
-enum class ListSort(val label: String) {
-    GROUPS("לפי קבוצות"),
-    ALPHA("א–ב"),
-    ADDED("לפי סדר הוספה"),
-    PICK("לפי סדר איסוף"),
-    CART_LOAD("לפי סדר העמסה לעגלה"),
+/**
+ * How the list is ordered, with a line under each choice that says what it does. [hasDirection]: only an order
+ * by name or by time can be turned around (ascending / descending); the others have one natural order.
+ */
+enum class ListSort(val label: String, val hint: String?, val hasDirection: Boolean) {
+    GROUPS("לפי קבוצות", null, false),
+    ALPHA("א–ב", null, true),
+    ADDED("לפי סדר הוספה", null, true),
+    PICK("לפי המסלול שלי בחנות", "נלמד מהסדר שבו סימנתם בקניות קודמות", false),
+    CART_LOAD("כבדים קודם, קירור בסוף", "כבדים לתחתית העגלה, ירקות ולחם למעלה, קפואים אחרונים", false),
 }
 
 /** The two ways the list is used: preparing it at home, and walking the shop. */
@@ -342,6 +346,8 @@ object ListOrdering {
     ): List<ListSection> {
         val needed = lines.filter { it.status == LineStatus.NEEDED }
         if (needed.isEmpty()) return emptyList()
+        // a direction chosen for another sort does not turn around one that has no direction
+        val descending = descending && sort.hasDirection
         fun List<ListLine>.dir() = if (descending) asReversed().toList() else this
 
         if (sort == ListSort.CART_LOAD) {

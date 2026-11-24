@@ -8,6 +8,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import app.necessityq.AppContainer
 import app.necessityq.domain.Autocomplete
+import app.necessityq.domain.HebrewText
 import app.necessityq.domain.ItemIdentity
 import app.necessityq.domain.LineSource
 import app.necessityq.domain.ListLine
@@ -67,7 +68,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     val isShared: Boolean = container.household.isShared
 
-    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    // a burst of messages is never dropped: each one is shown (in layers) until it goes
+    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 64)
     val messages: SharedFlow<String> = _messages
 
     val session: StateFlow<Session> = container.household.session
@@ -153,7 +155,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun checkOff(line: ListLine) {
         val (hid, uid, _) = ctx() ?: return
         launchSafe { container.service.checkOff(hid, uid, line, currentStoreId.value) }
-        _undo.tryEmit(UndoEvent("${line.displayName} סומן כנקנה") { reopen(line) })
+        _undo.tryEmit(UndoEvent("${line.displayName} הושלם") { reopen(line) })
     }
 
     fun reopen(line: ListLine) {
@@ -208,17 +210,18 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun delete(line: ListLine) {
         val (hid, _, _) = ctx() ?: return
         launchSafe { container.service.delete(hid, line) }
-        _undo.tryEmit(UndoEvent("${line.displayName} הועבר לסל המחזור") { restore(line, line.status) })
+        _undo.tryEmit(UndoEvent("${line.displayName} הוסר") { restore(line, line.status) })
     }
 
-    fun clearBought() {
+    /** [text]: the message shown with "ביטול" (by default, which items went to the recycle bin). */
+    fun clearBought(text: String? = null) {
         val (hid, _, lines) = ctx() ?: return
         val bought = lines.filter { it.status == LineStatus.BOUGHT }
         launchSafe { container.service.clearBought(hid, lines) }
         if (bought.isNotEmpty()) {
             val undoChats = archiveChats(bought.map { it.itemId }, lines.filter { it.status == LineStatus.NEEDED })
             _undo.tryEmit(
-                UndoEvent("${bought.size} פריטים שנקנו עברו לסל המחזור") {
+                UndoEvent(text ?: if (bought.size == 1) "${bought[0].displayName} עבר לסל המחזור" else "${HebrewText.nameList(bought.map { it.displayName })} עברו לסל המחזור") {
                     bought.forEach { restore(it, LineStatus.BOUGHT) }
                     undoChats?.invoke()
                 },
@@ -239,8 +242,11 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         val (hid, uid, lines) = ctx() ?: return
         if (items.isEmpty()) return
         launchSafe {
+            val onList = lines.filter { it.status == LineStatus.NEEDED }.map { it.itemId }.toSet()
+            val names = items.filter { it.identity.id !in onList }.map { it.identity.displayName }.distinct()
             val added = container.service.addGenerated(hid, uid, items, lines)
-            _undo.tryEmit(UndoEvent("נוספו ${added.size} פריטים מקניות עבר") { launchSafe { container.service.undoGenerated(hid, added) } })
+            if (added.isEmpty()) return@launchSafe
+            _undo.tryEmit(UndoEvent("נוספו מקניות עבר: " + HebrewText.nameList(names.ifEmpty { listOf("${added.size} פריטים") })) { launchSafe { container.service.undoGenerated(hid, added) } })
         }
     }
 
@@ -249,12 +255,12 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         launchSafe {
             val moved = container.service.resetList(hid, scope, lines)
             if (moved.isEmpty()) {
-                _messages.tryEmit("אין מה לאפס")
+                _messages.tryEmit("אין מה לנקות")
             } else {
                 val movedIds = moved.map { it.id }.toSet()
                 val undoChats = archiveChats(moved.map { it.itemId }, lines.filter { it.id !in movedIds })
                 _undo.tryEmit(
-                    UndoEvent("${moved.size} פריטים עברו לסל המחזור") {
+                    UndoEvent(if (moved.size == 1) "${moved[0].displayName} הוסר" else "${HebrewText.nameList(moved.map { it.displayName })} הוסרו") {
                         moved.forEach { restore(it, it.status) }
                         undoChats?.invoke()
                     },
@@ -296,7 +302,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         sort.value = prefs.sortFor(value)
         descending.value = prefs.descendingFor(value)
         checkStorePrompt()
-        if (value == ListMode.PLAN) endTrip()
+        // back to preparing (the arrow or the system back) keeps the trip and its split: only "סיום קנייה" ends it
         if (value == ListMode.SHOP) {
             refreshStalePricesForShopping()
             locate()
@@ -346,9 +352,10 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     // ---------- undo ----------
 
-    /** A reversible action just done; the UI offers "ביטול" for a few seconds. */
+    /** A reversible action just done; its message has its own "ביטול" for half a minute. */
     class UndoEvent(val text: String, val undo: () -> Unit)
-    private val _undo = MutableSharedFlow<UndoEvent>(extraBufferCapacity = 4)
+    // every undo is kept (the old queue of four dropped the rest)
+    private val _undo = MutableSharedFlow<UndoEvent>(extraBufferCapacity = 64)
     val undo: SharedFlow<UndoEvent> = _undo
 
     fun restore(line: ListLine, status: LineStatus = line.removedFrom?.takeIf { it != LineStatus.REMOVED } ?: LineStatus.NEEDED) {
@@ -564,6 +571,29 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         updateMeals { d -> d.dish(dishId)?.let { d.withDish(change(it)) } ?: d }
 
     fun setDisplay(value: DisplayOptions) { prefs.display = value; display.value = value }
+
+    /** The order of the tabs and the one the app opens on ("הגדרות" ← "סדר הלשוניות"). */
+    val tabOrder = MutableStateFlow(prefs.tabOrder)
+    val startTab = MutableStateFlow(prefs.startTab)
+    fun moveTab(from: Int, to: Int) {
+        val next = app.necessityq.domain.TabOrder.move(tabOrder.value, from, to)
+        prefs.tabOrder = next
+        tabOrder.value = next
+    }
+    fun setStartTab(tab: app.necessityq.domain.AppTab) { prefs.startTab = tab; startTab.value = tab }
+
+    /** Which features are on; the first run asks once ("רשימה פשוטה" or "הכול"). */
+    val features = MutableStateFlow(prefs.features)
+    val featuresChosen = MutableStateFlow(prefs.featuresChosen)
+    fun setFeatures(value: app.necessityq.domain.Features) {
+        prefs.features = value
+        features.value = value
+        featuresChosen.value = true
+    }
+
+    /** The swipe hint ("משכו שמאלה…") is shown the first three times the list opens with items. */
+    fun swipeHintDue(): Boolean = prefs.swipeHintSeen < 3
+    fun countSwipeHint() { prefs.swipeHintSeen = prefs.swipeHintSeen + 1 }
     fun selectStore(id: String?) { prefs.currentStoreId = id; currentStoreId.value = id }
 
     val stores: StateFlow<List<Store>> = householdId
@@ -665,6 +695,27 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     val hereBranch: StateFlow<app.necessityq.domain.NearbyBranch?> = combine(fix, priceBranches) { f, all ->
         f?.let { app.necessityq.domain.BranchLocator.branchAt(all, it.latitude, it.longitude, it.accuracyMeters) }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** The branch the offer was turned down for ("לא עכשיו"): not offered again for it in this run. */
+    private val shopHereDismissed = MutableStateFlow<String?>(null)
+
+    /**
+     * While preparing the list, the location shows a followed branch: "נראה שאתם ב… — לעבור למצב קנייה?",
+     * one tap away from shopping there.
+     */
+    val shopHereOffer: StateFlow<app.necessityq.domain.PriceBranch?> =
+        combine(hereBranch, selectedPriceBranches, mode, shopHereDismissed) { here, followed, m, dismissed ->
+            here?.branch?.takeIf { m == ListMode.PLAN && it.id in followed && it.id != dismissed }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    fun dismissShopHere() { shopHereDismissed.value = shopHereOffer.value?.id }
+
+    /** Into shopping at the branch we are standing in: it becomes the store, and a trip left half-way goes on. */
+    fun shopHere() {
+        val here = shopHereOffer.value ?: return
+        if (tripStops.value.isEmpty()) startTrip(null) else setMode(ListMode.SHOP)
+        addStoreFromBranch(here)?.let { answerStorePrompt(it) }
+    }
 
     /** Starts following the branch the user is in, so its prices are loaded. */
     fun followHereBranch() {
@@ -1049,11 +1100,40 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         tripAssignment.value = assignment
         tripStops.value = stops
         activeStop.value = stops.firstOrNull()
+        // the supermarket chosen while planning is where we shop: "איפה קונים היום?" is not asked again
+        stops.firstOrNull()?.let { shopAtBranch(it) }
         setMode(ListMode.SHOP)
     }
 
-    /** Shows one stop of the split (its items and prices); null = the whole list. */
-    fun selectStop(branchId: String?) { activeStop.value = branchId }
+    /**
+     * "סיום קנייה": the only way a trip ends. Says in one line what happened (bought · missing, which stay on
+     * the list · not bought), moves what was bought to the recycle bin (with "ביטול"), ends the split and
+     * goes back to preparing the list.
+     */
+    fun finishShopping() {
+        val summary = app.necessityq.domain.TripSummary.of(snapshot.value?.lines.orEmpty())
+        endTrip()
+        setMode(ListMode.PLAN)
+        if (summary.bought > 0) clearBought(summary.text()) else _messages.tryEmit(summary.text())
+    }
+
+    /** Shows one stop of the split (its items and prices); null = the whole list. The store follows the stop. */
+    fun selectStop(branchId: String?) {
+        activeStop.value = branchId
+        branchId?.let { shopAtBranch(it) }
+    }
+
+    /** Makes the followed branch [branchId] the current store (the household's store of that name, saved if new). */
+    private fun shopAtBranch(branchId: String) {
+        val branch = priceBranches.value.firstOrNull { it.id == branchId } ?: return
+        addStoreFromBranch(branch)?.let { answerStorePrompt(it) }
+    }
+
+    /** The household store that stands for [branch] (same name), if there is one. */
+    fun storeOfBranch(branch: app.necessityq.domain.PriceBranch, stores: List<Store> = this.stores.value): Store? {
+        val key = HebrewText.matchKey(app.necessityq.domain.BranchLocator.storeName(branch))
+        return stores.firstOrNull { HebrewText.matchKey(it.name) == key }
+    }
 
     private fun endTrip() {
         prefs.tripAssignment = emptyMap()
@@ -1144,10 +1224,12 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun refreshLocation() = locate()
 
     /**
-     * Saves the price branch the user is in as a household store ("רמי לוי תלפיות") at the current
-     * coordinates (the branch's own when there is no fix) and returns its id.
+     * The household store of a price branch ("רמי לוי תלפיות"): one store per branch, so a followed branch and
+     * "the store we shop at" are the same thing. Saved (at the current coordinates, or the branch's own when there
+     * is no fix) the first time it is chosen; afterwards its id is returned.
      */
     fun addStoreFromBranch(branch: app.necessityq.domain.PriceBranch): String? {
+        storeOfBranch(branch)?.let { return it.id }
         val (hid, _, _) = ctx() ?: return null
         // an exactly geocoded branch keeps its own coordinates (it may be chosen from afar, from the
         // followed list); one known only by its city centre takes where the user is shopping now
@@ -1212,6 +1294,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setMissing(line: ListLine, missing: Boolean) {
         val (hid, uid, _) = ctx() ?: return
+        if (missing) askNotificationsInContext()
         launchSafe { container.service.setMissing(hid, uid, line, missing) }
         if (missing) _undo.tryEmit(UndoEvent("${line.displayName} סומן כחסר") { setMissing(line, false) })
     }
@@ -1274,9 +1357,34 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun remindLater(result: app.necessityq.domain.ScanResult) {
         val p = result.product
         val name = p?.name ?: result.identity?.displayName ?: result.code
-        prefs.addRemindLater(result.code, name, result.here?.price ?: p?.price, result.branchId)
-        _messages.tryEmit("נשמר לתזכורת: $name")
+        prefs.addRemindLater(
+            app.necessityq.domain.ScanReminder(
+                code = result.code,
+                name = name,
+                price = result.here?.price ?: p?.price,
+                branchId = result.branchId,
+                atMillis = System.currentTimeMillis(),
+                itemName = result.identity?.displayName,
+            ),
+        )
+        scanReminders.value = prefs.remindLater
+        _messages.tryEmit("נשמר לתזכורת: $name — יופיע ב\"לבדוק שוב\"")
         closeScan()
+    }
+
+    /** "לבדוק שוב": products saved with "תזכיר לי אחר כך" while scanning (newest last). */
+    val scanReminders = MutableStateFlow(prefs.remindLater)
+
+    /** "לרשימה" on a reminder: the item goes on the list and the reminder is done. */
+    fun reminderToList(reminder: app.necessityq.domain.ScanReminder) {
+        val (hid, uid, lines) = ctx() ?: return
+        launchSafe { container.service.addFromText(hid, uid, reminder.listName, lines)?.let { _added.tryEmit(it.item.id) } }
+        dismissReminder(reminder)
+    }
+
+    fun dismissReminder(reminder: app.necessityq.domain.ScanReminder) {
+        prefs.removeRemindLater(reminder.code)
+        scanReminders.value = prefs.remindLater
     }
 
     /** The scanned product is on the list: mark that line bought. */
@@ -1308,6 +1416,21 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     /** Scanned from an item's page: that exact product becomes the item's chosen product. */
+    /**
+     * "לרשימה" on a product found on the prices tab: the list gets the generic item ("קוטג' 5%"), and the exact
+     * product is remembered for it, so its price is the one shown.
+     */
+    fun addProductToList(product: app.necessityq.domain.BranchProduct) {
+        val (hid, uid, lines) = ctx() ?: return
+        val item = app.necessityq.domain.Scan.genericIdentity(product)
+        launchSafe {
+            container.service.add(hid, uid, item, null, LineSource.MANUAL, lines)
+            setPreferredProduct(item.id, product.code)
+            _added.tryEmit(item.id)
+            _messages.tryEmit("${item.displayName} נוסף לרשימה (${product.name})")
+        }
+    }
+
     fun linkScannedProduct(itemId: String, raw: String?) {
         if (raw == null) return
         scanBusy.value = true
@@ -1525,6 +1648,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             java.util.UUID.randomUUID().toString(), itemId, itemName, uid, authorName(uid), clean,
             System.currentTimeMillis(), replyToId = replyToId, mentions = mentionsIn(clean, uid),
         )
+        if (message.mentions.isNotEmpty()) askNotificationsInContext()
         launchSafe {
             container.collab.sendMessage(hid, message)
             pushAlerts(hid, message)
@@ -1612,6 +1736,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             System.currentTimeMillis(), kind = kind, mediaId = mediaId, durationMs = durationMs, replyToId = replyToId, waveform = waveform,
             mentions = mentionsIn(caption, uid),
         )
+        if (message.mentions.isNotEmpty()) askNotificationsInContext()
         launchSafe {
             container.collab.saveMedia(hid, mediaId, uid, media)
             container.collab.sendMessage(hid, message)
@@ -1769,6 +1894,20 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         .catch { emit(emptyList()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /**
+     * Notifications are asked for in context, not when the app first opens: when the household is shared with
+     * someone else, on the first "חסר", or when tagging someone in צ'אט פוד.
+     */
+    private val _wantNotifications = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val wantNotifications: SharedFlow<Unit> = _wantNotifications
+    private fun askNotificationsInContext() { _wantNotifications.tryEmit(Unit) }
+
+    init {
+        viewModelScope.launch {
+            members.map { it.size > 1 }.distinctUntilChanged().collect { shared -> if (shared) askNotificationsInContext() }
+        }
+    }
+
     fun signInWithGoogle(idToken: String) = launchSafe {
         container.household.signInWithGoogle(idToken)
         _messages.tryEmit("התחברת עם חשבון Google")
@@ -1863,6 +2002,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun onForeground() {
         // back in the app: promotions and stock are checked again when the last check is half an hour old
         refreshOffers()
+        // standing in a followed branch while preparing the list? (offers to switch to shopping)
+        if (mode.value == ListMode.PLAN) locate()
         if (!prefs.autoCheckUpdates) return
         if (System.currentTimeMillis() - lastUpdateCheck < 15 * 60_000L) return
         when (_update.value) {
@@ -1941,6 +2082,11 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     fun createHousehold(name: String) = launchSafe { container.household.createHousehold(name) }
     fun joinHousehold(code: String) = launchSafe { container.household.joinHousehold(code) }
+
+    /** A household code from a join link, waiting for the user's one tap (or for the explanation, when already in one). */
+    val pendingJoin = MutableStateFlow<String?>(null)
+    fun requestJoin(code: String) { pendingJoin.value = code }
+    fun consumeJoin() { pendingJoin.value = null }
     fun leaveHousehold() = launchSafe { container.household.leaveHousehold() }
 
     /** The stages of the opening load, in order. */
