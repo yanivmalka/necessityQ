@@ -139,8 +139,16 @@ private enum class Dest(val title: String) {
     FAMILY_MEMBER("בן/בת משפחה"),
 }
 
-/** The bottom-bar tabs, in order (the first is on the right): הבית on the right, the list on the left. */
+/** The bottom-bar tabs (their order, and the one the app opens on, are chosen in the settings). */
 private val TABS = listOf(Dest.HOME, Dest.MENU, Dest.PRICES, Dest.LIST)
+
+private val app.necessityq.domain.AppTab.dest: Dest
+    get() = when (this) {
+        app.necessityq.domain.AppTab.HOME -> Dest.HOME
+        app.necessityq.domain.AppTab.MENU -> Dest.MENU
+        app.necessityq.domain.AppTab.PRICES -> Dest.PRICES
+        app.necessityq.domain.AppTab.LIST -> Dest.LIST
+    }
 
 /** The tab that is lit while a screen is open. */
 private val Dest.tab: Dest
@@ -216,7 +224,8 @@ private fun Root(vm: AppViewModel) {
                 return
             }
             val mode by vm.mode.collectAsStateWithLifecycle()
-            var dest by rememberSaveable { mutableStateOf(Dest.LIST) }
+            // the app opens on the tab chosen in the settings (the list, unless changed)
+            var dest by rememberSaveable { mutableStateOf(vm.startTab.value.dest) }
             /** Where the back arrow of a secondary page leads; null on the tabs. */
             var backTo by rememberSaveable { mutableStateOf<Dest?>(null) }
             /** The family member whose profile is open ("" = a new member). */
@@ -231,8 +240,9 @@ private fun Root(vm: AppViewModel) {
 
             // the "תפריט" and "מחירים" tabs can be turned off (הגדרות ← פיצ'רים): with both off, two tabs are left
             val features by vm.features.collectAsStateWithLifecycle()
-            val tabs = remember(features) {
-                TABS.filter { t ->
+            val tabOrder by vm.tabOrder.collectAsStateWithLifecycle()
+            val tabs = remember(features, tabOrder) {
+                tabOrder.map { it.dest }.filter { t ->
                     when (t) {
                         Dest.MENU -> app.necessityq.domain.Feature.MENU_TAB in features
                         Dest.PRICES -> app.necessityq.domain.Feature.PRICES_TAB in features
@@ -240,6 +250,9 @@ private fun Root(vm: AppViewModel) {
                     }
                 }
             }
+            val startTab by vm.startTab.collectAsStateWithLifecycle()
+            /** Where "back" from the other tabs leads, and where back leaves the app. */
+            val startDest = startTab.dest.takeIf { it in tabs } ?: Dest.LIST
             val pager = rememberPagerState(initialPage = maxOf(0, tabs.indexOf(dest.tab))) { tabs.size }
             val scope = rememberCoroutineScope()
             /** A recipe or other page is open inside the menu tab: swiping there belongs to that page, not to the tabs. */
@@ -257,7 +270,7 @@ private fun Root(vm: AppViewModel) {
             }
 
             fun back() {
-                val to = backTo ?: Dest.LIST
+                val to = backTo ?: startDest
                 // a page under "הבית" (the household, from a family member's profile) keeps its own way back
                 go(to, from = if (to !in tabs && to.tab == Dest.HOME) Dest.HOME else null)
             }
@@ -271,11 +284,11 @@ private fun Root(vm: AppViewModel) {
             }
             // a tab that was turned off is not where the app stays
             LaunchedEffect(tabs) {
-                if (dest in TABS && dest !in tabs) go(Dest.LIST)
+                if (dest in TABS && dest !in tabs) go(startDest)
             }
 
             val shoppingOnList = dest == Dest.LIST && mode == ListMode.SHOP
-            BackHandler(enabled = dest != Dest.LIST || shoppingOnList) {
+            BackHandler(enabled = dest != startDest || shoppingOnList) {
                 if (shoppingOnList) vm.setMode(ListMode.PLAN) else back()
             }
 

@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedButton
@@ -113,7 +114,7 @@ private fun SettingsSection(title: String) {
 
 /**
  * One settings screen, in parts: the list and its tiles · appearance (theme, colours, icon) · notifications
- * (צ'אט פוד, and who hears about a missing item) · features (each can be turned off and on).
+ * (צ'אט פוד, and who hears about a missing item) · features (each can be turned off and on) · the order of the tabs.
  */
 @Composable
 fun SettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier) = PageScaffold("הגדרות", modifier) {
@@ -243,6 +244,59 @@ fun SettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier) = PageScaffo
         ) {
             Text(feature.label, modifier = Modifier.weight(1f))
             androidx.compose.material3.Switch(checked = on, onCheckedChange = { vm.setFeatures(features.with(feature, it)) })
+        }
+    }
+
+    SettingsSection("סדר הלשוניות")
+    TabOrderSettings(vm)
+}
+
+/**
+ * The tabs in their order (the first is on the right of the bar): drag a tab by its handle to move it, and pick the
+ * one the app opens on.
+ */
+@Composable
+private fun TabOrderSettings(vm: AppViewModel) {
+    val order by vm.tabOrder.collectAsStateWithLifecycle()
+    val start by vm.startTab.collectAsStateWithLifecycle()
+    val features by vm.features.collectAsStateWithLifecycle()
+    Text(
+        "גררו לשונית בידית כדי להזיז אותה (הראשונה מימין בסרגל). העיגול בוחר באיזו לשונית האפליקציה נפתחת.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    sh.calvin.reorderable.ReorderableColumn(
+        list = order,
+        onSettle = { from, to -> vm.moveTab(from, to) },
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) { _, tab, isDragging ->
+        // a tab turned off in "פיצ'רים" keeps its place, greyed
+        val off = (tab == app.necessityq.domain.AppTab.MENU && app.necessityq.domain.Feature.MENU_TAB !in features) ||
+            (tab == app.necessityq.domain.AppTab.PRICES && app.necessityq.domain.Feature.PRICES_TAB !in features)
+        androidx.compose.runtime.key(tab) {
+            Row(
+                Modifier.fillMaxWidth()
+                    .background(
+                        if (isDragging) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                        NqShapes.Panel,
+                    )
+                    .clickable(enabled = !off) { vm.setStartTab(tab) }
+                    .padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(selected = start == tab, onClick = { vm.setStartTab(tab) }, enabled = !off)
+                Text(
+                    tab.label + (if (start == tab) " · נפתחת ראשונה" else "") + (if (off) " (כבויה)" else ""),
+                    modifier = Modifier.weight(1f),
+                    color = if (off) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                )
+                Icon(
+                    Icons.Default.DragHandle,
+                    contentDescription = "גרירה: ${tab.label}",
+                    tint = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.draggableHandle().padding(12.dp),
+                )
+            }
         }
     }
 }

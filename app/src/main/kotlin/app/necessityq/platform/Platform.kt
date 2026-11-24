@@ -75,6 +75,16 @@ class AppPrefs(context: Context) {
     /** Nothing was stored before this run: a new install (an update keeps what was stored). */
     private val freshInstall: Boolean = p.all.isEmpty()
 
+    /** The order of the bottom-bar tabs (the first on the right). */
+    var tabOrder: List<app.necessityq.domain.AppTab>
+        get() = app.necessityq.domain.TabOrder.decode(p.getString("tab_order", null))
+        set(v) = p.edit().putString("tab_order", app.necessityq.domain.TabOrder.encode(v)).apply()
+
+    /** The tab the app opens on (the list, unless chosen otherwise). */
+    var startTab: app.necessityq.domain.AppTab
+        get() = app.necessityq.domain.AppTab.entries.firstOrNull { it.name == p.getString("start_tab", null) } ?: app.necessityq.domain.AppTab.LIST
+        set(v) = p.edit().putString("start_tab", v.name).apply()
+
     /** Which features are on ("הגדרות" ← "פיצ'רים"). */
     var features: app.necessityq.domain.Features
         get() = app.necessityq.domain.Features.decodeOff(p.getString("features_off", null))

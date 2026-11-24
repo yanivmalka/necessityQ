@@ -572,6 +572,16 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setDisplay(value: DisplayOptions) { prefs.display = value; display.value = value }
 
+    /** The order of the tabs and the one the app opens on ("הגדרות" ← "סדר הלשוניות"). */
+    val tabOrder = MutableStateFlow(prefs.tabOrder)
+    val startTab = MutableStateFlow(prefs.startTab)
+    fun moveTab(from: Int, to: Int) {
+        val next = app.necessityq.domain.TabOrder.move(tabOrder.value, from, to)
+        prefs.tabOrder = next
+        tabOrder.value = next
+    }
+    fun setStartTab(tab: app.necessityq.domain.AppTab) { prefs.startTab = tab; startTab.value = tab }
+
     /** Which features are on; the first run asks once ("רשימה פשוטה" or "הכול"). */
     val features = MutableStateFlow(prefs.features)
     val featuresChosen = MutableStateFlow(prefs.featuresChosen)
