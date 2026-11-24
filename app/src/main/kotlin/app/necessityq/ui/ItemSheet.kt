@@ -205,17 +205,7 @@ fun ItemSheet(
                 IconButton(onClick = pageWindow::close) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "חזרה")
                 }
-                if (line != null) {
-                    // bought: the same round check as on the list
-                    Box(
-                        Modifier.size(36.dp).clip(androidx.compose.foundation.shape.CircleShape)
-                            .clickable { vm.checkOff(line); pageWindow.close() }
-                            .semantics { contentDescription = "נקנה" },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Box(Modifier.size(22.dp).border(2.dp, MaterialTheme.colorScheme.outline, androidx.compose.foundation.shape.CircleShape))
-                    }
-                }
+                // "נקנה" is a labelled button in the row below, away from the back arrow (no marking by mistake)
                 if (favorite) Icon(Icons.Default.Star, "מועדף", Modifier.size(20.dp), tint = NqPalette.FavoriteStar)
                 Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -240,34 +230,13 @@ fun ItemSheet(
                 androidx.compose.foundation.layout.Box {
                     var menu by remember { mutableStateOf(false) }
                     IconButton(onClick = { menu = true }, modifier = Modifier.size(40.dp)) { Icon(Icons.Default.MoreVert, contentDescription = "פעולות") }
+                    // what has a button of its own on the page (נקנה, חסר, הסרה, צ'אט פוד, the pencil) is not repeated here
                     androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         androidx.compose.material3.DropdownMenuItem(
                             text = { Text(if (favorite) "הסרה מהמועדפים" else "הוספה למועדפים") },
                             leadingIcon = { Icon(if (favorite) Icons.Default.StarBorder else Icons.Default.Star, null) },
                             onClick = { vm.toggleFavorite(itemId); menu = false },
                         )
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = { Text("צ'אט פוד על המוצר") },
-                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.Chat, null) },
-                            onClick = { chat = itemId to (line?.displayName ?: itemName); menu = false },
-                        )
-                        if (line != null) {
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = { Text(if (line.missing) "ביטול חסר" else "חסר") },
-                                leadingIcon = { Icon(Icons.Default.ReportProblem, null) },
-                                onClick = { vm.setMissing(line, !line.missing); menu = false },
-                            )
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = { Text("עריכת כמות והערה") },
-                                leadingIcon = { Icon(Icons.Default.Edit, null) },
-                                onClick = { editing = true; menu = false },
-                            )
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = { Text("הסרה מהרשימה") },
-                                leadingIcon = { Icon(Icons.Default.Delete, null) },
-                                onClick = { vm.delete(line); menu = false; pageWindow.close() },
-                            )
-                        }
                     }
                 }
             }
@@ -291,10 +260,14 @@ fun ItemSheet(
                 .verticalScroll(scroll).padding(horizontal = 16.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            // first, in one row: missing (a toggle — filled while marked), remove, and the product's צ'אט פוד
+            // first, in one row: bought, missing (a toggle — filled while marked), remove, and the product's צ'אט פוד
             val compact = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 6.dp)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (line != null) {
+                    Button(onClick = { vm.checkOff(line); pageWindow.close() }, contentPadding = compact) {
+                        Icon(Icons.Default.Check, null, Modifier.padding(end = 4.dp).size(18.dp))
+                        Text("נקנה", maxLines = 1, softWrap = false)
+                    }
                     val missingContent: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
                         Icon(Icons.Default.ReportProblem, null, Modifier.padding(end = 4.dp).size(18.dp))
                         Text("חסר", maxLines = 1, softWrap = false)
