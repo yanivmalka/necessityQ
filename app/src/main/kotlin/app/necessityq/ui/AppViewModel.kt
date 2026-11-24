@@ -2049,6 +2049,11 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     fun createHousehold(name: String) = launchSafe { container.household.createHousehold(name) }
     fun joinHousehold(code: String) = launchSafe { container.household.joinHousehold(code) }
+
+    /** A household code from a join link, waiting for the user's one tap (or for the explanation, when already in one). */
+    val pendingJoin = MutableStateFlow<String?>(null)
+    fun requestJoin(code: String) { pendingJoin.value = code }
+    fun consumeJoin() { pendingJoin.value = null }
     fun leaveHousehold() = launchSafe { container.household.leaveHousehold() }
 
     /** The stages of the opening load, in order. */

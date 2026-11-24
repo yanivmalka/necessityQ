@@ -147,7 +147,8 @@ fun HouseholdScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(household.joinCode, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
                     IconButton(onClick = {
-                        val text = "הצטרפו לרשימת הקניות של \"${household.name}\" ב-necessityQ עם הקוד: ${household.joinCode}"
+                        // a link that opens the app and joins in one tap; the code stays in the text as a fallback
+                        val text = app.necessityq.domain.JoinLinks.shareText(household.name, household.joinCode)
                         val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
                         context.startActivity(Intent.createChooser(send, "שיתוף קוד"))
                     }) { Icon(Icons.Default.Share, contentDescription = "שיתוף") }
