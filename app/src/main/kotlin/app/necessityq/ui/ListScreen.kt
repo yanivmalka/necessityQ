@@ -17,6 +17,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -56,7 +58,6 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.UnfoldLess
 import androidx.compose.material.icons.filled.UnfoldMore
-import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -267,8 +268,6 @@ fun ListScreen(
     var showFilter by remember { mutableStateOf(false) }
     var showGenerate by remember { mutableStateOf(false) }
     var showReset by remember { mutableStateOf(false) }
-    /** Tiles whose controls are open (tap mode "controls"). */
-    var expanded by remember { mutableStateOf(emptySet<String>()) }
     var showBin by remember { mutableStateOf(false) }
     val scan = rememberBarcodeScan(vm) { vm.onScanned(it) }
     var showStoreDialog by remember { mutableStateOf(false) }
@@ -793,7 +792,6 @@ fun ListScreen(
                                 price = prices[line.itemId],
                                 priceInfo = itemPrices[line.itemId],
                                 comparison = comparisons[line.itemId]?.takeIf { it.notable },
-                                controlsOpen = line.id in expanded,
                                 lifted = isDragging,
                                 dragHandle = if (dragAvailable && TileElement.DRAG in tile) {
                                     {
@@ -821,11 +819,7 @@ fun ListScreen(
                                 onMinus = { vm.adjustQuantity(line, -1) },
                                 onSetQuantity = { q, approved -> vm.changeQuantity(line, q, approved) },
                                 quantityCheck = { vm.quantityCheck(line, it) },
-                                onTap = {
-                                    if (display.tapMode == TapMode.INFO) openItem = line
-                                    else expanded = if (line.id in expanded) expanded - line.id else expanded + line.id
-                                },
-                                onInfo = { openItem = line },
+                                onOpen = { openItem = line },
                             )
                         }
                     }
@@ -1286,7 +1280,7 @@ private fun SwipeableTile(left: SwipeAction, right: SwipeAction, content: @Compo
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 private fun ProductTile(
     line: ListLine,
@@ -1300,7 +1294,6 @@ private fun ProductTile(
     priceInfo: app.necessityq.domain.ItemPriceInfo? = null,
     /** significantly dearer / cheaper here than at the household's other branches */
     comparison: app.necessityq.domain.PriceComparison? = null,
-    controlsOpen: Boolean,
     lifted: Boolean,
     dragHandle: (@Composable () -> Unit)?,
     onBought: () -> Unit,
@@ -1309,8 +1302,8 @@ private fun ProductTile(
     onMinus: () -> Unit,
     onSetQuantity: ((Quantity?, Boolean) -> Unit)? = null,
     quantityCheck: (Quantity) -> app.necessityq.domain.QuantityCheck? = { null },
-    onTap: () -> Unit,
-    onInfo: () -> Unit,
+    /** Opens the item's page: on a tap or a double tap, as chosen in the settings. */
+    onOpen: () -> Unit,
 ) {
     val right = if (shopping) {
         SwipeAction(if (line.missing) "ביטול חסר" else "חסר", Icons.Default.ReportProblem, NqPalette.SwipeMissing, onRightSwipe)
@@ -1318,9 +1311,8 @@ private fun ProductTile(
         SwipeAction("מחיקה", Icons.Default.Delete, NqPalette.SwipeDelete, onRightSwipe)
     }
     val left = SwipeAction("נקנה", Icons.Default.Check, NqPalette.SwipeBought, onBought)
-    val controlsMode = tapMode == TapMode.CONTROLS
-    // stepper: always (info mode, if on the tile) or only after a tap (controls mode)
-    val showStepper = if (controlsMode) controlsOpen else TileElement.STEPPER in tile
+    // the quantity buttons are a part of the tile ("תצוגה"), whatever a tap does
+    val showStepper = TileElement.STEPPER in tile
     val showQuantityText = TileElement.QUANTITY in tile && !showStepper && line.quantity != null
     // produce counted in pieces: estimated weight (the price next to it is per kilo / 100 g)
     val weight = if (TileElement.WEIGHT in tile) app.necessityq.domain.PieceWeights.estimate(line.name, line.quantity) else null
@@ -1331,7 +1323,6 @@ private fun ProductTile(
                 shape = NqShapes.Tile,
                 border = when {
                     line.missing -> BorderStroke(2.dp, MaterialTheme.colorScheme.secondary)
-                    controlsOpen && controlsMode -> BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
                     else -> BorderStroke(1.dp, NqTheme.colors.hairline)
                 },
                 colors = CardDefaults.cardColors(
@@ -1345,7 +1336,12 @@ private fun ProductTile(
             ) {
                 Row {
                     // the category is shown by the group header's dot; auto-generated lines carry an "אוטומטי" tag
-                    Column(Modifier.weight(1f).clickable(onClick = onTap).padding(start = 6.dp, end = 12.dp, top = 8.dp, bottom = 6.dp)) {
+                    val open = if (tapMode == TapMode.DOUBLE) {
+                        Modifier.combinedClickable(onClickLabel = null, onDoubleClickLabel = "פתיחת דף הפריט", onClick = {}, onDoubleClick = onOpen)
+                    } else {
+                        Modifier.clickable(onClickLabel = "פתיחת דף הפריט", onClick = onOpen)
+                    }
+                    Column(Modifier.weight(1f).then(open).padding(start = 6.dp, end = 12.dp, top = 8.dp, bottom = 6.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             dragHandle?.invoke()
                             if (TileElement.CHECK in tile) {
@@ -1393,7 +1389,7 @@ private fun ProductTile(
                                 PriceSlot(price = price, average = null, info = priceInfo, comparison = comparison)
                             }
                         }
-                        if (subline.isNotBlank() || showStepper || (controlsMode && controlsOpen)) {
+                        if (subline.isNotBlank() || showStepper) {
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
                                 Text(
                                     subline,
@@ -1412,9 +1408,6 @@ private fun ProductTile(
                                     )
                                 }
                                 if (showStepper) QuantityStepper(line.quantity, onMinus, onPlus, onSetQuantity, line.displayName, quantityCheck)
-                                if (controlsMode && controlsOpen) {
-                                    IconButton(onClick = onInfo) { Icon(Icons.Outlined.Info, contentDescription = "דף מידע") }
-                                }
                             }
                         }
                     }

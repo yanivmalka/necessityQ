@@ -20,10 +20,19 @@ import app.necessityq.domain.TileLayout
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 
-/** What a tap on a product tile does. */
+/** How a product tile opens the item's page. The quantity controls are a part of the tile ("תצוגה"). */
 enum class TapMode(val label: String, val hint: String) {
-    INFO("נגיעה פותחת דף מידע", "פקדי הכמות מוצגים קבוע על כל פריט"),
-    CONTROLS("נגיעה מציגה פקדים", "הפקדים מופיעים רק בנגיעה; דף המידע בכפתור ⓘ"),
+    SINGLE("נגיעה אחת", "נגיעה בפריט פותחת את דף הפריט"),
+    DOUBLE("נגיעה כפולה", "רק נגיעה כפולה פותחת את דף הפריט, כך שנגיעה בטעות לא פותחת אותו"),
+    ;
+
+    companion object {
+        /** Stored names, including the older "נגיעה פותחת דף מידע / מציגה פקדים". */
+        fun of(name: String?): TapMode = when (name) {
+            "DOUBLE", "CONTROLS" -> DOUBLE
+            else -> SINGLE
+        }
+    }
 }
 
 /** What a recommendation card says under the product's name: one choice. */
@@ -47,7 +56,7 @@ data class DisplayOptions(
     val showTotal: Boolean = true,
     /** Dairy, meat/fish and frozen grouped at the end of the list. */
     val chilledLast: Boolean = false,
-    val tapMode: TapMode = TapMode.INFO,
+    val tapMode: TapMode = TapMode.SINGLE,
     /** Items already checked off (struck through) at the bottom of the list. */
     val showBought: Boolean = true,
     /** Prices of products sold by weight: per kilo or per 100 grams. */
@@ -103,7 +112,7 @@ class AppPrefs(context: Context) {
             shopTile = tileLayout(ListMode.SHOP),
             showTotal = p.getBoolean("d_total", true),
             chilledLast = p.getBoolean("d_chilled", false),
-            tapMode = runCatching { TapMode.valueOf(p.getString("d_tap", null) ?: "") }.getOrDefault(TapMode.INFO),
+            tapMode = TapMode.of(p.getString("d_tap", null)),
             showBought = p.getBoolean("d_bought", true),
             weightUnit = runCatching { app.necessityq.domain.WeightPriceUnit.valueOf(p.getString("d_weight_unit", null) ?: "") }
                 .getOrDefault(app.necessityq.domain.WeightPriceUnit.KILO),
