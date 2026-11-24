@@ -195,7 +195,8 @@ private fun Root(vm: AppViewModel) {
     var started by rememberSaveable { mutableStateOf(false) }
     if (!started) {
         val step by vm.startupStep.collectAsStateWithLifecycle()
-        StartupScreen(step) { started = true }
+        val palette by vm.palette.collectAsStateWithLifecycle()
+        StartupScreen(step, palette) { started = true }
         return
     }
 
@@ -228,6 +229,8 @@ private fun Root(vm: AppViewModel) {
             var dest by rememberSaveable { mutableStateOf(vm.startTab.value.dest) }
             /** Where the back arrow of a secondary page leads; null on the tabs. */
             var backTo by rememberSaveable { mutableStateOf<Dest?>(null) }
+            // the settings tab to open on: notifications when coming from the household's notification row
+            var settingsTab by rememberSaveable { mutableStateOf(SettingsTab.LIST) }
             /** The family member whose profile is open ("" = a new member). */
             var familyMember by rememberSaveable { mutableStateOf("") }
             val unread by vm.unreadTotal.collectAsStateWithLifecycle()
@@ -302,7 +305,7 @@ private fun Root(vm: AppViewModel) {
                 ).filterNotNull(),
                 listOf(
                     HubEntry(Dest.ACCOUNT.title, Icons.Default.AccountCircle) { go(Dest.ACCOUNT, from = Dest.HOME) },
-                    HubEntry(Dest.SETTINGS.title, Icons.Default.Tune) { go(Dest.SETTINGS, from = Dest.HOME) },
+                    HubEntry(Dest.SETTINGS.title, Icons.Default.Tune) { settingsTab = SettingsTab.LIST; go(Dest.SETTINGS, from = Dest.HOME) },
                 ),
                 listOf(
                     HubEntry(
@@ -381,7 +384,7 @@ private fun Root(vm: AppViewModel) {
                                         Dest.LIST -> ListScreen(
                                             vm, household.name, modifier,
                                             onOpenMessages = { go(Dest.MESSAGES, from = Dest.LIST) },
-                                            onOpenDisplaySettings = { go(Dest.SETTINGS, from = Dest.LIST) },
+                                            onOpenDisplaySettings = { settingsTab = SettingsTab.LIST; go(Dest.SETTINGS, from = Dest.LIST) },
                                         )
                                         Dest.MENU -> MenuScreen(vm, modifier, onInnerPage = { menuInnerPage = it })
                                         Dest.PRICES -> PricesScreen(vm, modifier)
@@ -396,11 +399,12 @@ private fun Root(vm: AppViewModel) {
                                     vm, household, s.account, s.userId, modifier,
                                     onOpenFamilyMember = { id -> familyMember = id.orEmpty(); go(Dest.FAMILY_MEMBER, from = Dest.HOUSEHOLD) },
                                     onOpenAccount = { go(Dest.ACCOUNT, from = Dest.HOUSEHOLD) },
-                                    onOpenSettings = { go(Dest.SETTINGS, from = Dest.HOUSEHOLD) },
+                                    onOpenSettings = { settingsTab = SettingsTab.NOTIFY; go(Dest.SETTINGS, from = Dest.HOUSEHOLD) },
                                 )
                                 Dest.ACCOUNT -> AccountScreen(vm, s.account, modifier)
-                                // "מראה" is a part of the one settings screen now
-                                Dest.SETTINGS, Dest.APPEARANCE -> SettingsScreen(vm, modifier)
+                                // "מראה" is a part of the settings' "האפליקציה" tab now
+                                Dest.SETTINGS -> SettingsScreen(vm, modifier, settingsTab)
+                                Dest.APPEARANCE -> SettingsScreen(vm, modifier, SettingsTab.APP)
                                 Dest.UPDATES -> UpdatesScreen(vm, modifier)
                                 Dest.ABOUT -> AboutScreen(modifier)
                                 Dest.FAMILY_MEMBER -> MemberScreen(vm, familyMember.ifEmpty { null }, onBack = { back() }, modifier = modifier)

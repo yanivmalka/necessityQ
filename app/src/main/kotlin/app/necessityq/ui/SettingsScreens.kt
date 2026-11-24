@@ -3,10 +3,14 @@ package app.necessityq.ui
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -16,7 +20,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -30,11 +33,14 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -103,36 +109,75 @@ fun UpdatesScreen(vm: AppViewModel, modifier: Modifier = Modifier) = PageScaffol
     UpdateCard(vm)
 }
 
-/** A part of the settings screen: a clear title over its options. */
-@Composable
-private fun SettingsSection(title: String) {
-    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-        HorizontalDivider(Modifier.padding(top = 4.dp))
-    }
+/**
+ * The three tabs of the settings screen, each about one idea, the most used first: the list (how it behaves and
+ * what each item shows), the app (its look, its features and its tabs), and notifications.
+ */
+enum class SettingsTab(val label: String) {
+    LIST("הרשימה"),
+    APP("האפליקציה"),
+    NOTIFY("התראות"),
 }
 
 /**
- * One settings screen, in parts: the list and its tiles · appearance (theme, colours, icon) · notifications
- * (צ'אט פוד, and who hears about a missing item) · features (each can be turned off and on) · the order of the tabs.
+ * The settings, in three tabs switched at the top of the page ([SettingsTab]); it opens on [initialTab]. Within a
+ * tab the settings are grouped in cards, the most important first.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier) = PageScaffold("הגדרות", modifier) {
-    val current by vm.display.collectAsStateWithLifecycle()
-    val sound by vm.chatSound.collectAsStateWithLifecycle()
+fun SettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier, initialTab: SettingsTab = SettingsTab.LIST) {
+    var tab by rememberSaveable(initialTab) { mutableStateOf(initialTab) }
+    Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        TopAppBar(
+            navigationIcon = { BackNavButton() },
+            title = { Text("הגדרות", fontWeight = FontWeight.ExtraBold) },
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+        )
+        Box(Modifier.padding(horizontal = 16.dp)) {
+            SegmentedTabs(SettingsTab.entries.map { it.label }, tab.ordinal) { tab = SettingsTab.entries[it] }
+        }
+        // each tab scrolls on its own, from its top
+        key(tab) {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                when (tab) {
+                    SettingsTab.LIST -> ListSettings(vm)
+                    SettingsTab.APP -> AppSettings(vm)
+                    SettingsTab.NOTIFY -> NotifySettings(vm)
+                }
+            }
+        }
+    }
+}
 
-    SettingsSection("רשימה ואריחים")
+/** "הרשימה": what a tap on an item does, what each tile shows, the order of the list, prices and recommendations. */
+@Composable
+private fun ListSettings(vm: AppViewModel) {
+    val current by vm.display.collectAsStateWithLifecycle()
+    SettingsCard("נגיעה בפריט", "מה קורה כשנוגעים בפריט ברשימה.") {
+        app.necessityq.platform.TapMode.entries.forEach { mode ->
+            Row(
+                Modifier.fillMaxWidth().clickable { vm.setDisplay(current.copy(tapMode = mode)) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(selected = current.tapMode == mode, onClick = { vm.setDisplay(current.copy(tapMode = mode)) })
+                Column {
+                    Text(mode.label)
+                    Text(mode.hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+
     var editing by remember { mutableStateOf<ListMode?>(null) }
-    Text("מה להציג על כל פריט ברשימה", style = MaterialTheme.typography.titleMedium)
-    Text(
-        "לכל שלב תצוגה משלו. נגיעה ברכיב באריח לדוגמה מסתירה או מחזירה אותו.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        ListMode.entries.forEach { m ->
-            OutlinedButton(onClick = { editing = m }, modifier = Modifier.weight(1f)) {
-                Text("${m.label} · ${current.tile(m).shown.size}/${TileElement.entries.size}")
+    SettingsCard("מה להציג על כל פריט ברשימה", "לכל שלב תצוגה משלו. נגיעה ברכיב באריח לדוגמה מסתירה או מחזירה אותו.") {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ListMode.entries.forEach { m ->
+                OutlinedButton(onClick = { editing = m }, modifier = Modifier.weight(1f)) {
+                    Text("${m.label} · ${current.tile(m).shown.size}/${TileElement.entries.size}")
+                }
             }
         }
     }
@@ -145,110 +190,136 @@ fun SettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier) = PageScaffo
         )
     }
 
-    Text("רשימה", style = MaterialTheme.typography.titleMedium)
-    OptionRow("מחיר משוער בתחתית הרשימה", current.showTotal) { vm.setDisplay(current.copy(showTotal = it)) }
-    OptionRow("מוצרי קירור והקפאה בסוף הרשימה", current.chilledLast) { vm.setDisplay(current.copy(chilledLast = it)) }
-    OptionRow("מוצרים שסומנו או נמחקו (מחוקים בקו) בתחתית הרשימה", current.showBought) { vm.setDisplay(current.copy(showBought = it)) }
-
-    Text("מחיר של מוצר במשקל", style = MaterialTheme.typography.titleMedium)
-    Text(
-        "ירקות, פירות, בשר ומוצרים שנמכרים במשקל: המחיר ברשימה, בדף המוצר ובהשוואה בין הסניפים.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    app.necessityq.domain.WeightPriceUnit.entries.forEach { unit ->
-        Row(
-            Modifier.fillMaxWidth().clickable { vm.setDisplay(current.copy(weightUnit = unit)) },
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            RadioButton(selected = current.weightUnit == unit, onClick = { vm.setDisplay(current.copy(weightUnit = unit)) })
-            Text("מחיר " + unit.title)
-        }
+    SettingsCard("סדר הרשימה") {
+        OptionRow("מוצרי קירור והקפאה בסוף הרשימה", current.chilledLast) { vm.setDisplay(current.copy(chilledLast = it)) }
+        OptionRow("מוצרים שסומנו או נמחקו (מחוקים בקו) בתחתית הרשימה", current.showBought) { vm.setDisplay(current.copy(showBought = it)) }
     }
 
-    Text("נגיעה בפריט", style = MaterialTheme.typography.titleMedium)
-    app.necessityq.platform.TapMode.entries.forEach { mode ->
-        Row(
-            Modifier.fillMaxWidth().clickable { vm.setDisplay(current.copy(tapMode = mode)) },
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            RadioButton(selected = current.tapMode == mode, onClick = { vm.setDisplay(current.copy(tapMode = mode)) })
-            Column {
-                Text(mode.label)
-                Text(mode.hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    SettingsCard("מחירים") {
+        OptionRow("מחיר משוער בתחתית הרשימה", current.showTotal) { vm.setDisplay(current.copy(showTotal = it)) }
+        Text("מחיר של מוצר במשקל", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
+        Text(
+            "ירקות, פירות, בשר ומוצרים שנמכרים במשקל: המחיר ברשימה, בדף המוצר ובהשוואה בין הסניפים.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 4.dp),
+        )
+        app.necessityq.domain.WeightPriceUnit.entries.forEach { unit ->
+            Row(
+                Modifier.fillMaxWidth().clickable { vm.setDisplay(current.copy(weightUnit = unit)) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(selected = current.weightUnit == unit, onClick = { vm.setDisplay(current.copy(weightUnit = unit)) })
+                Text("מחיר " + unit.title)
             }
         }
     }
 
-    Text("פרטים בהמלצות", style = MaterialTheme.typography.titleMedium)
-    Text("בכרטיס ההמלצה להציג:", style = MaterialTheme.typography.bodyMedium)
-    app.necessityq.platform.RecommendationDetail.entries.forEach { detail ->
-        Row(
-            Modifier.fillMaxWidth().clickable { vm.setDisplay(current.copy(recommendationDetail = detail)) },
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            RadioButton(selected = current.recommendationDetail == detail, onClick = { vm.setDisplay(current.copy(recommendationDetail = detail)) })
-            Text(detail.label)
+    SettingsCard("פרטים בהמלצות", "מה מופיע בכרטיסי \"כנראה נגמר בקרוב\".") {
+        app.necessityq.platform.RecommendationDetail.entries.forEach { detail ->
+            Row(
+                Modifier.fillMaxWidth().clickable { vm.setDisplay(current.copy(recommendationDetail = detail)) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(selected = current.recommendationDetail == detail, onClick = { vm.setDisplay(current.copy(recommendationDetail = detail)) })
+                Text(detail.label)
+            }
+        }
+        OptionRow("סימון מועדפים ★", current.showFavorite) { vm.setDisplay(current.copy(showFavorite = it)) }
+    }
+}
+
+/** "האפליקציה": its look (theme, colours, icon), which features are on, and the order of the tabs. */
+@Composable
+private fun AppSettings(vm: AppViewModel) {
+    SettingsCard("מראה") {
+        Column(Modifier.padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            DisplayCard(vm)
+            PalettePicker(vm)
+            AppIconPicker(vm)
         }
     }
-    OptionRow("סימון מועדפים ★", current.showFavorite) { vm.setDisplay(current.copy(showFavorite = it)) }
 
-    SettingsSection("מראה")
-    DisplayCard(vm)
-    PalettePicker(vm)
-    AppIconPicker()
+    val features by vm.features.collectAsStateWithLifecycle()
+    SettingsCard(
+        "פיצ'רים",
+        "כל פיצ'ר אפשר לכבות ולהדליק בחזרה בכל זמן. כששתי הלשוניות \"תפריט\" ו\"מחירים\" כבויות, נשארות למטה שתי לשוניות: הרשימה והבית.",
+    ) {
+        Row(Modifier.padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { vm.setFeatures(app.necessityq.domain.Features.SIMPLE) }) { Text("רשימה פשוטה") }
+            OutlinedButton(onClick = { vm.setFeatures(app.necessityq.domain.Features.ALL) }) { Text("הכול") }
+        }
+        app.necessityq.domain.Feature.entries.forEach { feature ->
+            val on = feature in features
+            Row(
+                Modifier.fillMaxWidth().clickable { vm.setFeatures(features.with(feature, !on)) }.padding(start = 4.dp, top = 2.dp, bottom = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(feature.label, modifier = Modifier.weight(1f))
+                androidx.compose.material3.Switch(checked = on, onCheckedChange = { vm.setFeatures(features.with(feature, it)) })
+            }
+        }
+    }
 
-    SettingsSection("התראות")
-    Text("צ'אט פוד", style = MaterialTheme.typography.titleMedium)
-    Text(
-        "כדי שלא כל בני הבית יקבלו התראה על כל הודעה: התראה מגיעה רק למי שתויג ב-@ ולמי שההודעה שלו צוטטה.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+    SettingsCard("סדר הלשוניות") { TabOrderSettings(vm) }
+}
+
+/** "התראות": צ'אט פוד (who is notified, and how it sounds), and who hears about an item marked missing. */
+@Composable
+private fun NotifySettings(vm: AppViewModel) {
     val notifyMode by vm.chatNotifyMode.collectAsStateWithLifecycle()
     val loud by vm.loudMentions.collectAsStateWithLifecycle()
-    app.necessityq.domain.ChatNotifyMode.entries.forEach { mode ->
-        Row(
-            Modifier.fillMaxWidth().clickable { vm.setChatNotifyMode(mode) },
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            RadioButton(selected = notifyMode == mode, onClick = { vm.setChatNotifyMode(mode) })
-            Text("התראה: " + mode.label)
+    val sound by vm.chatSound.collectAsStateWithLifecycle()
+    SettingsCard(
+        "צ'אט פוד",
+        "כדי שלא כל בני הבית יקבלו התראה על כל הודעה: התראה מגיעה רק למי שתויג ב-@ ולמי שההודעה שלו צוטטה.",
+    ) {
+        app.necessityq.domain.ChatNotifyMode.entries.forEach { mode ->
+            Row(
+                Modifier.fillMaxWidth().clickable { vm.setChatNotifyMode(mode) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(selected = notifyMode == mode, onClick = { vm.setChatNotifyMode(mode) })
+                Text("התראה: " + mode.label)
+            }
         }
+        OptionRow("תיוג או ציטוט נשמעים גם כשהטלפון על שקט", loud) { vm.setLoudMentions(it) }
+        OptionRow("צליל להודעות שאינן תיוג (כשבחרתם \"כל הודעה\")", sound) { vm.setChatSound(it) }
     }
-    OptionRow("תיוג או ציטוט נשמעים גם כשהטלפון על שקט", loud) { vm.setLoudMentions(it) }
-    OptionRow("צליל להודעות שאינן תיוג (כשבחרתם \"כל הודעה\")", sound) { vm.setChatSound(it) }
 
-    // who hears about an item marked missing — next to the chat's notifications, all in one place
     if (vm.isShared) {
         val members by vm.members.collectAsStateWithLifecycle()
         NotifyCard(vm, members, vm.me)
+    } else {
+        Text(
+            "התראות על מוצר חסר מופיעות כאן כשמשתפים את הרשימה עם בני הבית.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 4.dp),
+        )
     }
+}
 
-    SettingsSection("פיצ'רים")
-    val features by vm.features.collectAsStateWithLifecycle()
-    Text(
-        "כל פיצ'ר אפשר לכבות ולהדליק בחזרה בכל זמן. כששתי הלשוניות \"תפריט\" ו\"מחירים\" כבויות, נשארות למטה שתי לשוניות: הרשימה והבית.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = { vm.setFeatures(app.necessityq.domain.Features.SIMPLE) }) { Text("רשימה פשוטה") }
-        OutlinedButton(onClick = { vm.setFeatures(app.necessityq.domain.Features.ALL) }) { Text("הכול") }
-    }
-    app.necessityq.domain.Feature.entries.forEach { feature ->
-        val on = feature in features
-        Row(
-            Modifier.fillMaxWidth().clickable { vm.setFeatures(features.with(feature, !on)) }.padding(vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(feature.label, modifier = Modifier.weight(1f))
-            androidx.compose.material3.Switch(checked = on, onCheckedChange = { vm.setFeatures(features.with(feature, it)) })
+/** A group of settings about one thing: a card with a title, an optional line of explanation, and the options. */
+@Composable
+private fun SettingsCard(title: String, hint: String? = null, content: @Composable () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().clip(NqShapes.Tile).background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, NqTheme.colors.hairline, NqShapes.Tile).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 4.dp))
+        hint?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
         }
+        Spacer(Modifier.height(4.dp))
+        content()
     }
-
-    SettingsSection("סדר הלשוניות")
-    TabOrderSettings(vm)
 }
 
 /**

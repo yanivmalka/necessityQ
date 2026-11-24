@@ -386,7 +386,7 @@ private fun InfoPill(text: String) {
 
 /** Two or more tabs in one segmented switch. */
 @Composable
-private fun SegmentedTabs(labels: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+fun SegmentedTabs(labels: List<String>, selected: Int, onSelect: (Int) -> Unit) {
     Row(
         Modifier.fillMaxWidth().clip(NqShapes.Field).background(NqTheme.colors.segmentTrack).padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),

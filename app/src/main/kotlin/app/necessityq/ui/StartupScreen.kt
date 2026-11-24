@@ -67,12 +67,12 @@ private const val FADE_MS = 300f
 private const val DROP_HEIGHT = 60f
 
 /**
- * The opening screen: the basket with groceries jumping in, and the three things being loaded (account, list,
- * prices), each ticked as it arrives. [onDone] is called once everything is in, on "continue", or after
- * [GIVE_UP_MS] (a slow or missing connection never locks the user out).
+ * The opening screen: the basket with groceries jumping in (on the colour of the app's [palette], like the icon), and
+ * the three things being loaded (account, list, prices), each ticked as it arrives. [onDone] is called once everything
+ * is in, on "continue", or after [GIVE_UP_MS] (a slow or missing connection never locks the user out).
  */
 @Composable
-fun StartupScreen(step: StartupStep, onDone: () -> Unit) {
+fun StartupScreen(step: StartupStep, palette: AppPalette, onDone: () -> Unit) {
     var offerSkip by remember { mutableStateOf(false) }
     LaunchedEffect(step) {
         if (step == StartupStep.READY) {
@@ -89,7 +89,7 @@ fun StartupScreen(step: StartupStep, onDone: () -> Unit) {
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 32.dp)) {
-            BasketLoading(step == StartupStep.READY, 128.dp)
+            BasketLoading(step == StartupStep.READY, palette, 128.dp)
             Spacer(Modifier.height(20.dp))
             Text("necessityQ", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text(
@@ -140,12 +140,12 @@ private fun StepRow(label: String, mine: StartupStep, current: StartupStep) {
 }
 
 /**
- * The basket picture (the app's former icon) with its groceries jumping in one after another, over and over, while the
- * data loads; when everything is in ([ready]) the amber tick badge pops onto it. Drawn from layers that share the
+ * The basket picture (the app's former icon) on the launcher icon's ground in the app's [palette], with its groceries
+ * jumping in one after another, over and over, while the data loads; when everything is in ([ready]) the amber tick badge pops onto it. Drawn from layers that share the
  * 108-unit adaptive-icon grid: handle behind, the items, then the basket's front, so an item lands *inside* the basket.
  */
 @Composable
-private fun BasketLoading(ready: Boolean, size: Dp) {
+private fun BasketLoading(ready: Boolean, palette: AppPalette, size: Dp) {
     val t by rememberInfiniteTransition(label = "basket").animateFloat(
         initialValue = 0f, targetValue = CYCLE_MS,
         animationSpec = infiniteRepeatable(tween(CYCLE_MS.toInt(), easing = LinearEasing)), label = "t",
@@ -164,7 +164,7 @@ private fun BasketLoading(ready: Boolean, size: Dp) {
 
     Box(Modifier.size(size).clip(RoundedCornerShape(size * 0.26f)), contentAlignment = Alignment.Center) {
         val layer = Modifier.requiredSize(size * 1.5f)
-        Image(painterResource(R.drawable.ic_launcher_background), null, layer)
+        Image(painterResource(launcherBackground(palette)), null, layer)
         val basket = layer.graphicsLayer { translationY = give * unit }
         Image(painterResource(R.drawable.startup_basket_back), null, basket)
         listOf(R.drawable.startup_item_greens, R.drawable.startup_item_milk, R.drawable.startup_item_bread).forEachIndexed { i, res ->

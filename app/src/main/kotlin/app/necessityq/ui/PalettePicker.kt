@@ -22,19 +22,26 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.necessityq.platform.AppIcons
 
-/** "ערכת צבעים": the palettes side by side, each as a small sample of its ground, card and main colour. */
+/**
+ * "ערכת צבעים": the palettes side by side, each as a small sample of its ground, card and main colour. Choosing one
+ * also recolours the launcher icon ([AppIcons]) and the opening animation.
+ */
 @Composable
 fun PalettePicker(vm: AppViewModel) {
+    val context = LocalContext.current
     val current by vm.palette.collectAsStateWithLifecycle()
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("ערכת צבעים", style = MaterialTheme.typography.titleMedium)
         Text(
-            "הצבע הראשי של האפליקציה ושל הרקע, בתצוגה בהירה וכהה. כתום של \"נגמר\" ומבצעים נשאר בכל הערכות.",
+            "הצבע הראשי של האפליקציה ושל הרקע, בתצוגה בהירה וכהה, וגם של סמל האפליקציה ושל מסך הפתיחה. " +
+                "כתום של \"נגמר\" ומבצעים נשאר בכל הערכות.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -45,7 +52,9 @@ fun PalettePicker(vm: AppViewModel) {
             AppPalette.entries.forEach { p ->
                 val selected = p == current
                 Column(
-                    Modifier.width(76.dp).clip(RoundedCornerShape(12.dp)).clickable { vm.setPalette(p) }.padding(vertical = 6.dp),
+                    Modifier.width(76.dp).clip(RoundedCornerShape(12.dp)).clickable {
+                        if (!selected) { vm.setPalette(p); AppIcons.matchPalette(context, p) }
+                    }.padding(vertical = 6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Box(
