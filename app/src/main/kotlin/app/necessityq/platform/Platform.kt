@@ -220,6 +220,11 @@ class AppPrefs(context: Context) {
         get() = p.getBoolean("upd_auto_install", false)
         set(v) = p.edit().putBoolean("upd_auto_install", v).apply()
 
+    /** How many times the swipe hint above the list was shown (it stops after three). */
+    var swipeHintSeen: Int
+        get() = p.getInt("swipe_hint_seen", 0)
+        set(v) = p.edit().putInt("swipe_hint_seen", v).apply()
+
     /** When the user last opened the conversation of [itemId] (millis). */
     fun readAt(itemId: String): Long = p.getLong("read_$itemId", 0L)
     fun markRead(itemId: String, atMillis: Long) = p.edit().putLong("read_$itemId", atMillis).apply()

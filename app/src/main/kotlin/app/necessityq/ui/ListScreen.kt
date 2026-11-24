@@ -235,7 +235,6 @@ fun ListScreen(
     vm.receipts.collectAsStateWithLifecycle() // recompose ticks when receipts change
     vm.unreadTotal.collectAsStateWithLifecycle() // recompose unread counts after reading
     val names by vm.memberNames.collectAsStateWithLifecycle()
-    val members by vm.members.collectAsStateWithLifecycle()
     val pickRanks by vm.pickRanks.collectAsStateWithLifecycle()
     val collapsed by vm.collapsed.collectAsStateWithLifecycle()
     val storePrompt by vm.storePrompt.collectAsStateWithLifecycle()
@@ -311,7 +310,11 @@ fun ListScreen(
 
     // suggestion sections: collapsed by default, hidden while typing so the list itself stays visible
     val showSuggestions = !shopping && searchText.isBlank()
-    var lowExpanded by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(true) }
+    // "כנראה נגמר בקרוב" opens by itself only while the list is empty; with items on the list it is one folded
+    // line ("5 מוצרים כנראה נגמרים · הוספה ›") so the list starts near the top. Once tapped, the choice holds.
+    var lowExpandedChoice by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<Boolean?>(null) }
+    val hasOpenLines = snapshot?.lines?.any { it.status == LineStatus.NEEDED } == true
+    val lowExpanded = lowExpandedChoice ?: !hasOpenLines
     var frequentExpanded by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
 
     // recipes whose ingredients are on the list: their servings can be changed (or the recipe removed) from here
@@ -320,6 +323,17 @@ fun ListScreen(
     val recipesOnList = remember(mealData.dishes, snapshot?.lines) {
         val lines = snapshot?.lines.orEmpty()
         mealData.dishes.mapNotNull { d -> RecipeListSync.onList(lines, d).size.takeIf { it > 0 }?.let { d to it } }
+    }
+
+    // "משכו שמאלה…" is shown the first three times the list opens with items, then it is learned
+    val showSwipeHint = remember { vm.swipeHintDue() }
+    var swipeHintCounted by remember { mutableStateOf(false) }
+    val hasRows = rows.isNotEmpty()
+    LaunchedEffect(hasRows) {
+        if (showSwipeHint && hasRows && !swipeHintCounted) {
+            swipeHintCounted = true
+            vm.countSwipeHint()
+        }
     }
 
     val listState = rememberLazyListState()
@@ -456,31 +470,24 @@ fun ListScreen(
                 menuButton(NqTheme.colors.onShopHeader)
             }
         } else {
-            Column(
-                Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+            // one row: the household's name, the "הכנת רשימה | בקנייה" switch, chat and the ⋮ menu —
+            // so the list itself starts higher (the members' pictures are on the home tab)
+            Row(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            householdName,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text("הרשימה", style = MaterialTheme.typography.titleLarge)
-                    }
-                    // with their profile pictures (as on the home page); initials only until the members load
-                    if (members.size > 1) {
-                        MemberAvatars(members.map { it.displayName }, photos = members.map { it.photo })
-                    } else if (names.size > 1) {
-                        MemberAvatars(names.values.toList())
-                    }
-                    messagesButton(MaterialTheme.colorScheme.onSurface)
-                    menuButton(MaterialTheme.colorScheme.onSurface)
-                }
-                ModeSwitch(shopping = false, onSelect = vm::setMode, modifier = Modifier.padding(end = 12.dp))
+                Text(
+                    householdName,
+                    Modifier.widthIn(max = 84.dp),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.width(8.dp))
+                ModeSwitch(shopping = false, onSelect = vm::setMode, modifier = Modifier.weight(1f), compact = true)
+                messagesButton(MaterialTheme.colorScheme.onSurface)
+                menuButton(MaterialTheme.colorScheme.onSurface)
             }
         }
 
@@ -618,29 +625,29 @@ fun ListScreen(
 
             if (showSuggestions && snap.runningLow.isNotEmpty()) {
                 item(key = "low") {
-                    Column(Modifier.padding(bottom = 6.dp)) {
+                    if (!lowExpanded) {
+                        RunningLowLine(snap.runningLow.size, onOpen = { lowExpandedChoice = true })
+                    } else Column(Modifier.padding(bottom = 6.dp)) {
                         SuggestionHeader(
                             title = "כנראה נגמר בקרוב",
                             icon = Icons.Default.Schedule,
                             iconTint = MaterialTheme.colorScheme.secondary,
                             count = snap.runningLow.size,
-                            expanded = lowExpanded,
-                            onToggle = { lowExpanded = !lowExpanded },
+                            expanded = true,
+                            onToggle = { lowExpandedChoice = false },
                             onAddAll = { snap.runningLow.forEach { vm.accept(it) } },
                         )
-                        if (lowExpanded) {
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = 16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            ) {
-                                items(snap.runningLow, key = { "low_" + it.itemId }) { s ->
-                                    RunningLowCard(
-                                        s,
-                                        info = recommendationInfo(s, snap.stats[s.itemId], favorites, display, today),
-                                        onAdd = { vm.accept(s) },
-                                        onDismiss = { vm.dismiss(s) },
-                                    )
-                                }
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            items(snap.runningLow, key = { "low_" + it.itemId }) { s ->
+                                RunningLowCard(
+                                    s,
+                                    info = recommendationInfo(s, snap.stats[s.itemId], favorites, display, today),
+                                    onAdd = { vm.accept(s) },
+                                    onDismiss = { vm.dismiss(s) },
+                                )
                             }
                         }
                     }
@@ -700,8 +707,9 @@ fun ListScreen(
                     }
                 }
             } else {
+                // the slot stays (empty) after the hint is learned, so row indexes do not shift
                 item(key = "hint") {
-                    Text(
+                    if (showSwipeHint) Text(
                         "משכו שמאלה: נקנה · ימינה: " + (if (shopping) "חסר" else "מחיקה") + " — והחזיקו עד שהטבעת מהבהבת",
                         Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                         style = MaterialTheme.typography.bodySmall,
@@ -1845,21 +1853,22 @@ private fun <T> TwoRowStrip(
 
 /** "הכנת רשימה | בקנייה" as one segmented switch: the two stages of using the list. */
 @Composable
-fun ModeSwitch(shopping: Boolean, onSelect: (ListMode) -> Unit, modifier: Modifier = Modifier) {
+fun ModeSwitch(shopping: Boolean, onSelect: (ListMode) -> Unit, modifier: Modifier = Modifier, compact: Boolean = false) {
     Row(
-        modifier.fillMaxWidth().clip(NqShapes.Field).background(NqTheme.colors.segmentTrack).padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier.fillMaxWidth().clip(NqShapes.Field).background(NqTheme.colors.segmentTrack).padding(if (compact) 3.dp else 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 3.dp else 4.dp),
     ) {
         listOf(ListMode.PLAN, ListMode.SHOP).forEach { m ->
             val selected = (m == ListMode.SHOP) == shopping
             Row(
-                Modifier.weight(1f).height(40.dp).clip(RoundedCornerShape(12.dp))
+                Modifier.weight(1f).height(if (compact) 34.dp else 40.dp).clip(RoundedCornerShape(12.dp))
                     .background(if (selected) MaterialTheme.colorScheme.surface else Color.Transparent)
                     .selectable(selected = selected, role = Role.Tab, onClick = { onSelect(m) }),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (m == ListMode.SHOP) {
+                // in the narrow one-row header the cart icon would squeeze the label
+                if (m == ListMode.SHOP && !compact) {
                     Icon(
                         Icons.Default.ShoppingCart, null, Modifier.size(16.dp),
                         tint = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1868,9 +1877,11 @@ fun ModeSwitch(shopping: Boolean, onSelect: (ListMode) -> Unit, modifier: Modifi
                 }
                 Text(
                     m.label,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = if (compact) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                     color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
@@ -2053,6 +2064,32 @@ private fun PreviewPill(text: String, background: Color, ink: Color, bold: Boole
         style = MaterialTheme.typography.bodySmall,
         maxLines = 1,
     )
+}
+
+/** "כנראה נגמר בקרוב" folded into one line: how many, and a tap opens the cards to add them. */
+@Composable
+private fun RunningLowLine(count: Int, onOpen: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clip(NqShapes.Panel)
+            .background(MaterialTheme.colorScheme.secondaryContainer)
+            .clickable(role = Role.Button, onClickLabel = "הצגת המוצרים שכנראה נגמרים", onClick = onOpen)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Default.Schedule, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(
+            (if (count == 1) "מוצר אחד כנראה נגמר" else "$count מוצרים כנראה נגמרים") + " · ",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+        Text(
+            "הוספה ›",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+    }
 }
 
 /** Title of a suggestion section: tap to fold it; "להוסיף הכל" when the section offers it. */

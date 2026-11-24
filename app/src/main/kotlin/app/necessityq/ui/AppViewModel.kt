@@ -564,6 +564,10 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         updateMeals { d -> d.dish(dishId)?.let { d.withDish(change(it)) } ?: d }
 
     fun setDisplay(value: DisplayOptions) { prefs.display = value; display.value = value }
+
+    /** The swipe hint ("משכו שמאלה…") is shown the first three times the list opens with items. */
+    fun swipeHintDue(): Boolean = prefs.swipeHintSeen < 3
+    fun countSwipeHint() { prefs.swipeHintSeen = prefs.swipeHintSeen + 1 }
     fun selectStore(id: String?) { prefs.currentStoreId = id; currentStoreId.value = id }
 
     val stores: StateFlow<List<Store>> = householdId
