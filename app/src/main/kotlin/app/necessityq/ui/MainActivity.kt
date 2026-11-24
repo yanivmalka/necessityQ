@@ -311,7 +311,10 @@ private fun Root(vm: AppViewModel) {
                                 null -> HorizontalPager(
                                     state = pager,
                                     key = { tabs[it] },
-                                    userScrollEnabled = !shoppingOnList && !(menuInnerPage && tabs[pager.currentPage] == Dest.MENU),
+                                    // no swiping away from the list: a quick swipe on a tile (meant to change tab)
+                                    // would mark it bought; the tabs below move between pages there
+                                    userScrollEnabled = tabs[pager.currentPage] != Dest.LIST &&
+                                        !(menuInnerPage && tabs[pager.currentPage] == Dest.MENU),
                                     modifier = Modifier.fillMaxSize(),
                                 ) { index ->
                                     when (tabs[index]) {

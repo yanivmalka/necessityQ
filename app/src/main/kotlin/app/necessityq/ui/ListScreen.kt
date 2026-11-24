@@ -1789,12 +1789,15 @@ fun QuantityStepper(
 
 @Composable
 private fun BoughtRow(line: ListLine, onReopen: () -> Unit) {
+    // only the ✓ brings an item back to the list: a touch elsewhere on the row (while scrolling) does nothing
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onReopen).padding(horizontal = 16.dp, vertical = 6.dp),
+        Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Default.CheckCircle, contentDescription = "החזרה לרשימה", tint = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.width(10.dp))
+        IconButton(onClick = onReopen) {
+            Icon(Icons.Default.CheckCircle, contentDescription = "החזרה לרשימה: ${line.displayName}", tint = MaterialTheme.colorScheme.primary)
+        }
+        Spacer(Modifier.width(2.dp))
         Text(
             line.displayName,
             style = MaterialTheme.typography.bodyLarge,
