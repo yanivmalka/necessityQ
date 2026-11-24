@@ -87,8 +87,9 @@ class AppPrefs(context: Context) {
     val featuresChosen: Boolean
         get() = p.getBoolean("features_chosen", false) || !freshInstall
 
+    /** "תצוגה בהירה במיוחד": off by default, so the app follows the phone (light or dark). */
     var brightTheme: Boolean
-        get() = p.getBoolean("bright", true)
+        get() = p.getBoolean("bright", false)
         set(v) = p.edit().putBoolean("bright", v).apply()
 
     /** Colour palette of the app ([app.necessityq.ui.AppPalette] name). */
