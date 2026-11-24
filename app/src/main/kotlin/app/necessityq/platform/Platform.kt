@@ -26,12 +26,18 @@ enum class TapMode(val label: String, val hint: String) {
     CONTROLS("נגיעה מציגה פקדים", "הפקדים מופיעים רק בנגיעה; דף המידע בכפתור ⓘ"),
 }
 
+/** What a recommendation card says under the product's name: one choice. */
+enum class RecommendationDetail(val label: String) {
+    REASON("הסיבה (מומלץ)"),
+    HISTORY("מתי נקנה ובאיזו תדירות"),
+    NONE("כלום"),
+}
+
 /** Display toggles for the list and the recommendations. */
 data class DisplayOptions(
-    /** Recommendation cards: why it is suggested, when last bought, how often, the ★. */
-    val showReason: Boolean = true,
-    val showLastBought: Boolean = true,
-    val showFrequency: Boolean = true,
+    /** Recommendation cards: the reason, or when last bought and how often, or nothing. */
+    val recommendationDetail: RecommendationDetail = RecommendationDetail.REASON,
+    /** The ★ of favourites on the recommendation cards (a toggle of its own). */
     val showFavorite: Boolean = true,
     /** What a product tile shows while making the list. */
     val planTile: TileLayout = TileLayout.defaultFor(ListMode.PLAN),
@@ -91,9 +97,7 @@ class AppPrefs(context: Context) {
 
     var display: DisplayOptions
         get() = DisplayOptions(
-            showReason = p.getBoolean("d_reason", true),
-            showLastBought = p.getBoolean("d_last", true),
-            showFrequency = p.getBoolean("d_freq", true),
+            recommendationDetail = recommendationDetail(),
             showFavorite = p.getBoolean("d_fav", true),
             planTile = tileLayout(ListMode.PLAN),
             shopTile = tileLayout(ListMode.SHOP),
@@ -105,13 +109,22 @@ class AppPrefs(context: Context) {
                 .getOrDefault(app.necessityq.domain.WeightPriceUnit.KILO),
         )
         set(v) = p.edit()
-            .putBoolean("d_reason", v.showReason).putBoolean("d_last", v.showLastBought)
-            .putBoolean("d_freq", v.showFrequency).putBoolean("d_fav", v.showFavorite)
+            .putString("d_rec_detail", v.recommendationDetail.name).putBoolean("d_fav", v.showFavorite)
             .putString("tile_" + ListMode.PLAN.name, v.planTile.encode())
             .putString("tile_" + ListMode.SHOP.name, v.shopTile.encode())
             .putBoolean("d_total", v.showTotal)
             .putBoolean("d_chilled", v.chilledLast).putString("d_tap", v.tapMode.name)
             .putBoolean("d_bought", v.showBought).putString("d_weight_unit", v.weightUnit.name).apply()
+
+    /** Before it was one choice, three checkboxes: the reason won when it was on. */
+    private fun recommendationDetail(): RecommendationDetail {
+        p.getString("d_rec_detail", null)?.let { name -> RecommendationDetail.entries.firstOrNull { it.name == name }?.let { return it } }
+        return when {
+            p.getBoolean("d_reason", true) -> RecommendationDetail.REASON
+            p.getBoolean("d_last", true) || p.getBoolean("d_freq", true) -> RecommendationDetail.HISTORY
+            else -> RecommendationDetail.NONE
+        }
+    }
 
     /**
      * The tile of [mode]; before tiles were set per stage, one set of checkboxes covered both, so a phone

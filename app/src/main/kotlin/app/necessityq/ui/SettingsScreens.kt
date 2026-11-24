@@ -180,9 +180,16 @@ fun SettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier) = PageScaffo
     }
 
     Text("פרטים בהמלצות", style = MaterialTheme.typography.titleMedium)
-    OptionRow("סיבת ההמלצה", current.showReason) { vm.setDisplay(current.copy(showReason = it)) }
-    OptionRow("מתי נקנה לאחרונה", current.showLastBought) { vm.setDisplay(current.copy(showLastBought = it)) }
-    OptionRow("תדירות קנייה", current.showFrequency) { vm.setDisplay(current.copy(showFrequency = it)) }
+    Text("בכרטיס ההמלצה להציג:", style = MaterialTheme.typography.bodyMedium)
+    app.necessityq.platform.RecommendationDetail.entries.forEach { detail ->
+        Row(
+            Modifier.fillMaxWidth().clickable { vm.setDisplay(current.copy(recommendationDetail = detail)) },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RadioButton(selected = current.recommendationDetail == detail, onClick = { vm.setDisplay(current.copy(recommendationDetail = detail)) })
+            Text(detail.label)
+        }
+    }
     OptionRow("סימון מועדפים ★", current.showFavorite) { vm.setDisplay(current.copy(showFavorite = it)) }
 
     SettingsSection("מראה")

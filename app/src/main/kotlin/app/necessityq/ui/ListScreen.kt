@@ -1132,9 +1132,9 @@ private fun tileInfo(line: ListLine, stats: ItemStats?, names: Map<String, Strin
 
 private fun recommendationInfo(s: Suggestion, stats: ItemStats?, favorites: Set<String>, display: DisplayOptions, today: LocalDate): String =
     listOfNotNull(
-        if (display.showReason) s.reason else null,
-        if (display.showLastBought && !display.showReason) daysAgo(stats, today) else null,
-        if (display.showFrequency && !display.showReason) cadence(stats) else null,
+        if (display.recommendationDetail == app.necessityq.platform.RecommendationDetail.REASON) s.reason else null,
+        if (display.recommendationDetail == app.necessityq.platform.RecommendationDetail.HISTORY) daysAgo(stats, today) else null,
+        if (display.recommendationDetail == app.necessityq.platform.RecommendationDetail.HISTORY) cadence(stats) else null,
         if (display.showFavorite && s.itemId in favorites) "★ במועדפים" else null,
     ).joinToString(" · ")
 
