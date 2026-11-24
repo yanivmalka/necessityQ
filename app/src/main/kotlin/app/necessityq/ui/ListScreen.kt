@@ -256,6 +256,9 @@ fun ListScreen(
     val allBranches by vm.priceBranches.collectAsStateWithLifecycle()
     // kept up to date so "יוצאים לקנות" knows at once whether the regular supermarket is the cheapest
     val tripPlan by vm.tripPlan.collectAsStateWithLifecycle()
+    // "לבדוק שוב": scanned with "תזכיר לי אחר כך" — all while preparing, the branch's own while shopping there
+    val reminders by vm.scanReminders.collectAsStateWithLifecycle()
+    val priceBranchId by vm.primaryBranchId.collectAsStateWithLifecycle()
     val pricesLoading by vm.pricesLoading.collectAsStateWithLifecycle()
     var showTrip by remember { mutableStateOf(false) }
     var openItem by remember { mutableStateOf<ListLine?>(null) }
@@ -339,10 +342,16 @@ fun ListScreen(
         }
     }
 
+    val shownReminders = remember(reminders, shopping, priceBranchId) {
+        app.necessityq.domain.ScanReminder.shown(reminders, shopping, priceBranchId).reversed()
+    }
+    val showReminders = searchText.isBlank() && shownReminders.isNotEmpty()
+
     val listState = rememberLazyListState()
-    // LazyColumn items before the product rows (store prompt, recipes, suggestions, hint) — to find a row's index
+    // LazyColumn items before the product rows (store prompt, reminders, recipes, suggestions, hint) — to find a row's index
     val leadingItems = snapshot?.let { snap ->
         (if (shopping && storePrompt) 1 else 0) +
+            (if (showReminders) 1 else 0) +
             (if (showRecipes && recipesOnList.isNotEmpty()) 1 else 0) +
             (if (showRecipes && hasOffers) 1 else 0) +
             (if (showSuggestions && snap.runningLow.isNotEmpty()) 1 else 0) +
@@ -616,6 +625,12 @@ fun ListScreen(
 
             if (shopping && storePrompt) {
                 item(key = "store_prompt") { StorePromptCard(vm) }
+            }
+
+            if (showReminders) {
+                item(key = "reminders") {
+                    RemindersCard(shownReminders, onAdd = vm::reminderToList, onRemove = vm::dismissReminder)
+                }
             }
 
             if (showRecipes && recipesOnList.isNotEmpty()) {
@@ -2092,6 +2107,51 @@ private fun PreviewPill(text: String, background: Color, ink: Color, bold: Boole
         style = MaterialTheme.typography.bodySmall,
         maxLines = 1,
     )
+}
+
+/** "לבדוק שוב": products saved from a scan, with the price seen then; each goes on the list or away. */
+@Composable
+private fun RemindersCard(
+    reminders: List<app.necessityq.domain.ScanReminder>,
+    onAdd: (app.necessityq.domain.ScanReminder) -> Unit,
+    onRemove: (app.necessityq.domain.ScanReminder) -> Unit,
+) {
+    var showAll by remember { mutableStateOf(false) }
+    val shown = if (showAll) reminders else reminders.take(3)
+    Column(
+        Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().clip(NqShapes.Tile)
+            .background(MaterialTheme.colorScheme.surface).border(1.dp, NqTheme.colors.hairline, NqShapes.Tile)
+            .padding(start = 14.dp, end = 4.dp, top = 10.dp, bottom = 4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.QrCodeScanner, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("לבדוק שוב", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            if (reminders.size > 3) {
+                TextButton(onClick = { showAll = !showAll }) { Text(if (showAll) "פחות" else "הכל (${reminders.size})") }
+            }
+        }
+        shown.forEach { r ->
+            androidx.compose.runtime.key(r.code) {
+                Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(r.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        r.price?.let {
+                            Text(
+                                "${app.necessityq.domain.PriceData.formatPrice(it)} בסריקה",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    TextButton(onClick = { onAdd(r) }) { Text("לרשימה", fontWeight = FontWeight.SemiBold) }
+                    IconButton(onClick = { onRemove(r) }) {
+                        Icon(Icons.Default.Close, contentDescription = "להסיר: ${r.name}", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+    }
 }
 
 /** "כנראה נגמר בקרוב" folded into one line: how many, and a tap opens the cards to add them. */

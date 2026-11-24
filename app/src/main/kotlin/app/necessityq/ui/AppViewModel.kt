@@ -1316,9 +1316,34 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun remindLater(result: app.necessityq.domain.ScanResult) {
         val p = result.product
         val name = p?.name ?: result.identity?.displayName ?: result.code
-        prefs.addRemindLater(result.code, name, result.here?.price ?: p?.price, result.branchId)
-        _messages.tryEmit("נשמר לתזכורת: $name")
+        prefs.addRemindLater(
+            app.necessityq.domain.ScanReminder(
+                code = result.code,
+                name = name,
+                price = result.here?.price ?: p?.price,
+                branchId = result.branchId,
+                atMillis = System.currentTimeMillis(),
+                itemName = result.identity?.displayName,
+            ),
+        )
+        scanReminders.value = prefs.remindLater
+        _messages.tryEmit("נשמר לתזכורת: $name — יופיע ב\"לבדוק שוב\"")
         closeScan()
+    }
+
+    /** "לבדוק שוב": products saved with "תזכיר לי אחר כך" while scanning (newest last). */
+    val scanReminders = MutableStateFlow(prefs.remindLater)
+
+    /** "לרשימה" on a reminder: the item goes on the list and the reminder is done. */
+    fun reminderToList(reminder: app.necessityq.domain.ScanReminder) {
+        val (hid, uid, lines) = ctx() ?: return
+        launchSafe { container.service.addFromText(hid, uid, reminder.listName, lines)?.let { _added.tryEmit(it.item.id) } }
+        dismissReminder(reminder)
+    }
+
+    fun dismissReminder(reminder: app.necessityq.domain.ScanReminder) {
+        prefs.removeRemindLater(reminder.code)
+        scanReminders.value = prefs.remindLater
     }
 
     /** The scanned product is on the list: mark that line bought. */

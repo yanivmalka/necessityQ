@@ -139,16 +139,18 @@ class AppPrefs(context: Context) {
     fun descendingFor(mode: app.necessityq.domain.ListMode): Boolean = p.getBoolean("desc_" + mode.name, false)
     fun setDescendingFor(mode: app.necessityq.domain.ListMode, v: Boolean) = p.edit().putBoolean("desc_" + mode.name, v).apply()
 
-    /** Scanned products to be reminded of later ("code\tname\tprice\tbranch\tat" per entry, newest last). */
-    val remindLater: List<String>
-        get() = p.getString("remind_later", null)?.split('\n')?.filter { it.isNotBlank() }.orEmpty()
+    /** Scanned products to be reminded of later ([app.necessityq.domain.ScanReminder] lines, newest last). */
+    val remindLater: List<app.necessityq.domain.ScanReminder>
+        get() = p.getString("remind_later", null)?.split('\n')?.mapNotNull { app.necessityq.domain.ScanReminder.decode(it) }.orEmpty()
 
-    fun addRemindLater(code: String, name: String, price: Double?, branchId: String?) {
-        val entry = listOf(code, name.replace('\t', ' ').replace('\n', ' '), price?.toString().orEmpty(), branchId.orEmpty(), System.currentTimeMillis().toString())
-            .joinToString("\t")
-        val next = (remindLater.filterNot { it.startsWith(code + "\t") } + entry).takeLast(100)
-        p.edit().putString("remind_later", next.joinToString("\n")).apply()
+    fun addRemindLater(reminder: app.necessityq.domain.ScanReminder) {
+        saveRemindLater((remindLater.filterNot { it.code == reminder.code } + reminder).takeLast(100))
     }
+
+    fun removeRemindLater(code: String) = saveRemindLater(remindLater.filterNot { it.code == code })
+
+    private fun saveRemindLater(list: List<app.necessityq.domain.ScanReminder>) =
+        p.edit().putString("remind_later", list.joinToString("\n") { it.encode() }).apply()
 
     /** Play a sound when a new message arrives. */
     var chatSound: Boolean
