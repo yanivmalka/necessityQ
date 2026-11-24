@@ -29,7 +29,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.ui.unit.dp
@@ -127,7 +126,7 @@ class MainActivity : ComponentActivity() {
 private enum class Dest(val title: String) {
     LIST("רשימה"), MENU("תפריט"), PRICES("מחירים"), HOME("הבית"),
     HOUSEHOLD("הבית ומשתתפים"), MESSAGES("צ'אט פוד"), HISTORY("היסטוריה"), ACCOUNT("חשבון"),
-    SETTINGS("הגדרות תצוגה"), APPEARANCE("מראה"), UPDATES("עדכונים"), ABOUT("אודות"),
+    SETTINGS("הגדרות"), APPEARANCE("הגדרות"), UPDATES("עדכונים"), ABOUT("אודות"),
     FAMILY_MEMBER("בן/בת משפחה"),
 }
 
@@ -244,7 +243,6 @@ private fun Root(vm: AppViewModel) {
                 listOf(
                     HubEntry(Dest.ACCOUNT.title, Icons.Default.AccountCircle) { go(Dest.ACCOUNT, from = Dest.HOME) },
                     HubEntry(Dest.SETTINGS.title, Icons.Default.Tune) { go(Dest.SETTINGS, from = Dest.HOME) },
-                    HubEntry(Dest.APPEARANCE.title, Icons.Default.Palette) { go(Dest.APPEARANCE, from = Dest.HOME) },
                 ),
                 listOf(
                     HubEntry(
@@ -336,10 +334,11 @@ private fun Root(vm: AppViewModel) {
                                     vm, household, s.account, s.userId, modifier,
                                     onOpenFamilyMember = { id -> familyMember = id.orEmpty(); go(Dest.FAMILY_MEMBER, from = Dest.HOUSEHOLD) },
                                     onOpenAccount = { go(Dest.ACCOUNT, from = Dest.HOUSEHOLD) },
+                                    onOpenSettings = { go(Dest.SETTINGS, from = Dest.HOUSEHOLD) },
                                 )
                                 Dest.ACCOUNT -> AccountScreen(vm, s.account, modifier)
-                                Dest.SETTINGS -> DisplaySettingsScreen(vm, modifier)
-                                Dest.APPEARANCE -> AppearanceScreen(vm, modifier)
+                                // "מראה" is a part of the one settings screen now
+                                Dest.SETTINGS, Dest.APPEARANCE -> SettingsScreen(vm, modifier)
                                 Dest.UPDATES -> UpdatesScreen(vm, modifier)
                                 Dest.ABOUT -> AboutScreen(modifier)
                                 Dest.FAMILY_MEMBER -> MemberScreen(vm, familyMember.ifEmpty { null }, onBack = { back() }, modifier = modifier)

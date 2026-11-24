@@ -96,6 +96,8 @@ fun HouseholdScreen(
     onOpenFamilyMember: (memberId: String?) -> Unit = {},
     /** Opens the account page ("הבית" ← "חשבון"). */
     onOpenAccount: () -> Unit = {},
+    /** Opens the settings (who is notified lives there, under "התראות"). */
+    onOpenSettings: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val members by vm.members.collectAsStateWithLifecycle()
@@ -174,9 +176,17 @@ fun HouseholdScreen(
                 Text("מצב מכשיר יחיד: הנתונים נשמרים במכשיר בלבד.", style = MaterialTheme.typography.bodyMedium)
             }
 
+            // who is notified about a missing item is chosen in the settings, with the other notifications
             if (vm.isShared) {
                 HorizontalDivider()
-                NotifyCard(vm, members, userId)
+                Row(
+                    Modifier.fillMaxWidth().clip(NqShapes.Panel).clickable(onClickLabel = "להגדרות ההתראות", onClick = onOpenSettings)
+                        .padding(vertical = 8.dp, horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("מי מקבל התראות", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                    Text("הגדרות ›", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+                }
             }
 
             HorizontalDivider()
@@ -568,7 +578,7 @@ fun DisplayCard(vm: AppViewModel) {
 // ---------- who is notified ----------
 
 @Composable
-private fun NotifyCard(vm: AppViewModel, members: List<Member>, userId: String) {
+fun NotifyCard(vm: AppViewModel, members: List<Member>, userId: String) {
     val settings by vm.notifySettings.collectAsStateWithLifecycle()
     // nobody chosen yet = everyone
     val chosen = settings.missingRecipients.ifEmpty { members.map { it.userId }.toSet() }

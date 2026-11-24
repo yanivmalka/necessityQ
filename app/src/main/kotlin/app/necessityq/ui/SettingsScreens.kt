@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -91,13 +92,6 @@ fun PageScaffold(title: String, modifier: Modifier = Modifier, content: @Composa
 }
 
 @Composable
-fun AppearanceScreen(vm: AppViewModel, modifier: Modifier = Modifier) = PageScaffold("מראה", modifier) {
-    DisplayCard(vm)
-    PalettePicker(vm)
-    AppIconPicker()
-}
-
-@Composable
 fun AccountScreen(vm: AppViewModel, account: Account, modifier: Modifier = Modifier) = PageScaffold("חשבון", modifier) {
     if (vm.supportsAccounts) AccountCard(vm, account)
     else Text("גרסה זו פועלת במצב מכשיר יחיד, ללא חשבון.")
@@ -108,12 +102,25 @@ fun UpdatesScreen(vm: AppViewModel, modifier: Modifier = Modifier) = PageScaffol
     UpdateCard(vm)
 }
 
-/** What the list and the recommendations show. */
+/** A part of the settings screen: a clear title over its options. */
 @Composable
-fun DisplaySettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier) = PageScaffold("הגדרות תצוגה", modifier) {
+private fun SettingsSection(title: String) {
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        HorizontalDivider(Modifier.padding(top = 4.dp))
+    }
+}
+
+/**
+ * One settings screen, in parts: the list and its tiles · appearance (theme, colours, icon) · notifications
+ * (צ'אט פוד, and who hears about a missing item).
+ */
+@Composable
+fun SettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier) = PageScaffold("הגדרות", modifier) {
     val current by vm.display.collectAsStateWithLifecycle()
     val sound by vm.chatSound.collectAsStateWithLifecycle()
 
+    SettingsSection("רשימה ואריחים")
     var editing by remember { mutableStateOf<ListMode?>(null) }
     Text("מה להציג על כל פריט ברשימה", style = MaterialTheme.typography.titleMedium)
     Text(
@@ -172,6 +179,18 @@ fun DisplaySettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier) = Pag
         }
     }
 
+    Text("פרטים בהמלצות", style = MaterialTheme.typography.titleMedium)
+    OptionRow("סיבת ההמלצה", current.showReason) { vm.setDisplay(current.copy(showReason = it)) }
+    OptionRow("מתי נקנה לאחרונה", current.showLastBought) { vm.setDisplay(current.copy(showLastBought = it)) }
+    OptionRow("תדירות קנייה", current.showFrequency) { vm.setDisplay(current.copy(showFrequency = it)) }
+    OptionRow("סימון מועדפים ★", current.showFavorite) { vm.setDisplay(current.copy(showFavorite = it)) }
+
+    SettingsSection("מראה")
+    DisplayCard(vm)
+    PalettePicker(vm)
+    AppIconPicker()
+
+    SettingsSection("התראות")
     Text("צ'אט פוד", style = MaterialTheme.typography.titleMedium)
     Text(
         "כדי שלא כל בני הבית יקבלו התראה על כל הודעה: התראה מגיעה רק למי שתויג ב-@ ולמי שההודעה שלו צוטטה.",
@@ -192,11 +211,11 @@ fun DisplaySettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier) = Pag
     OptionRow("תיוג או ציטוט נשמעים גם כשהטלפון על שקט", loud) { vm.setLoudMentions(it) }
     OptionRow("צליל להודעות שאינן תיוג (כשבחרתם \"כל הודעה\")", sound) { vm.setChatSound(it) }
 
-    Text("פרטים בהמלצות", style = MaterialTheme.typography.titleMedium)
-    OptionRow("סיבת ההמלצה", current.showReason) { vm.setDisplay(current.copy(showReason = it)) }
-    OptionRow("מתי נקנה לאחרונה", current.showLastBought) { vm.setDisplay(current.copy(showLastBought = it)) }
-    OptionRow("תדירות קנייה", current.showFrequency) { vm.setDisplay(current.copy(showFrequency = it)) }
-    OptionRow("סימון מועדפים ★", current.showFavorite) { vm.setDisplay(current.copy(showFavorite = it)) }
+    // who hears about an item marked missing — next to the chat's notifications, all in one place
+    if (vm.isShared) {
+        val members by vm.members.collectAsStateWithLifecycle()
+        NotifyCard(vm, members, vm.me)
+    }
 }
 
 @Composable
