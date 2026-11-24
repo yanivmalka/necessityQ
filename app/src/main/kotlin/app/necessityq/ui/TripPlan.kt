@@ -2,6 +2,7 @@ package app.necessityq.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -88,6 +89,9 @@ fun TripPlanSheet(vm: AppViewModel, onDismiss: () -> Unit) {
     var homeMenu by remember { mutableStateOf(false) }
     val home = vm.homeBranchId(settings)
 
+    var settingsOpen by remember { mutableStateOf(false) }
+    val p = plan
+
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
@@ -95,70 +99,7 @@ fun TripPlanSheet(vm: AppViewModel, onDismiss: () -> Unit) {
         ) {
             Text("איפה הכי משתלם לקנות?", style = MaterialTheme.typography.titleLarge)
 
-            // the regular supermarket
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Storefront, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.width(6.dp))
-                Text("הסופר הרגיל שלי:", style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.width(4.dp))
-                androidx.compose.foundation.layout.Box {
-                    TextButton(onClick = { homeMenu = true }) { Text(home?.let { branchName(it, all) } ?: "—", maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                    DropdownMenu(expanded = homeMenu, onDismissRequest = { homeMenu = false }) {
-                        followed.forEach { id ->
-                            DropdownMenuItem(
-                                text = { Text((if (id == home) "✓ " else "") + branchName(id, all)) },
-                                onClick = { vm.setTripSettings(settings.copy(homeBranchId = id)); homeMenu = false },
-                            )
-                        }
-                    }
-                }
-            }
-
-            // from what saving another supermarket (or one more stop) is worth it
-            Text("כדאי לשנות סופר אם החיסכון לפחות:", style = MaterialTheme.typography.labelLarge)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = thresholdText,
-                    onValueChange = { t ->
-                        val digits = t.filter { it.isDigit() }.take(5)
-                        thresholdText = digits
-                        digits.toIntOrNull()?.let { vm.setTripSettings(settings.copy(threshold = it)) }
-                    },
-                    suffix = { Text("₪") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.width(120.dp),
-                )
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(listOf(20, 50, 100, 200)) { v ->
-                        FilterChip(
-                            selected = settings.threshold == v,
-                            onClick = { thresholdText = v.toString(); vm.setTripSettings(settings.copy(threshold = v)) },
-                            label = { Text("$v") },
-                        )
-                    }
-                }
-            }
-
-            // over how many supermarkets the list may be split
-            Text("לכמה סופרים מוכנים ללכת?", style = MaterialTheme.typography.labelLarge)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                (1..minOf(3, maxOf(1, followed.size))).forEach { n ->
-                    FilterChip(
-                        selected = settings.maxStores == n,
-                        onClick = { vm.setTripSettings(settings.copy(maxStores = n)) },
-                        label = { Text(if (n == 1) "סופר אחד" else "עד $n (פיצול)") },
-                    )
-                }
-            }
-            Row(Modifier.clickable { vm.setTripSettings(settings.copy(includeMembers = !settings.includeMembers)) }, verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = settings.includeMembers, onCheckedChange = { vm.setTripSettings(settings.copy(includeMembers = it)) })
-                Text("לכלול מבצעי מועדון, כרטיס אשראי וקופונים", style = MaterialTheme.typography.bodyMedium)
-            }
-
-            HorizontalDivider()
-
-            val p = plan
+            // the recommendation first, with one button
             when {
                 followed.size < 2 -> Text(
                     "כדי להשוות צריך לעקוב אחרי שני סניפים לפחות (בלשונית המחירים).",
@@ -168,34 +109,108 @@ fun TripPlanSheet(vm: AppViewModel, onDismiss: () -> Unit) {
                     if (loading.isNotEmpty()) "טוען מחירים של הסניפים…" else "אין עדיין פריטים שאפשר להשוות בין הסניפים.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                else -> PlanResult(p, all)
+                else -> PlanCard(p, all)
+            }
+            Button(onClick = { vm.startTrip(p); onDismiss() }, modifier = Modifier.fillMaxWidth().height(52.dp), shape = NqShapes.Field) {
+                Text(
+                    when {
+                        p != null && p.advice == TripAdvice.SPLIT -> "יוצאים: ${p.chosen.stops.size} רשימות"
+                        p != null && p.advice == TripAdvice.SWITCH -> "יוצאים ל${branchName(p.chosen.branchIds.first(), all)}"
+                        else -> "יוצאים לקנות"
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            // the settings behind the recommendation, folded
+            Row(
+                Modifier.fillMaxWidth().clip(NqShapes.Panel).clickable { settingsOpen = !settingsOpen }.padding(vertical = 8.dp, horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("שינוי הגדרות", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                Icon(if (settingsOpen) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = if (settingsOpen) "סגירה" else "פתיחה")
+            }
+            if (settingsOpen) {
+                // the regular supermarket
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Storefront, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.width(6.dp))
+                    Text("הסופר הרגיל שלי:", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.width(4.dp))
+                    androidx.compose.foundation.layout.Box {
+                        TextButton(onClick = { homeMenu = true }) { Text(home?.let { branchName(it, all) } ?: "—", maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                        DropdownMenu(expanded = homeMenu, onDismissRequest = { homeMenu = false }) {
+                            followed.forEach { id ->
+                                DropdownMenuItem(
+                                    text = { Text((if (id == home) "✓ " else "") + branchName(id, all)) },
+                                    onClick = { vm.setTripSettings(settings.copy(homeBranchId = id)); homeMenu = false },
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // from what saving another supermarket (or one more stop) is worth it
+                Text("כדאי לשנות סופר אם החיסכון לפחות:", style = MaterialTheme.typography.labelLarge)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = thresholdText,
+                        onValueChange = { t ->
+                            val digits = t.filter { it.isDigit() }.take(5)
+                            thresholdText = digits
+                            digits.toIntOrNull()?.let { vm.setTripSettings(settings.copy(threshold = it)) }
+                        },
+                        suffix = { Text("₪") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.width(120.dp),
+                    )
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(listOf(20, 50, 100, 200)) { v ->
+                            FilterChip(
+                                selected = settings.threshold == v,
+                                onClick = { thresholdText = v.toString(); vm.setTripSettings(settings.copy(threshold = v)) },
+                                label = { Text("$v") },
+                            )
+                        }
+                    }
+                }
+
+                // over how many supermarkets the list may be split
+                Text("לכמה סופרים מוכנים ללכת?", style = MaterialTheme.typography.labelLarge)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    (1..minOf(3, maxOf(1, followed.size))).forEach { n ->
+                        FilterChip(
+                            selected = settings.maxStores == n,
+                            onClick = { vm.setTripSettings(settings.copy(maxStores = n)) },
+                            label = { Text(if (n == 1) "סופר אחד" else "עד $n (פיצול)") },
+                        )
+                    }
+                }
+                Row(Modifier.clickable { vm.setTripSettings(settings.copy(includeMembers = !settings.includeMembers)) }, verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = settings.includeMembers, onCheckedChange = { vm.setTripSettings(settings.copy(includeMembers = it)) })
+                    Text("לכלול מבצעי מועדון, כרטיס אשראי וקופונים", style = MaterialTheme.typography.bodyMedium)
+                }
+                OutlinedButton(onClick = { vm.startTrip(null); onDismiss() }) { Text("יציאה בלי תכנון") }
+            }
+
+            if (p != null) {
+                HorizontalDivider()
+                PlanDetails(p, all)
             }
 
             if (offers.isNotEmpty() || basketOffers.isNotEmpty()) {
                 HorizontalDivider()
                 PromoOfferList(offers.take(12), basketOffers, all, title = "מבצעים לרשימה")
             }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Button(onClick = { vm.startTrip(p); onDismiss() }, modifier = Modifier.weight(1f)) {
-                    Text(
-                        when {
-                            p != null && p.advice == TripAdvice.SPLIT -> "יוצאים: ${p.chosen.stops.size} רשימות"
-                            p != null && p.advice == TripAdvice.SWITCH -> "יוצאים ל${branchName(p.chosen.branchIds.first(), all)}"
-                            else -> "יוצאים לקנות"
-                        },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                OutlinedButton(onClick = { vm.startTrip(null); onDismiss() }) { Text("בלי תכנון") }
-            }
         }
     }
 }
 
+/** The recommendation: the regular supermarket, another one, or a split — and why. */
 @Composable
-private fun PlanResult(p: TripPlan, all: List<PriceBranch>) {
+private fun PlanCard(p: TripPlan, all: List<PriceBranch>) {
     val homeName = branchName(p.homeBranchId, all)
     Card(
         colors = CardDefaults.cardColors(
@@ -260,7 +275,11 @@ private fun PlanResult(p: TripPlan, all: List<PriceBranch>) {
             }
         }
     }
+}
 
+/** Every option side by side, and what was compared. */
+@Composable
+private fun PlanDetails(p: TripPlan, all: List<PriceBranch>) {
     // every option side by side
     Text("כמה תעלה הרשימה", style = MaterialTheme.typography.labelLarge)
     p.singles.forEach { o ->

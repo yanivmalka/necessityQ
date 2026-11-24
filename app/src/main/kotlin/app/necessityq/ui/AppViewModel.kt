@@ -1060,6 +1060,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         tripAssignment.value = assignment
         tripStops.value = stops
         activeStop.value = stops.firstOrNull()
+        // the supermarket chosen while planning is where we shop: "איפה קונים היום?" is not asked again
+        stops.firstOrNull()?.let { shopAtBranch(it) }
         setMode(ListMode.SHOP)
     }
 
@@ -1075,8 +1077,19 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         if (summary.bought > 0) clearBought(summary.text()) else _messages.tryEmit(summary.text())
     }
 
-    /** Shows one stop of the split (its items and prices); null = the whole list. */
-    fun selectStop(branchId: String?) { activeStop.value = branchId }
+    /** Shows one stop of the split (its items and prices); null = the whole list. The store follows the stop. */
+    fun selectStop(branchId: String?) {
+        activeStop.value = branchId
+        branchId?.let { shopAtBranch(it) }
+    }
+
+    /** Makes the followed branch [branchId] the current store (the household's store of that name, saved if new). */
+    private fun shopAtBranch(branchId: String) {
+        val branch = priceBranches.value.firstOrNull { it.id == branchId } ?: return
+        val key = HebrewText.matchKey(app.necessityq.domain.BranchLocator.storeName(branch))
+        val id = stores.value.firstOrNull { HebrewText.matchKey(it.name) == key }?.id ?: addStoreFromBranch(branch) ?: return
+        answerStorePrompt(id)
+    }
 
     private fun endTrip() {
         prefs.tripAssignment = emptyMap()

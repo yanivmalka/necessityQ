@@ -254,6 +254,9 @@ fun ListScreen(
     val hasOffers = promoOffers.isNotEmpty() || basketOffers.isNotEmpty()
     val followedBranches by vm.selectedPriceBranches.collectAsStateWithLifecycle()
     val allBranches by vm.priceBranches.collectAsStateWithLifecycle()
+    // kept up to date so "יוצאים לקנות" knows at once whether the regular supermarket is the cheapest
+    val tripPlan by vm.tripPlan.collectAsStateWithLifecycle()
+    val pricesLoading by vm.pricesLoading.collectAsStateWithLifecycle()
     var showTrip by remember { mutableStateOf(false) }
     var openItem by remember { mutableStateOf<ListLine?>(null) }
     var showSortMenu by remember { mutableStateOf(false) }
@@ -415,6 +418,13 @@ fun ListScreen(
                     leadingIcon = { Icon(Icons.Default.AutoAwesome, null) },
                     onClick = { showGenerate = true; showMore = false },
                 )
+                if (!shopping && followedBranches.size >= 2) {
+                    DropdownMenuItem(
+                        text = { Text("איפה הכי משתלם לקנות?") },
+                        leadingIcon = { Icon(Icons.Default.Storefront, null) },
+                        onClick = { showMore = false; showTrip = true },
+                    )
+                }
                 DropdownMenuItem(
                     text = { Text("סל מחזור" + (snapshot?.removed?.size?.takeIf { it > 0 }?.let { " ($it)" } ?: "")) },
                     leadingIcon = { Icon(Icons.Default.RestoreFromTrash, null) },
@@ -815,12 +825,19 @@ fun ListScreen(
                     storeName = storeName,
                     resume = tripStops.isNotEmpty(),
                     // a trip that was left with "back" (not finished) goes on as it was, split included;
-                    // otherwise, with two branches or more: first where it pays to shop (one supermarket or a split)
+                    // otherwise, with two branches or more: where it pays to shop. When the answer is the regular
+                    // supermarket (or there is nothing to compare) we go at once, without the sheet.
                     onGo = {
+                        val plan = tripPlan
                         when {
                             tripStops.isNotEmpty() -> vm.setMode(ListMode.SHOP)
-                            followedBranches.size >= 2 -> showTrip = true
-                            else -> vm.startTrip(null)
+                            followedBranches.size < 2 -> vm.startTrip(null)
+                            plan != null && plan.advice == app.necessityq.domain.TripAdvice.STAY -> {
+                                vm.startTrip(plan)
+                                vm.showMessage("הסופר הרגיל שלך הוא הזול לרשימה הזאת")
+                            }
+                            plan == null && pricesLoading.isEmpty() -> vm.startTrip(null)
+                            else -> showTrip = true
                         }
                     },
                 )
