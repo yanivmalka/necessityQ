@@ -75,6 +75,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
@@ -446,9 +447,15 @@ fun ListScreen(
                     leadingIcon = { Icon(Icons.Default.DeleteSweep, null) },
                     onClick = { showReset = true; showMore = false },
                 )
+                // what a tile shows, at this stage of use (the same sheet as in the settings)
                 DropdownMenuItem(
-                    text = { Text("הגדרות תצוגה") },
+                    text = { Text("תצוגה") },
                     leadingIcon = { Icon(Icons.Default.Tune, null) },
+                    onClick = { showMore = false; showTileEditor = true },
+                )
+                DropdownMenuItem(
+                    text = { Text("הגדרות") },
+                    leadingIcon = { Icon(Icons.Default.Settings, null) },
                     onClick = { showMore = false; onOpenDisplaySettings() },
                 )
                 DropdownMenuItem(
@@ -549,7 +556,7 @@ fun ListScreen(
             }
         }
 
-        // list toolbar: sort (with direction), filter, collapse/expand all
+        // list toolbar: sort (with direction), filter, collapse/expand all ("תצוגה" is in the ⋮ menu)
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -596,12 +603,6 @@ fun ListScreen(
                 onClick = { showFilter = true },
                 label = { Text(if (filter.isActive) "סינון · ${filter.activeCount}" else "סינון") },
                 leadingIcon = { Icon(Icons.Default.FilterList, null, Modifier.size(18.dp)) },
-            )
-            FilterChip(
-                selected = false,
-                onClick = { showTileEditor = true },
-                label = { Text("תצוגה") },
-                leadingIcon = { Icon(Icons.Default.Tune, contentDescription = "התאמת תצוגה", modifier = Modifier.size(18.dp)) },
             )
             Spacer(Modifier.weight(1f))
             if (titledKeys.isNotEmpty()) {
