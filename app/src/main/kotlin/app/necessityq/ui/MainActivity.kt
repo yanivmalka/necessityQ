@@ -60,10 +60,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material.icons.filled.Restaurant
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -147,14 +144,10 @@ private val Dest.tab: Dest
 @Composable
 private fun Root(vm: AppViewModel) {
     val session by vm.session.collectAsStateWithLifecycle()
-    val snackbar = remember { SnackbarHostState() }
-    LaunchedEffect(Unit) { vm.messages.collect { snackbar.showSnackbar(it) } }
-    LaunchedEffect(Unit) {
-        vm.undo.collect { event ->
-            val result = snackbar.showSnackbar(event.text, actionLabel = "ביטול", duration = SnackbarDuration.Long)
-            if (result == SnackbarResult.ActionPerformed) event.undo()
-        }
-    }
+    // system messages lie in layers: a new one does not hide (or drop) the previous one and its "ביטול"
+    val systemMessages = remember { SystemMessagesState() }
+    LaunchedEffect(Unit) { vm.messages.collect { systemMessages.show(it) } }
+    LaunchedEffect(Unit) { vm.undo.collect { event -> systemMessages.show(event.text, event.undo) } }
 
     // notifications (Android 13+) — asked once
     val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -186,7 +179,7 @@ private fun Root(vm: AppViewModel) {
         is Session.SignedIn -> {
             val household = s.household
             if (household == null) {
-                Scaffold(snackbarHost = { SwipeableSnackbarHost(snackbar) }) { padding ->
+                Scaffold(snackbarHost = { SystemMessagesHost(systemMessages) }) { padding ->
                     OnboardingScreen(vm, s.account, Modifier.padding(padding))
                 }
                 return
@@ -273,7 +266,7 @@ private fun Root(vm: AppViewModel) {
                 LocalWeightPriceUnit provides display.weightUnit,
             ) {
                 Scaffold(
-                    snackbarHost = { SwipeableSnackbarHost(snackbar) },
+                    snackbarHost = { SystemMessagesHost(systemMessages) },
                     bottomBar = {
                         // shopping is a focused mode: the list takes the whole screen and has its own way back
                         if (!shoppingOnList) {

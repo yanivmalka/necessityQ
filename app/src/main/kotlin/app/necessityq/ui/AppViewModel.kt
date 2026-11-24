@@ -8,6 +8,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import app.necessityq.AppContainer
 import app.necessityq.domain.Autocomplete
+import app.necessityq.domain.HebrewText
 import app.necessityq.domain.ItemIdentity
 import app.necessityq.domain.LineSource
 import app.necessityq.domain.ListLine
@@ -67,7 +68,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     val isShared: Boolean = container.household.isShared
 
-    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    // a burst of messages is never dropped: each one is shown (in layers) until it goes
+    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 64)
     val messages: SharedFlow<String> = _messages
 
     val session: StateFlow<Session> = container.household.session
@@ -153,7 +155,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun checkOff(line: ListLine) {
         val (hid, uid, _) = ctx() ?: return
         launchSafe { container.service.checkOff(hid, uid, line, currentStoreId.value) }
-        _undo.tryEmit(UndoEvent("${line.displayName} סומן כנקנה") { reopen(line) })
+        _undo.tryEmit(UndoEvent("${line.displayName} הושלם") { reopen(line) })
     }
 
     fun reopen(line: ListLine) {
@@ -208,10 +210,10 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun delete(line: ListLine) {
         val (hid, _, _) = ctx() ?: return
         launchSafe { container.service.delete(hid, line) }
-        _undo.tryEmit(UndoEvent("${line.displayName} הועבר לסל המחזור") { restore(line, line.status) })
+        _undo.tryEmit(UndoEvent("${line.displayName} הוסר") { restore(line, line.status) })
     }
 
-    /** [text]: the message shown with "ביטול" (by default, how many went to the recycle bin). */
+    /** [text]: the message shown with "ביטול" (by default, which items went to the recycle bin). */
     fun clearBought(text: String? = null) {
         val (hid, _, lines) = ctx() ?: return
         val bought = lines.filter { it.status == LineStatus.BOUGHT }
@@ -219,7 +221,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         if (bought.isNotEmpty()) {
             val undoChats = archiveChats(bought.map { it.itemId }, lines.filter { it.status == LineStatus.NEEDED })
             _undo.tryEmit(
-                UndoEvent(text ?: "${bought.size} פריטים שנקנו עברו לסל המחזור") {
+                UndoEvent(text ?: if (bought.size == 1) "${bought[0].displayName} עבר לסל המחזור" else "${HebrewText.nameList(bought.map { it.displayName })} עברו לסל המחזור") {
                     bought.forEach { restore(it, LineStatus.BOUGHT) }
                     undoChats?.invoke()
                 },
@@ -240,8 +242,11 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         val (hid, uid, lines) = ctx() ?: return
         if (items.isEmpty()) return
         launchSafe {
+            val onList = lines.filter { it.status == LineStatus.NEEDED }.map { it.itemId }.toSet()
+            val names = items.filter { it.identity.id !in onList }.map { it.identity.displayName }.distinct()
             val added = container.service.addGenerated(hid, uid, items, lines)
-            _undo.tryEmit(UndoEvent("נוספו ${added.size} פריטים מקניות עבר") { launchSafe { container.service.undoGenerated(hid, added) } })
+            if (added.isEmpty()) return@launchSafe
+            _undo.tryEmit(UndoEvent("נוספו מקניות עבר: " + HebrewText.nameList(names.ifEmpty { listOf("${added.size} פריטים") })) { launchSafe { container.service.undoGenerated(hid, added) } })
         }
     }
 
@@ -255,7 +260,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                 val movedIds = moved.map { it.id }.toSet()
                 val undoChats = archiveChats(moved.map { it.itemId }, lines.filter { it.id !in movedIds })
                 _undo.tryEmit(
-                    UndoEvent("${moved.size} פריטים עברו לסל המחזור") {
+                    UndoEvent(if (moved.size == 1) "${moved[0].displayName} הוסר" else "${HebrewText.nameList(moved.map { it.displayName })} הוסרו") {
                         moved.forEach { restore(it, it.status) }
                         undoChats?.invoke()
                     },
@@ -347,9 +352,10 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     // ---------- undo ----------
 
-    /** A reversible action just done; the UI offers "ביטול" for a few seconds. */
+    /** A reversible action just done; its message has its own "ביטול" for half a minute. */
     class UndoEvent(val text: String, val undo: () -> Unit)
-    private val _undo = MutableSharedFlow<UndoEvent>(extraBufferCapacity = 4)
+    // every undo is kept (the old queue of four dropped the rest)
+    private val _undo = MutableSharedFlow<UndoEvent>(extraBufferCapacity = 64)
     val undo: SharedFlow<UndoEvent> = _undo
 
     fun restore(line: ListLine, status: LineStatus = line.removedFrom?.takeIf { it != LineStatus.REMOVED } ?: LineStatus.NEEDED) {
