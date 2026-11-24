@@ -142,8 +142,9 @@ private fun MessageCard(message: SystemMessage, top: Boolean, modifier: Modifier
         enableDismissFromEndToStart = top,
         backgroundContent = { Box(Modifier) },
     ) {
+        val undo = message.undo
         Snackbar(
-            action = message.undo?.let { undo ->
+            action = if (undo == null) null else {
                 {
                     TextButton(
                         onClick = {
