@@ -101,18 +101,18 @@ app/      Android (Jetpack Compose)
 
 ## בנייה והפצה אוטומטית
 
-[`.github/workflows/android.yml`](.github/workflows/android.yml) עובד בשני מסלולים:
+שני workflows:
 
-**בכל דחיפה ובכל PR (מהיר, בלי APK):**
+**"Android CI/CD"** ([`.github/workflows/android.yml`](.github/workflows/android.yml)) — בכל דחיפה ובכל PR (מהיר, בלי APK):
 1. בדיקות יחידה לדומיין.
 2. בדיקות כללי האבטחה של Firestore, ובדחיפה ל-`main` גם פריסת הכללים, אם הוגדרו הסודות המתאימים.
 
-**בניית APK — רק כשמפעילים ידנית:** ב-GitHub ← Actions ← "Android CI/CD" ← **Run workflow** (אפשר גם מאפליקציית GitHub בטלפון). הבנייה מבצעת:
+**"Build APK"** ([`.github/workflows/build-apk.yml`](.github/workflows/build-apk.yml)) — רק כשמפעילים ידנית: ב-GitHub ← Actions ← "Build APK" ← **Run workflow** ← ענף `main` (אפשר גם מאפליקציית GitHub בטלפון). הבנייה מבצעת:
 1. בדיקות יחידה לדומיין.
 2. Lint ובניית APK חתום.
 3. כשמפעילים על `main`: פרסום **GitHub Release** עם קובץ ה-APK. בטלפון: Releases ← הקובץ העדכני ← התקנה. מענף אחר ה-APK נשמר רק כ-artifact של הריצה.
 
-מספר הגרסה הוא מספר הריצה של אותו workflow, ולכן הוא ממשיך לעלות גם כשרוב הריצות הן בדיקות בלבד.
+מספר הגרסה הוא מספר הריצה של "Build APK" ועוד 200 (`v0.1.201` ואילך), כך שהוא גבוה מכל הגרסאות שנבנו קודם ב-"Android CI/CD" וממשיך לעלות.
 
 ### הגדרות (Settings → Secrets → Actions)
 
