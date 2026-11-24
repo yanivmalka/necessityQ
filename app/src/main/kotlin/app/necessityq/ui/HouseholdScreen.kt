@@ -94,6 +94,8 @@ fun HouseholdScreen(
     modifier: Modifier = Modifier,
     /** Opens a family member's profile (null = a new member). */
     onOpenFamilyMember: (memberId: String?) -> Unit = {},
+    /** Opens the account page ("הבית" ← "חשבון"). */
+    onOpenAccount: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val members by vm.members.collectAsStateWithLifecycle()
@@ -118,7 +120,24 @@ fun HouseholdScreen(
             Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (vm.supportsAccounts) AccountCard(vm, account)
+            // the account has its own page; here only a small row that leads to it
+            if (vm.supportsAccounts) {
+                Row(
+                    Modifier.fillMaxWidth().clip(NqShapes.Panel).clickable(onClickLabel = "לדף החשבון", onClick = onOpenAccount)
+                        .padding(vertical = 6.dp, horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "החשבון שלי" + (account.displayName?.takeIf { it.isNotBlank() }?.let { ": $it" } ?: ""),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                    Text("לדף החשבון ›", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+                }
+            }
             // the family's profiles (who eats, tastes, ratings) are managed here, with the participants
             FamilyCard(vm, onOpenMember = onOpenFamilyMember)
             if (vm.isShared) {

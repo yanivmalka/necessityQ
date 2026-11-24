@@ -335,6 +335,7 @@ private fun Root(vm: AppViewModel) {
                                 Dest.HOUSEHOLD -> HouseholdScreen(
                                     vm, household, s.account, s.userId, modifier,
                                     onOpenFamilyMember = { id -> familyMember = id.orEmpty(); go(Dest.FAMILY_MEMBER, from = Dest.HOUSEHOLD) },
+                                    onOpenAccount = { go(Dest.ACCOUNT, from = Dest.HOUSEHOLD) },
                                 )
                                 Dest.ACCOUNT -> AccountScreen(vm, s.account, modifier)
                                 Dest.SETTINGS -> DisplaySettingsScreen(vm, modifier)
