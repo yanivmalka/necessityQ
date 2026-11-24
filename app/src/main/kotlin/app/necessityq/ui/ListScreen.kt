@@ -909,7 +909,7 @@ private fun StorePromptCard(vm: AppViewModel) {
                 Text("איפה קונים היום?", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 TextButton(onClick = { vm.answerStorePrompt(null, skipped = true) }) { Text("דלג") }
             }
-            Text("לא חובה. עוזר ללמוד את סדר האיסוף בכל חנות. אפשר לשנות בהמשך מהכותרת.", style = MaterialTheme.typography.bodySmall)
+            Text("לא חובה. מציג את המחירים של החנות ולומד את סדר האיסוף בה. אפשר לשנות בהמשך מהכותרת.", style = MaterialTheme.typography.bodySmall)
             StoreChooser(vm, allowNone = false, onChosen = { vm.answerStorePrompt(it) })
         }
     }
@@ -931,24 +931,38 @@ private fun StoreChooser(vm: AppViewModel, allowNone: Boolean, onChosen: (String
     }
     LaunchedEffect(hasPermission) { if (hasPermission) vm.refreshLocation() }
 
+    // one list of stores: every followed branch is a store (with prices); a store without a branch is a manual one
+    // (it still learns the order of picking, but has no prices). Where we stand, by location, comes first.
+    val followedIds by vm.selectedPriceBranches.collectAsStateWithLifecycle()
+    val allBranches by vm.priceBranches.collectAsStateWithLifecycle()
+    val position by vm.userPosition.collectAsStateWithLifecycle()
+    val followed = followedIds.mapNotNull { id -> allBranches.firstOrNull { it.id == id } }
+        .map { b ->
+            val lat = b.latitude
+            val lon = b.longitude
+            b to position?.let { (la, lo) -> if (lat != null && lon != null) app.necessityq.domain.Stores.distanceMeters(la, lo, lat, lon) else null }
+        }
+        .sortedBy { it.second ?: Double.MAX_VALUE }
+    val branchStoreIds = followed.mapNotNull { (b, _) -> vm.storeOfBranch(b, stores)?.id }.toSet()
+    val hereStore = nearby ?: hereBranch?.branch?.let { vm.storeOfBranch(it, stores) }
+    val hereBranchNew = hereBranch?.branch?.takeIf { nearby == null && vm.storeOfBranch(it, stores) == null }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        nearby?.let { near ->
+        hereStore?.let { near ->
             AssistChip(
                 onClick = { onChosen(near.id) },
-                label = { Text("ליד: ${near.name}", fontWeight = FontWeight.Bold) },
+                label = { Text("כאן: ${near.name}", fontWeight = FontWeight.Bold) },
                 leadingIcon = { Icon(Icons.Default.LocationOn, null, Modifier.size(18.dp)) },
             )
         }
-        // not a household store yet, but the coordinates match a chain branch: offer it by name
-        val branchHere = hereBranch?.branch?.takeIf { nearby == null }
-        branchHere?.let { b ->
+        // the coordinates match a chain branch that is not one of the household's stores yet
+        hereBranchNew?.let { b ->
             AssistChip(
                 onClick = { vm.addStoreFromBranch(b)?.let(onChosen) },
                 label = { Text("כאן: ${app.necessityq.domain.BranchLocator.storeName(b)}", fontWeight = FontWeight.Bold) },
                 leadingIcon = { Icon(Icons.Default.LocationOn, null, Modifier.size(18.dp)) },
             )
         }
-        if (hasPermission && nearby == null && branchHere == null) {
+        if (hasPermission && hereStore == null && hereBranchNew == null) {
             AssistChip(
                 onClick = { vm.locate(quiet = false) },
                 enabled = !locating,
@@ -956,36 +970,21 @@ private fun StoreChooser(vm: AppViewModel, allowNone: Boolean, onChosen: (String
                 leadingIcon = { Icon(Icons.Default.LocationOn, null, Modifier.size(18.dp)) },
             )
         }
-        // the branches followed on the prices screen, nearest first: one tap saves it as a household store
-        val followedIds by vm.selectedPriceBranches.collectAsStateWithLifecycle()
-        val allBranches by vm.priceBranches.collectAsStateWithLifecycle()
-        val position by vm.userPosition.collectAsStateWithLifecycle()
-        val storeKeys = stores.map { app.necessityq.domain.HebrewText.matchKey(it.name) }.toSet()
-        val followed = followedIds.mapNotNull { id -> allBranches.firstOrNull { it.id == id } }
-            .filter { it.id != branchHere?.id && app.necessityq.domain.HebrewText.matchKey(app.necessityq.domain.BranchLocator.storeName(it)) !in storeKeys }
-            .map { b ->
-                val lat = b.latitude
-                val lon = b.longitude
-                b to position?.let { (la, lo) -> if (lat != null && lon != null) app.necessityq.domain.Stores.distanceMeters(la, lo, lat, lon) else null }
-            }
-            .sortedBy { it.second ?: Double.MAX_VALUE }
-        followed.forEachIndexed { i, (b, meters) ->
-            val close = i == 0 && meters != null && meters <= 500
-            AssistChip(
+        // the followed branches, nearest first
+        followed.forEach { (b, meters) ->
+            val store = vm.storeOfBranch(b, stores)
+            FilterChip(
+                selected = store != null && store.id == currentId,
                 onClick = { vm.addStoreFromBranch(b)?.let(onChosen) },
-                label = {
-                    Text(
-                        app.necessityq.domain.BranchLocator.storeName(b) + (meters?.let { " · " + distanceLabel(it) } ?: ""),
-                        fontWeight = if (close) FontWeight.Bold else null,
-                    )
-                },
+                label = { Text(app.necessityq.domain.BranchLocator.storeName(b) + (meters?.let { " · " + distanceLabel(it) } ?: "")) },
                 leadingIcon = { Icon(Icons.Default.Storefront, null, Modifier.size(18.dp)) },
             )
         }
-        stores.filter { it.id != nearby?.id }.forEach { store ->
-            FilterChip(selected = store.id == currentId, onClick = { onChosen(store.id) }, label = { Text(store.name) })
+        // stores without a followed branch: manual, without prices
+        stores.filter { it.id !in branchStoreIds && it.id != hereStore?.id }.forEach { store ->
+            FilterChip(selected = store.id == currentId, onClick = { onChosen(store.id) }, label = { Text(store.name + " · בלי מחירים") })
         }
-        AssistChip(onClick = { adding = true }, label = { Text("חנות חדשה כאן") }, leadingIcon = { Icon(Icons.Default.Add, null, Modifier.size(18.dp)) })
+        AssistChip(onClick = { adding = true }, label = { Text("חנות אחרת") }, leadingIcon = { Icon(Icons.Default.Add, null, Modifier.size(18.dp)) })
         if (allowNone && currentId != null) AssistChip(onClick = { onChosen(null) }, label = { Text("ללא חנות") })
         if (!hasPermission) {
             TextButton(onClick = {
@@ -999,7 +998,7 @@ private fun StoreChooser(vm: AppViewModel, allowNone: Boolean, onChosen: (String
         var type by remember { mutableStateOf(StoreType.SUPERMARKET) }
         AlertDialog(
             onDismissRequest = { adding = false },
-            title = { Text("חנות חדשה") },
+            title = { Text("חנות אחרת") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(name, { name = it }, label = { Text("שם (למשל: רמי לוי תלפיות)") }, singleLine = true)
@@ -1007,8 +1006,9 @@ private fun StoreChooser(vm: AppViewModel, allowNone: Boolean, onChosen: (String
                         StoreType.entries.forEach { t -> FilterChip(selected = type == t, onClick = { type = t }, label = { Text(t.label) }) }
                     }
                     Text(
-                        if (hasPermission) "המיקום הנוכחי יישמר כדי להציע את החנות כשתגיעו אליה."
-                        else "בלי הרשאת מיקום החנות תישמר בלי מיקום.",
+                        "חנות שאינה סניף במעקב נשמרת בלי מחירים (סניף עם מחירים מוסיפים בלשונית המחירים). " +
+                            if (hasPermission) "המיקום הנוכחי יישמר כדי להציע את החנות כשתגיעו אליה."
+                            else "בלי הרשאת מיקום החנות תישמר בלי מיקום.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }

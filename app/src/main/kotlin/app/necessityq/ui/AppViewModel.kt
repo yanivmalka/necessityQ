@@ -1086,9 +1086,13 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     /** Makes the followed branch [branchId] the current store (the household's store of that name, saved if new). */
     private fun shopAtBranch(branchId: String) {
         val branch = priceBranches.value.firstOrNull { it.id == branchId } ?: return
+        addStoreFromBranch(branch)?.let { answerStorePrompt(it) }
+    }
+
+    /** The household store that stands for [branch] (same name), if there is one. */
+    fun storeOfBranch(branch: app.necessityq.domain.PriceBranch, stores: List<Store> = this.stores.value): Store? {
         val key = HebrewText.matchKey(app.necessityq.domain.BranchLocator.storeName(branch))
-        val id = stores.value.firstOrNull { HebrewText.matchKey(it.name) == key }?.id ?: addStoreFromBranch(branch) ?: return
-        answerStorePrompt(id)
+        return stores.firstOrNull { HebrewText.matchKey(it.name) == key }
     }
 
     private fun endTrip() {
@@ -1180,10 +1184,12 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun refreshLocation() = locate()
 
     /**
-     * Saves the price branch the user is in as a household store ("רמי לוי תלפיות") at the current
-     * coordinates (the branch's own when there is no fix) and returns its id.
+     * The household store of a price branch ("רמי לוי תלפיות"): one store per branch, so a followed branch and
+     * "the store we shop at" are the same thing. Saved (at the current coordinates, or the branch's own when there
+     * is no fix) the first time it is chosen; afterwards its id is returned.
      */
     fun addStoreFromBranch(branch: app.necessityq.domain.PriceBranch): String? {
+        storeOfBranch(branch)?.let { return it.id }
         val (hid, _, _) = ctx() ?: return null
         // an exactly geocoded branch keeps its own coordinates (it may be chosen from afar, from the
         // followed list); one known only by its city centre takes where the user is shopping now
