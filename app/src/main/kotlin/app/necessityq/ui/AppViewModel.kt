@@ -696,6 +696,27 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         f?.let { app.necessityq.domain.BranchLocator.branchAt(all, it.latitude, it.longitude, it.accuracyMeters) }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    /** The branch the offer was turned down for ("לא עכשיו"): not offered again for it in this run. */
+    private val shopHereDismissed = MutableStateFlow<String?>(null)
+
+    /**
+     * While preparing the list, the location shows a followed branch: "נראה שאתם ב… — לעבור למצב קנייה?",
+     * one tap away from shopping there.
+     */
+    val shopHereOffer: StateFlow<app.necessityq.domain.PriceBranch?> =
+        combine(hereBranch, selectedPriceBranches, mode, shopHereDismissed) { here, followed, m, dismissed ->
+            here?.branch?.takeIf { m == ListMode.PLAN && it.id in followed && it.id != dismissed }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    fun dismissShopHere() { shopHereDismissed.value = shopHereOffer.value?.id }
+
+    /** Into shopping at the branch we are standing in: it becomes the store, and a trip left half-way goes on. */
+    fun shopHere() {
+        val here = shopHereOffer.value ?: return
+        if (tripStops.value.isEmpty()) startTrip(null) else setMode(ListMode.SHOP)
+        addStoreFromBranch(here)?.let { answerStorePrompt(it) }
+    }
+
     /** Starts following the branch the user is in, so its prices are loaded. */
     fun followHereBranch() {
         val here = hereBranch.value?.branch ?: return
@@ -1981,6 +2002,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun onForeground() {
         // back in the app: promotions and stock are checked again when the last check is half an hour old
         refreshOffers()
+        // standing in a followed branch while preparing the list? (offers to switch to shopping)
+        if (mode.value == ListMode.PLAN) locate()
         if (!prefs.autoCheckUpdates) return
         if (System.currentTimeMillis() - lastUpdateCheck < 15 * 60_000L) return
         when (_update.value) {

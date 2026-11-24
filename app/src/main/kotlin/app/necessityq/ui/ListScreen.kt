@@ -524,6 +524,16 @@ fun ListScreen(
             TripStopsRow(tripStops, activeStop, stopCounts, allBranches, onSelect = vm::selectStop)
         }
 
+        // standing in a followed branch while preparing: into shopping there in one tap
+        val shopHere by vm.shopHereOffer.collectAsStateWithLifecycle()
+        if (!shopping) shopHere?.let { branch ->
+            ShopHereBanner(
+                name = app.necessityq.domain.BranchLocator.storeName(branch),
+                onShop = vm::shopHere,
+                onDismiss = vm::dismissShopHere,
+            )
+        }
+
         // Quick add: always open while preparing; behind the + button while shopping
         if (!shopping || addOpen || query.isNotEmpty()) {
             QuickAddField(
@@ -2114,6 +2124,31 @@ private fun PreviewPill(text: String, background: Color, ink: Color, bold: Boole
         style = MaterialTheme.typography.bodySmall,
         maxLines = 1,
     )
+}
+
+/** "נראה שאתם ב… — לעבור למצב קנייה?": the location shows a followed branch while the list is being prepared. */
+@Composable
+private fun ShopHereBanner(name: String, onShop: () -> Unit, onDismiss: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp).clip(NqShapes.Panel)
+            .background(MaterialTheme.colorScheme.primaryContainer).padding(start = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(
+            "נראה שאתם ב$name — לעבור למצב קנייה?",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            modifier = Modifier.weight(1f),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        TextButton(onClick = onShop) { Text("לקנייה", fontWeight = FontWeight.SemiBold) }
+        IconButton(onClick = onDismiss) {
+            Icon(Icons.Default.Close, contentDescription = "לא עכשיו", tint = MaterialTheme.colorScheme.onPrimaryContainer)
+        }
+    }
 }
 
 /** "לבדוק שוב": products saved from a scan, with the price seen then; each goes on the list or away. */
