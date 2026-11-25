@@ -9,81 +9,169 @@ enum class FeatureGroup(val label: String, val hint: String) {
     ADVANCED("למתקדמים", "פרטים נוספים על כל פריט ברשימה."),
 }
 
-/** A part of the app that can be turned off ("הגדרות" ← "מה האפליקציה עושה") and on again at any time. */
-enum class Feature(val label: String, val description: String, val group: FeatureGroup) {
+/**
+ * Where a feature works: in the whole app (a tab, the chat), only while making the list, only in the shop, or in
+ * both stages of the list — each stage then has its own switch (a feature can be on for the list and off in the
+ * shop, or the other way round).
+ */
+enum class FeatureScope { APP, PLAN, SHOP, BOTH }
+
+/**
+ * A part of the app that can be turned off ("הגדרות" ← "יכולות") and on again at any time. [description] is what the
+ * "!" beside its name explains: everything the feature adds.
+ */
+enum class Feature(val label: String, val description: String, val scope: FeatureScope, val group: FeatureGroup) {
     MENU_TAB(
         "לשונית \"תפריט\"",
-        "תפריט שבועי לבני המשפחה, ומתכונים שהמרכיבים שלהם נכנסים לרשימה בנגיעה.",
+        "לשונית בסרגל התחתון לתכנון הארוחות: בני המשפחה ומה כל אחד אוהב, מתכונים (גם מקישור), ותפריט שבועי " +
+            "שממלא את רשימת הקניות במצרכים שחסרים.",
+        FeatureScope.APP,
         FeatureGroup.MEALS,
     ),
     PRICES_TAB(
         "לשונית \"מחירים\"",
-        "בחירת הסניפים שקונים בהם, וחיפוש מחיר של כל מוצר בכל סניף.",
+        "לשונית בסרגל התחתון לבחירת הסניפים שהבית קונה בהם (לפי מיקום או חיפוש), חיפוש מוצר והשוואת המחיר שלו " +
+            "בין הסניפים, והוספה לרשימה מתוצאת החיפוש.",
+        FeatureScope.APP,
         FeatureGroup.SAVING,
     ),
     CHAT(
         "צ'אט פוד",
-        "שיחה על מוצר מסוים עם בני הבית: \"אין קוטג' 5%, לקחת 3%?\" — עם תמונה, הקלטה ותיוג ב-@.",
+        "שיחה על כל מוצר עם בני הבית: הודעות, תמונות והקלטות, תיוג ב-@ וציטוט, וסימן שיחה על אריח המוצר. " +
+            "גם עמוד \"צ'אט פוד\" בלשונית הבית עם כל השיחות.",
+        FeatureScope.APP,
         FeatureGroup.SHARING,
     ),
     RUNNING_LOW(
         "\"כנראה נגמר בקרוב\"",
-        "הצעות בראש הרשימה למה שעומד להיגמר, לפי הקצב שבו הבית קונה אותו (\"בדרך כלל כל 5 ימים\").",
+        "בראש הרשימה: מוצרים שלפי קצב הקנייה של הבית כנראה עומדים להיגמר, עם הוספה בנגיעה או דחייה.",
+        FeatureScope.PLAN,
         FeatureGroup.LEARNING,
     ),
     FREQUENT(
         "\"קונים בדרך כלל\"",
-        "כפתורי הוספה מהירה למוצרים שהבית קונה הכי הרבה, בלי להקליד.",
+        "בראש הרשימה: המוצרים שהבית קונה הכי הרבה, בשתי שורות שנגללות הצידה, להוספה מהירה בנגיעה.",
+        FeatureScope.PLAN,
         FeatureGroup.LEARNING,
     ),
     TRIP_PLAN(
         "תכנון \"איפה הכי משתלם לקנות\"",
-        "לפני היציאה: השוואת הרשימה כולה בין הסניפים שבמעקב (צריך לעקוב אחרי שני סניפים לפחות).",
+        "לפני שיוצאים לקנות (כשיש שני סניפים במעקב ומעלה): בדיקה באיזה סופר הרשימה הכי זולה, האם כדאי לעבור או " +
+            "לפצל בין כמה סופרים, מאיזה סכום חיסכון, ומבצעי מועדון וקופונים.",
+        FeatureScope.PLAN,
         FeatureGroup.SAVING,
     ),
     PRICES(
-        "מחירים על הפריטים וסכום משוער",
-        "המחיר של כל פריט בסניף שלכם, והסכום המשוער של כל הרשימה בתחתית.",
+        "מחירים על האריחים וסכום משוער",
+        "המחיר של כל מוצר על האריח שלו (מהסניף הראשי, או טווח המחירים של המוצרים המתאימים), והסכום המשוער של " +
+            "הרשימה: בתחתית הרשימה, ובקנייה — כמה נשאר לשלם.",
+        FeatureScope.BOTH,
         FeatureGroup.SAVING,
     ),
     PROMOS(
         "מבצעים",
-        "מבצעים על המוצרים שברשימה: על כל פריט עצמו, ובכרטיס מסכם בראש הרשימה.",
+        "על כל מוצר ברשימה שיש עליו מבצע: סמל מתנה בפינת האריח ופס מתחתיו (מה המבצע, המחיר איתו ואיפה). בדף " +
+            "המוצר: איפה המבצע, כמה הוא חוסך ומה התנאים (מועדון, קופון, עד גמר המלאי).",
+        FeatureScope.BOTH,
+        FeatureGroup.SAVING,
+    ),
+    BRANCH_COMPARE(
+        "השוואה בין הסניפים שלך",
+        "כשמוצר יקר או זול באופן בולט בסניף הראשי לעומת שאר הסניפים שבמעקב: סימן ▲/▼ ליד המחיר על האריח, ובדף " +
+            "המוצר אריח \"השוואה לסניפים שלך\" עם המחיר בכל סניף והזול מסומן. אפשר לבחור מאיזה הפרש בשקלים להציג.",
+        FeatureScope.BOTH,
         FeatureGroup.SAVING,
     ),
     RECIPES_ON_LIST(
         "\"מתכונים ברשימה\"",
-        "כרטיס בראש הרשימה עם המתכונים שהמרכיבים שלהם ברשימה: שינוי מנות מעדכן את הכמויות.",
+        "בראש הרשימה: המתכונים שהמצרכים שלהם ברשימה, עם שינוי מספר המנות (והכמויות ברשימה) או הסרת המתכון.",
+        FeatureScope.PLAN,
         FeatureGroup.MEALS,
     ),
     TILE_EXTRAS(
-        "ידית גרירה וסטטיסטיקה על הפריט",
-        "ידית להזזת פריט ברשימה, ומתי נקנה לאחרונה ובאיזו תדירות.",
+        "ידית גרירה וסטטיסטיקה על האריח",
+        "אפשרות להציג על האריח ידית גרירה לסידור הרשימה ביד, ומתי המוצר נקנה לאחרונה ובאיזו תדירות.",
+        FeatureScope.BOTH,
         FeatureGroup.ADVANCED,
     ),
+    ;
+
+    /** Whether this feature has a switch of its own for [mode] (app-wide features have one switch for both). */
+    fun appliesTo(mode: ListMode): Boolean = when (scope) {
+        FeatureScope.APP, FeatureScope.BOTH -> true
+        FeatureScope.PLAN -> mode == ListMode.PLAN
+        FeatureScope.SHOP -> mode == ListMode.SHOP
+    }
+
+    companion object {
+        /** The features of the whole app (not of a stage of the list). */
+        val appWide: List<Feature> get() = entries.filter { it.scope == FeatureScope.APP }
+
+        /** The features that belong to [mode] of the list: its own and those of both stages. */
+        fun of(mode: ListMode): List<Feature> = entries.filter { it.scope != FeatureScope.APP && it.appliesTo(mode) }
+    }
 }
 
 /**
- * The features that are on. The first time the app opens it asks a few questions about the household's habits
- * ([FirstRunAnswers]); the settings also offer three ready choices: [SIMPLE], [RECOMMENDED] and [ALL].
- * Stored as the features turned off, so a feature added in a later version starts on.
+ * The features that are on, for making the list ([plan]) and in the shop ([shop]). An app-wide feature is in both or
+ * in neither. The first time the app opens it asks a few questions about the household's habits ([FirstRunAnswers]);
+ * the settings also offer three ready choices: [SIMPLE], [RECOMMENDED] and [ALL]. Stored as the features turned off,
+ * so a feature added in a later version starts on.
  *
  * Turning a feature off only hides it: every purchase is still recorded, so the suggestions are ready (with all the
  * history) the moment it is turned on again.
  */
-data class Features(val on: Set<Feature>) {
-    operator fun contains(feature: Feature): Boolean = feature in on
+data class Features(val plan: Set<Feature>, val shop: Set<Feature> = plan) {
+    /** On anywhere: app-wide features at all, a feature of one stage in that stage, one of both stages in either. */
+    operator fun contains(feature: Feature): Boolean = when (feature.scope) {
+        FeatureScope.APP, FeatureScope.PLAN -> feature in plan
+        FeatureScope.SHOP -> feature in shop
+        FeatureScope.BOTH -> feature in plan || feature in shop
+    }
 
-    fun with(feature: Feature, enabled: Boolean): Features = Features(if (enabled) on + feature else on - feature)
+    /** On for [mode] of the list (app-wide features: on at all). */
+    fun isOn(feature: Feature, mode: ListMode): Boolean = when (feature.scope) {
+        FeatureScope.APP -> feature in plan
+        FeatureScope.PLAN -> mode == ListMode.PLAN && feature in plan
+        FeatureScope.SHOP -> mode == ListMode.SHOP && feature in shop
+        FeatureScope.BOTH -> feature in (if (mode == ListMode.SHOP) shop else plan)
+    }
 
-    /** What a tile may show with these features: no price, chat, drag handle or statistics when they are off. */
-    fun tile(layout: TileLayout): TileLayout = TileLayout(layout.shown - hiddenElements())
+    /** Turned on or off everywhere it applies. */
+    fun with(feature: Feature, enabled: Boolean): Features =
+        Features(if (enabled) plan + feature else plan - feature, if (enabled) shop + feature else shop - feature)
 
-    /** The parts of a tile that a feature that is off keeps off the list (shown greyed in the tile editor). */
-    fun hiddenElements(): Set<TileElement> = TileElement.entries.filter { featureFor(it)?.let { f -> f !in on } == true }.toSet()
+    /** Turned on or off for [mode] only; an app-wide feature changes everywhere. */
+    fun with(feature: Feature, mode: ListMode, enabled: Boolean): Features = when {
+        feature.scope == FeatureScope.APP -> with(feature, enabled)
+        mode == ListMode.SHOP -> copy(shop = if (enabled) shop + feature else shop - feature)
+        else -> copy(plan = if (enabled) plan + feature else plan - feature)
+    }
 
-    /** The names of the features that are off, separated by commas. */
-    fun encodeOff(): String = Feature.entries.filter { it !in on }.joinToString(",") { it.name }
+    /**
+     * What a tile of [mode] may show with these features: no price, chat, drag handle or statistics when they are off;
+     * no check circle while making the list (an item is marked bought only in the shop).
+     */
+    fun tile(layout: TileLayout, mode: ListMode): TileLayout {
+        var shown = layout.shown.filter { it.availableIn(mode) }.toSet()
+        TileElement.entries.forEach { e -> e.feature?.let { f -> if (!isOn(f, mode)) shown = shown - e } }
+        return TileLayout(shown)
+    }
+
+    /** [layout] saved for [mode]: the features its parts need are turned on there (showing the price turns prices on). */
+    fun allowing(layout: TileLayout, mode: ListMode): Features {
+        var out = this
+        layout.shown.filter { it.availableIn(mode) }.mapNotNull { it.feature }.distinct().forEach { f ->
+            if (!out.isOn(f, mode)) out = out.with(f, mode, true)
+        }
+        return out
+    }
+
+    /** The names of the features that are off while making the list (and app-wide), separated by commas. */
+    fun encodeOff(): String = Feature.entries.filter { it !in plan }.joinToString(",") { it.name }
+
+    /** The names of the features that are off in the shop, separated by commas. */
+    fun encodeShopOff(): String = Feature.entries.filter { it !in shop }.joinToString(",") { it.name }
 
     companion object {
         val ALL = Features(Feature.entries.toSet())
@@ -94,21 +182,21 @@ data class Features(val on: Set<Feature>) {
          */
         val SIMPLE = Features(setOf(Feature.RUNNING_LOW))
 
-        /** "מומלץ": what helps almost every household — the suggestions and the prices — without the menu, chat or extras. */
+        /** "מומלץ": what helps almost every household — the suggestions, prices and promotions — without the menu, chat or extras. */
         val RECOMMENDED = Features(setOf(Feature.RUNNING_LOW, Feature.FREQUENT, Feature.PRICES, Feature.PROMOS))
 
-        /** The feature that, when off, keeps [element] off the tile (null: the element is always available). */
-        fun featureFor(element: TileElement): Feature? = when (element) {
-            TileElement.PRICE -> Feature.PRICES
-            TileElement.CHAT -> Feature.CHAT
-            TileElement.DRAG, TileElement.LAST_BOUGHT, TileElement.FREQUENCY -> Feature.TILE_EXTRAS
-            else -> null
-        }
+        private fun off(text: String?): Set<Feature> =
+            text.orEmpty().split(',').mapNotNull { n -> Feature.entries.firstOrNull { it.name == n.trim() } }.toSet()
 
-        /** From [encodeOff]; unknown names (from a newer version) are ignored. */
-        fun decodeOff(text: String?): Features {
-            val off = text.orEmpty().split(',').mapNotNull { n -> Feature.entries.firstOrNull { it.name == n.trim() } }.toSet()
-            return Features(Feature.entries.toSet() - off)
+        /**
+         * From [encodeOff] and [encodeShopOff]; unknown names (from a newer version) are ignored. Before the shop had
+         * switches of its own ([shopText] null), it follows the list. App-wide features follow [text].
+         */
+        fun decodeOff(text: String?, shopText: String? = null): Features {
+            val plan = Feature.entries.toSet() - off(text)
+            val shop = if (shopText == null) plan else Feature.entries.toSet() - off(shopText)
+            val app = Feature.appWide.toSet()
+            return Features(plan, (shop - app) + (plan intersect app))
         }
     }
 }
@@ -136,7 +224,7 @@ enum class FirstRunQuestion(
         "המחיר של כל פריט בסניף שלכם, הסכום המשוער של הסל, מבצעים, ואיפה הכי זול לקנות את כל הרשימה.",
         "לא תראו כמה הסל עולה ואיפה זול יותר.",
         recommended = false,
-        features = setOf(Feature.PRICES_TAB, Feature.PRICES, Feature.PROMOS, Feature.TRIP_PLAN),
+        features = setOf(Feature.PRICES_TAB, Feature.PRICES, Feature.PROMOS, Feature.TRIP_PLAN, Feature.BRANCH_COMPARE),
     ),
     MEALS(
         "מתכננים ארוחות או מבשלים לפי מתכונים?",

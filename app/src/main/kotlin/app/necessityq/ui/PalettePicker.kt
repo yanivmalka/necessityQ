@@ -31,7 +31,7 @@ import app.necessityq.platform.AppIcons
 
 /**
  * "ערכת צבעים": the palettes side by side, each as a small sample of its ground, card and main colour. Choosing one
- * also recolours the launcher icon ([AppIcons]) and the opening animation.
+ * recolours the app at once; the launcher icon ([AppIcons]) takes the colour when the user leaves the app.
  */
 @Composable
 fun PalettePicker(vm: AppViewModel) {
@@ -40,8 +40,8 @@ fun PalettePicker(vm: AppViewModel) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("ערכת צבעים", style = MaterialTheme.typography.titleMedium)
         Text(
-            "הצבע הראשי של האפליקציה ושל הרקע, בתצוגה בהירה וכהה, וגם של סמל האפליקציה ושל מסך הפתיחה. " +
-                "כתום של \"נגמר\" ומבצעים נשאר בכל הערכות.",
+            "הצבע הראשי של האפליקציה ושל הרקע, בתצוגה בהירה וכהה, וגם של מסך הפתיחה. הצבעים מתחלפים מיד; " +
+                "סמל האפליקציה במסך הבית מקבל את הצבע כשיוצאים מהאפליקציה. כתום של \"נגמר\" ומבצעים נשאר בכל הערכות.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -53,7 +53,7 @@ fun PalettePicker(vm: AppViewModel) {
                 val selected = p == current
                 Column(
                     Modifier.width(76.dp).clip(RoundedCornerShape(12.dp)).clickable {
-                        if (!selected) { vm.setPalette(p); AppIcons.matchPalette(context, p) }
+                        if (!selected) { vm.setPalette(p); AppIcons.requestPalette(context, p) }
                     }.padding(vertical = 6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {

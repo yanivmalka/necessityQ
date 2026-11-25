@@ -151,7 +151,7 @@ private fun InfoBlock(title: String, text: String, accent: androidx.compose.ui.g
 private fun Summary(answers: FirstRunAnswers) {
     Text("זה מה שהדלקנו", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
     val on = answers.features()
-    if (on.on.isEmpty()) {
+    if (on.plan.isEmpty()) {
         Text("רשימת קניות משותפת בלבד, בלי הצעות ובלי מחירים.", style = MaterialTheme.typography.bodyLarge)
     }
     app.necessityq.domain.Feature.entries.filter { it in on }.forEach { f ->

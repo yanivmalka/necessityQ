@@ -37,22 +37,34 @@ import app.necessityq.platform.AppIcon
 import app.necessityq.platform.AppIcons
 
 /**
- * "סמל האפליקציה": the icon shapes to choose from, each in the app's colour palette, the current one ringed. Choosing
- * one switches the launcher icon; choosing another palette recolours it ([PalettePicker]).
+ * "סמל האפליקציה": the icon shapes to choose from, each in the app's colour palette, the chosen one ringed. Choosing one
+ * (or another palette, [PalettePicker]) switches the launcher icon once the user leaves the app ([AppIcons]).
  */
 @Composable
 fun AppIconPicker(vm: AppViewModel) {
     val context = LocalContext.current
     val palette by vm.palette.collectAsStateWithLifecycle()
     var current by remember { mutableStateOf(AppIcons.current(context)) }
+    var pending by remember { mutableStateOf(AppIcons.hasPending(context)) }
+    // a palette chosen meanwhile is waiting too
+    androidx.compose.runtime.LaunchedEffect(palette) { pending = AppIcons.hasPending(context) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("סמל האפליקציה", style = MaterialTheme.typography.titleMedium)
         Text(
-            "הסמל שמופיע במסך הבית של הטלפון, בצבע של ערכת הצבעים. אחרי ההחלפה ייתכן שיעברו כמה שניות עד שהסמל יתעדכן, " +
-                "ובחלק מהטלפונים צריך להוסיף את קיצור הדרך למסך הבית מחדש.",
+            "הסמל שמופיע במסך הבית של הטלפון, בצבע של ערכת הצבעים. הסמל מתחלף כשיוצאים מהאפליקציה (ולא תוך כדי " +
+                "שימוש, כי החלפת הסמל סוגרת אותה). ייתכן שיעברו כמה שניות עד שהסמל יתעדכן, ובחלק מהטלפונים צריך " +
+                "להוסיף את קיצור הדרך למסך הבית מחדש.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (pending) {
+            Text(
+                "הסמל החדש יופיע במסך הבית אחרי שתצאו מהאפליקציה.",
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
         Row(
             Modifier.fillMaxWidth().fadingHorizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -61,7 +73,7 @@ fun AppIconPicker(vm: AppViewModel) {
                 val selected = icon == current
                 Column(
                     Modifier.width(76.dp).clip(RoundedCornerShape(12.dp)).clickable {
-                        if (!selected) { AppIcons.set(context, icon, palette); current = icon }
+                        if (!selected) { AppIcons.request(context, icon, palette); current = icon; pending = AppIcons.hasPending(context) }
                     }.padding(vertical = 6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {

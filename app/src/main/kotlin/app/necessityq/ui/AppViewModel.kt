@@ -591,7 +591,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun setFeatures(value: app.necessityq.domain.Features) {
         val now = System.currentTimeMillis()
         // a feature just turned on is not offered to be hidden before it had its month
-        value.on.filter { it !in features.value }.forEach { prefs.markEnabled(it, now) }
+        app.necessityq.domain.Feature.entries.filter { it in value && it !in features.value }.forEach { prefs.markEnabled(it, now) }
         prefs.features = value
         features.value = value
         featuresChosen.value = true
@@ -626,7 +626,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
      * the hints and suggestions as on a new install. The list, the household and the history are not touched.
      */
     fun startFirstRunReplay() {
-        if (firstRunReplay.value == null) prefs.replayBackup = features.value.encodeOff()
+        if (firstRunReplay.value == null) prefs.replayBackup = features.value.encodeOff() + "\n" + features.value.encodeShopOff()
         prefs.firstRunReplay = FirstRunReplay.ONBOARDING.name
         prefs.swipeHintSeen = 0
         prefs.advisor = app.necessityq.domain.AdvisorState(since = System.currentTimeMillis())
@@ -651,7 +651,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         prefs.replayBackup = null
         firstRunReplay.value = null
         if (restore && backup != null) {
-            val before = app.necessityq.domain.Features.decodeOff(backup)
+            val parts = backup.split('\n')
+            val before = app.necessityq.domain.Features.decodeOff(parts[0], parts.getOrNull(1))
             prefs.features = before
             features.value = before
         }
@@ -756,6 +757,16 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun noteItemPageClosed(openedAtMillis: Long) {
         val now = System.currentTimeMillis()
         if (now - openedAtMillis < 2_500L) prefs.addUsageEvent("quick_close", now)
+    }
+
+    /**
+     * Saves what the tiles of [mode] show. A part shown there whose feature is off (the price, with prices off) turns
+     * that feature on for [mode], so what was chosen is what the list shows.
+     */
+    fun saveTile(mode: app.necessityq.domain.ListMode, layout: app.necessityq.domain.TileLayout) {
+        setDisplay(display.value.withTile(mode, layout))
+        val allowed = features.value.allowing(layout, mode)
+        if (allowed != features.value) setFeatures(allowed)
     }
 
     /** The swipe hint ("משכו שמאלה…") is shown the first three times the list opens with items. */

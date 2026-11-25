@@ -61,11 +61,22 @@ data class DisplayOptions(
     val showBought: Boolean = true,
     /** Prices of products sold by weight: per kilo or per 100 grams. */
     val weightUnit: app.necessityq.domain.WeightPriceUnit = app.necessityq.domain.WeightPriceUnit.KILO,
+    /** What a swipe to each side does while making the list. */
+    val planSwipe: app.necessityq.domain.SwipeActions = app.necessityq.domain.SwipeActions.defaultFor(ListMode.PLAN),
+    /** What a swipe to each side does in the shop. */
+    val shopSwipe: app.necessityq.domain.SwipeActions = app.necessityq.domain.SwipeActions.defaultFor(ListMode.SHOP),
+    /** "השוואה בין הסניפים שלך" is shown from a gap of this many shekels (0 = whenever it is notable). */
+    val compareMinShekels: Int = 0,
 ) {
     fun tile(mode: ListMode): TileLayout = if (mode == ListMode.SHOP) shopTile else planTile
 
     fun withTile(mode: ListMode, layout: TileLayout): DisplayOptions =
         if (mode == ListMode.SHOP) copy(shopTile = layout) else copy(planTile = layout)
+
+    fun swipe(mode: ListMode): app.necessityq.domain.SwipeActions = (if (mode == ListMode.SHOP) shopSwipe else planSwipe).allowedIn(mode)
+
+    fun withSwipe(mode: ListMode, actions: app.necessityq.domain.SwipeActions): DisplayOptions =
+        if (mode == ListMode.SHOP) copy(shopSwipe = actions) else copy(planSwipe = actions)
 }
 
 /** Small device-local preferences: theme, sort, display toggles, current store, read markers. */
@@ -87,8 +98,9 @@ class AppPrefs(context: Context) {
 
     /** Which features are on ("הגדרות" ← "יכולות"). */
     var features: app.necessityq.domain.Features
-        get() = app.necessityq.domain.Features.decodeOff(p.getString("features_off", null))
-        set(v) = p.edit().putString("features_off", v.encodeOff()).putBoolean("features_chosen", true).apply()
+        get() = app.necessityq.domain.Features.decodeOff(p.getString("features_off", null), p.getString("features_shop_off", null))
+        set(v) = p.edit().putString("features_off", v.encodeOff()).putString("features_shop_off", v.encodeShopOff())
+            .putBoolean("features_chosen", true).apply()
 
     /**
      * Whether the first-run questions were answered. Someone who used the app before the questions existed is not
@@ -180,6 +192,9 @@ class AppPrefs(context: Context) {
             showBought = p.getBoolean("d_bought", true),
             weightUnit = runCatching { app.necessityq.domain.WeightPriceUnit.valueOf(p.getString("d_weight_unit", null) ?: "") }
                 .getOrDefault(app.necessityq.domain.WeightPriceUnit.KILO),
+            planSwipe = swipeActions(ListMode.PLAN),
+            shopSwipe = swipeActions(ListMode.SHOP),
+            compareMinShekels = p.getInt("d_compare_min", 0),
         )
         set(v) = p.edit()
             .putString("d_rec_detail", v.recommendationDetail.name).putBoolean("d_fav", v.showFavorite)
@@ -187,7 +202,20 @@ class AppPrefs(context: Context) {
             .putString("tile_" + ListMode.SHOP.name, v.shopTile.encode())
             .putBoolean("d_total", v.showTotal)
             .putBoolean("d_chilled", v.chilledLast).putString("d_tap", v.tapMode.name)
-            .putBoolean("d_bought", v.showBought).putString("d_weight_unit", v.weightUnit.name).apply()
+            .putBoolean("d_bought", v.showBought).putString("d_weight_unit", v.weightUnit.name)
+            .putString("swipe_left_" + ListMode.PLAN.name, v.planSwipe.left.name)
+            .putString("swipe_right_" + ListMode.PLAN.name, v.planSwipe.right.name)
+            .putString("swipe_left_" + ListMode.SHOP.name, v.shopSwipe.left.name)
+            .putString("swipe_right_" + ListMode.SHOP.name, v.shopSwipe.right.name)
+            .putInt("d_compare_min", v.compareMinShekels).apply()
+
+    private fun swipeActions(mode: ListMode): app.necessityq.domain.SwipeActions {
+        val default = app.necessityq.domain.SwipeActions.defaultFor(mode)
+        return app.necessityq.domain.SwipeActions(
+            app.necessityq.domain.SwipeChoice.decode(p.getString("swipe_left_" + mode.name, null), default.left),
+            app.necessityq.domain.SwipeChoice.decode(p.getString("swipe_right_" + mode.name, null), default.right),
+        )
+    }
 
     /** Before it was one choice, three checkboxes: the reason won when it was on. */
     private fun recommendationDetail(): RecommendationDetail {

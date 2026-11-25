@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -166,6 +167,10 @@ fun ItemSheet(
     val scrolled by remember { androidx.compose.runtime.derivedStateOf { scroll.value > 0 } }
     val productName = line?.name ?: stats?.identity?.name ?: itemName
     val productVariant = line?.variant ?: stats?.identity?.variant
+    val mode by vm.mode.collectAsStateWithLifecycle()
+    val features by vm.features.collectAsStateWithLifecycle()
+    /** "מוצרים נוספים" (⋮): the branch's products by the item's name, in a floating panel. */
+    var showProducts by remember(itemId) { mutableStateOf(false) }
 
     // a full page (not a sheet): it closes only with the back arrow or the system back, never by scrolling
     SlidingPageDialog(pageWindow) {
@@ -212,6 +217,12 @@ fun ItemSheet(
                             leadingIcon = { Icon(if (favorite) Icons.Default.StarBorder else Icons.Default.Star, null) },
                             onClick = { vm.toggleFavorite(itemId); menu = false },
                         )
+                        // the branch's products that carry the item's name, with the companies to choose from
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("הצגת מוצרים נוספים") },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.List, null) },
+                            onClick = { showProducts = true; menu = false },
+                        )
                     }
                 }
             }
@@ -235,13 +246,16 @@ fun ItemSheet(
                 .fadingVerticalScroll(scroll).padding(horizontal = 16.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            // first, in one row: bought, missing (a toggle — filled while marked), remove, and the product's צ'אט פוד
+            // first, in one row: bought (in the shop), missing (a toggle — filled while marked), remove, and the product's צ'אט פוד
             val compact = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 6.dp)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (line != null) {
-                    Button(onClick = { vm.checkOff(line); pageWindow.close() }, contentPadding = compact) {
-                        Icon(Icons.Default.Check, null, Modifier.padding(end = 4.dp).size(18.dp))
-                        Text("נקנה", maxLines = 1, softWrap = false)
+                    // an item is marked bought only in the shop, never while making the list
+                    if (mode == app.necessityq.domain.ListMode.SHOP) {
+                        Button(onClick = { vm.checkOff(line); pageWindow.close() }, contentPadding = compact) {
+                            Icon(Icons.Default.Check, null, Modifier.padding(end = 4.dp).size(18.dp))
+                            Text("נקנה", maxLines = 1, softWrap = false)
+                        }
                     }
                     val missingContent: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
                         Icon(Icons.Default.ReportProblem, null, Modifier.padding(end = 4.dp).size(18.dp))
@@ -265,7 +279,6 @@ fun ItemSheet(
                     Button(onClick = { vm.addByName(itemName) }, contentPadding = compact) { Text("הוספה לרשימה", maxLines = 1, softWrap = false) }
                 }
                 // צ'אט פוד can be turned off (הגדרות ← יכולות)
-                val features by vm.features.collectAsStateWithLifecycle()
                 if (app.necessityq.domain.Feature.CHAT in features) {
                     OutlinedButton(
                         onClick = { chat = itemId to (line?.displayName ?: itemName) },
@@ -277,11 +290,17 @@ fun ItemSheet(
                     }
                 }
             }
-            // then: the products that can be bought for it and their prices, with the brand chooser
+            // then: what it costs at the branch (the products themselves are in "מוצרים נוספים", ⋮)
             val priceInfo = rememberItemPriceInfo(vm, itemId, productName, productVariant)
             BranchPriceSection(vm, itemId = itemId, info = priceInfo)
             // the chosen product at every followed branch, like a stock ticker
             BranchQuotesStrip(vm, chosen = priceInfo?.preferred)
+            // promotions on it at the followed branches: where and how much (the gift on its tile)
+            if (features.isOn(app.necessityq.domain.Feature.PROMOS, mode)) ItemPromotions(vm, itemId)
+            // how it compares with the household's other branches, from the gap chosen in the settings
+            if (features.isOn(app.necessityq.domain.Feature.BRANCH_COMPARE, mode)) {
+                BranchComparisonTile(vm, itemId = itemId, name = productName, variant = productVariant, info = priceInfo)
+            }
 
             HorizontalDivider()
             if (line != null) {
@@ -375,6 +394,14 @@ fun ItemSheet(
             androidx.compose.foundation.layout.Spacer(Modifier.padding(bottom = 8.dp))
         }
       }
+    }
+
+    if (showProducts) {
+        ProductsPanel(
+            vm, itemId = itemId, title = line?.displayName ?: itemName,
+            info = rememberItemPriceInfo(vm, itemId, productName, productVariant),
+            onDismiss = { showProducts = false },
+        )
     }
 
     chat?.let { (id, name) ->
@@ -774,19 +801,15 @@ private fun rememberItemPriceInfo(vm: AppViewModel, itemId: String, name: String
 
 /**
  * What the item costs at the household's primary branch, first on the product page: the basic price (per unit, or per
- * kilo / 100 g by weight), the brand chooser — one line that scrolls sideways, the brands most of the products carry
- * first — and the matching products with their prices in a block of their own that scrolls up and down, rather than a
- * long list down the page. Choosing an exact product is optional.
+ * kilo / 100 g by weight) and the chosen product, when there is one. The matching products themselves, with the
+ * company chooser, are in a floating panel opened from ⋮ ← "הצגת מוצרים נוספים" ([ProductsPanel]).
  */
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun BranchPriceSection(vm: AppViewModel, itemId: String, info: app.necessityq.domain.ItemPriceInfo?) {
     val primary by vm.primaryBranch.collectAsStateWithLifecycle()
     val loaded by vm.branchPrices.collectAsStateWithLifecycle()
     val branch = primary ?: return
     val unit = LocalWeightPriceUnit.current
-    var brand by remember(itemId) { mutableStateOf<String?>(null) }
-    var pct by remember(itemId) { mutableStateOf<String?>(null) }
 
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text("מחיר ב${branch.title}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
@@ -801,50 +824,201 @@ private fun BranchPriceSection(vm: AppViewModel, itemId: String, info: app.neces
             },
             style = MaterialTheme.typography.bodyMedium,
         )
-    }
-    if (info == null || info.candidates.isEmpty()) return
-
-    val brands = remember(info) { app.necessityq.domain.ItemPrices.brands(info.candidates) }
-    val percents = remember(info) { app.necessityq.domain.ItemPrices.percents(info.candidates) }
-    if (percents.size > 1) {
-        Row(Modifier.fillMaxWidth().fadingHorizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            percents.forEach { p -> FilterChip(selected = pct == p, onClick = { pct = if (pct == p) null else p }, label = { Text(p) }) }
+        if (info != null && info.candidates.isNotEmpty()) {
+            Text(
+                if (info.preferred != null) "המוצר שבחרתם מוצג ברשימה במקום הטווח. מוצרים אחרים: ⋮ ← הצגת מוצרים נוספים."
+                else "בחירת מוצר מדויק (לא חובה): ⋮ ← הצגת מוצרים נוספים.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
-    if (brands.size > 1) {
-        // the companies: the common ones first, then the less known; one line that scrolls sideways
-        val brandRow = androidx.compose.foundation.lazy.rememberLazyListState()
-        androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp), state = brandRow, modifier = Modifier.fillMaxWidth().fadingEdges(brandRow, horizontal = true)) {
-            item { FilterChip(selected = brand == null, onClick = { brand = null }, label = { Text("כל החברות") }) }
-            items(brands, key = { it }) { b ->
-                FilterChip(selected = brand == b, onClick = { brand = if (brand == b) null else b }, label = { Text(b) })
-            }
-        }
-    }
-    val filtered = info.candidates.filter { c ->
-        (brand == null || c.brand.trim() == brand) && (pct == null || app.necessityq.domain.ItemPrices.hasPercent(c, pct!!))
-    }
-    // the products scroll up and down in a block of their own, with no visible frame — only the edges fade out
-    // where there is more to scroll to
-    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-    Box(Modifier.fillMaxWidth().heightIn(max = 300.dp).fadingEdges(listState, horizontal = false)) {
-        LazyColumn(Modifier.fillMaxWidth(), state = listState) {
-            items(filtered, key = { it.code }) { c ->
-                val chosen = info.preferred?.code == c.code
-                BranchProductRow(c, chosen, onChoose = { vm.setPreferredProduct(itemId, if (chosen) null else c.code) })
-            }
-            if (filtered.isEmpty()) item {
-                Text("אין מוצרים לבחירה הזו", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(8.dp))
-            }
-        }
-    }
-    Text(
-        if (info.preferred != null) "המוצר שבחרתם מוצג ברשימה במקום הטווח." else "בחירת מוצר מדויק היא לא חובה — המוצר שתבחרו יוצג ברשימה במקום הטווח.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    if (info.preferred != null) {
+    if (info?.preferred != null) {
         androidx.compose.material3.TextButton(onClick = { vm.setPreferredProduct(itemId, null) }) { Text("ביטול הבחירה — הצגת טווח בלבד") }
+    }
+}
+
+/**
+ * "הצגת מוצרים נוספים": the branch's products that carry the item's name, in a floating panel over the product page.
+ * At its top the company chooser — one line that scrolls sideways, the companies most of the products carry first —
+ * (and the fat percentages, when they differ), under it the products with their prices; choosing one is optional
+ * and it is then shown on the list instead of the range.
+ */
+@Composable
+private fun ProductsPanel(
+    vm: AppViewModel,
+    itemId: String,
+    title: String,
+    info: app.necessityq.domain.ItemPriceInfo?,
+    onDismiss: () -> Unit,
+) {
+    val primary by vm.primaryBranch.collectAsStateWithLifecycle()
+    var brand by remember(itemId) { mutableStateOf<String?>(null) }
+    var pct by remember(itemId) { mutableStateOf<String?>(null) }
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().heightIn(max = 560.dp).clip(NqShapes.Tile)
+                .background(MaterialTheme.colorScheme.surface).padding(vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("מוצרים בשם \"$title\"", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 2)
+                    primary?.let {
+                        Text("ב${it.title}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "סגירה") }
+            }
+            if (info == null || info.candidates.isEmpty()) {
+                Text(
+                    if (primary == null) "בחרו סניף בלשונית המחירים כדי לראות מוצרים ומחירים." else "לא נמצאו מוצרים מתאימים בסניף.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            } else {
+            val brands = remember(info) { app.necessityq.domain.ItemPrices.brands(info.candidates) }
+            val percents = remember(info) { app.necessityq.domain.ItemPrices.percents(info.candidates) }
+            if (brands.size > 1) {
+                // the companies: the common ones first, then the less known; one line that scrolls sideways
+                val brandRow = androidx.compose.foundation.lazy.rememberLazyListState()
+                androidx.compose.foundation.lazy.LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                    state = brandRow,
+                    modifier = Modifier.fillMaxWidth().fadingEdges(brandRow, horizontal = true),
+                ) {
+                    item { FilterChip(selected = brand == null, onClick = { brand = null }, label = { Text("כל החברות") }) }
+                    items(brands, key = { it }) { b ->
+                        FilterChip(selected = brand == b, onClick = { brand = if (brand == b) null else b }, label = { Text(b) })
+                    }
+                }
+            }
+            if (percents.size > 1) {
+                Row(
+                    Modifier.fillMaxWidth().fadingHorizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    percents.forEach { p -> FilterChip(selected = pct == p, onClick = { pct = if (pct == p) null else p }, label = { Text(p) }) }
+                }
+            }
+            val filtered = info.candidates.filter { c ->
+                (brand == null || c.brand.trim() == brand) && (pct == null || app.necessityq.domain.ItemPrices.hasPercent(c, pct!!))
+            }
+            // the products scroll up and down under the choosers, the edges fading where there is more
+            val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+            Box(Modifier.fillMaxWidth().weight(1f, fill = false).fadingEdges(listState, horizontal = false)) {
+                LazyColumn(Modifier.fillMaxWidth(), state = listState, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp)) {
+                    items(filtered, key = { it.code }) { c ->
+                        val chosen = info.preferred?.code == c.code
+                        BranchProductRow(c, chosen, onChoose = { vm.setPreferredProduct(itemId, if (chosen) null else c.code) })
+                    }
+                    if (filtered.isEmpty()) item {
+                        Text("אין מוצרים לבחירה הזו", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(8.dp))
+                    }
+                }
+            }
+            Text(
+                if (info.preferred != null) "המוצר שבחרתם מוצג ברשימה במקום הטווח. נגיעה בו שוב מבטלת את הבחירה."
+                else "בחירת מוצר מדויק היא לא חובה — המוצר שתבחרו יוצג ברשימה במקום הטווח.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+            }
+        }
+    }
+}
+
+/**
+ * The item's promotions at the followed branches (the gift on its tile): per branch, what the promotion is, the
+ * price with it against the regular price, and what it takes (a club, a coupon, until stock runs out).
+ */
+@Composable
+private fun ItemPromotions(vm: AppViewModel, itemId: String) {
+    val offers by vm.promoOffers.collectAsStateWithLifecycle()
+    val all by vm.priceBranches.collectAsStateWithLifecycle()
+    val mine = offers.filter { it.itemId == itemId }
+    if (mine.isEmpty()) return
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        PromoGift()
+        androidx.compose.foundation.layout.Spacer(Modifier.width(8.dp))
+        Text("מבצעים על המוצר", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+    }
+    PromoOfferList(mine, emptyList(), all, title = null)
+}
+
+/**
+ * "השוואה לסניפים שלך" on the product page: the item here against the household's other followed branches (by the
+ * chosen product's barcode, the products both sell, or the typical prices) — shown from the gap (₪) chosen in the
+ * settings (הגדרות ← פיצ'רים ← השוואה בין הסניפים שלך).
+ */
+@Composable
+private fun BranchComparisonTile(vm: AppViewModel, itemId: String, name: String, variant: String?, info: app.necessityq.domain.ItemPriceInfo?) {
+    val primary by vm.primaryBranch.collectAsStateWithLifecycle()
+    val loaded by vm.branchPrices.collectAsStateWithLifecycle()
+    val comparisons by vm.itemComparisons.collectAsStateWithLifecycle()
+    val followed by vm.selectedPriceBranches.collectAsStateWithLifecycle()
+    val allBranches by vm.priceBranches.collectAsStateWithLifecycle()
+    val display by vm.display.collectAsStateWithLifecycle()
+    val branch = primary ?: return
+    val comparedFallback by produceState<app.necessityq.domain.PriceComparison?>(null, loaded, info, comparisons, itemId) {
+        value = if (comparisons[itemId] != null || info == null) null else vm.comparisonFor(itemId, name, variant)
+    }
+    val comparison = comparisons[itemId] ?: comparedFallback
+    when {
+        comparison != null -> if (comparison.reaches(display.compareMinShekels)) BranchComparison(comparison, allBranches)
+        info != null && followed.size > 1 && followed.any { it != branch.id && !loaded.containsKey(it) } ->
+            Text("טוען את המחירים של הסניפים האחרים שלך להשוואה…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/**
+ * The item here against the household's other followed branches: a verdict pill (significantly dearer / cheaper,
+ * or about the same), then each branch's price with the cheapest marked.
+ */
+@Composable
+private fun BranchComparison(c: app.necessityq.domain.PriceComparison, branches: List<app.necessityq.domain.PriceBranch>) {
+    fun title(id: String) = branches.firstOrNull { it.id == id }?.title ?: id
+    val unit = LocalWeightPriceUnit.current
+    fun price(q: app.necessityq.domain.BranchPriceRange): String {
+        val r = c.shown(q, unit)
+        return app.necessityq.domain.PriceData.formatRange(r.low, r.high) + if (c.unitKilos != null) " ${unit.label}" else ""
+    }
+    val cheapest = c.cheapestBranchId
+    Column(
+        Modifier.fillMaxWidth().clip(NqShapes.Panel).background(MaterialTheme.colorScheme.surfaceVariant).padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("השוואה לסניפים שלך", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            PriceComparisonPill(c)
+        }
+        (listOf(c.here) + c.others).forEach { q ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    title(q.branchId),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = if (q.branchId == c.branchId) FontWeight.Bold else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (q.branchId == cheapest && c.others.isNotEmpty()) {
+                    Text("הזול  ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                }
+                Text(price(q), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        Text(
+            when (c.basis) {
+                app.necessityq.domain.CompareBasis.SAME_PRODUCT -> "לפי אותו מוצר (ברקוד) בכל סניף"
+                app.necessityq.domain.CompareBasis.SHARED_PRODUCTS -> "לפי המוצרים שנמכרים גם כאן וגם בסניפים האחרים"
+                app.necessityq.domain.CompareBasis.TYPICAL -> "לפי המחיר הטיפוסי של המוצרים המתאימים בכל סניף"
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

@@ -223,8 +223,6 @@ fun ListScreen(
     val tripAssignment by vm.tripAssignment.collectAsStateWithLifecycle()
     val activeStop by vm.activeStop.collectAsStateWithLifecycle()
     val promoOffers by vm.promoOffers.collectAsStateWithLifecycle()
-    val basketOffers by vm.basketOffers.collectAsStateWithLifecycle()
-    val hasOffers = promoOffers.isNotEmpty() || basketOffers.isNotEmpty()
     val followedBranches by vm.selectedPriceBranches.collectAsStateWithLifecycle()
     val allBranches by vm.priceBranches.collectAsStateWithLifecycle()
     // kept up to date so "יוצאים לקנות" knows at once whether the regular supermarket is the cheapest
@@ -248,20 +246,29 @@ fun ListScreen(
     // each stage of use has its own tile (set in the "תצוגה" popup)
     // features turned off (הגדרות ← יכולות) leave the list: their cards, buttons and parts of the tile
     val features by vm.features.collectAsStateWithLifecycle()
-    val tile = features.tile(display.tile(mode))
-    val showTotal = display.showTotal && app.necessityq.domain.Feature.PRICES in features
+    // each stage has its own features (הגדרות ← פיצ'רים ← הכנת רשימה | בקנייה)
+    val tile = features.tile(display.tile(mode), mode)
+    val showTotal = display.showTotal && features.isOn(app.necessityq.domain.Feature.PRICES, mode)
     val chatOn = app.necessityq.domain.Feature.CHAT in features
-    val tripPlanOn = app.necessityq.domain.Feature.TRIP_PLAN in features
-    // "איפה קונים היום?" is about the shop's prices: not asked while prices are off ("רשימה פשוטה")
-    val storePrompt = storePromptAsked && app.necessityq.domain.Feature.PRICES in features
+    val tripPlanOn = features.isOn(app.necessityq.domain.Feature.TRIP_PLAN, ListMode.PLAN)
+    val compareOn = features.isOn(app.necessityq.domain.Feature.BRANCH_COMPARE, mode)
+    // a gift in the corner of a tile whose product has a promotion at one of the followed branches
+    val promoItems = remember(promoOffers, features, mode) {
+        if (features.isOn(app.necessityq.domain.Feature.PROMOS, mode)) promoOffers.map { it.itemId }.toSet() else emptySet()
+    }
+    // what a swipe to each side does at this stage (הגדרות ← הרשימה ← החלקה על פריט)
+    val swipes = display.swipe(mode)
+    // "איפה קונים היום?" is about the shop's prices: not asked while prices are off in the shop ("רשימה פשוטה")
+    val storePrompt = storePromptAsked && features.isOn(app.necessityq.domain.Feature.PRICES, ListMode.SHOP)
     // the suggestion card is worked out again as the data it is based on comes in
     LaunchedEffect(snapshot?.stats?.size, features, followedForAdvice.size) { vm.refreshAdvice() }
     val showAdvice = !shopping && advice != null
-    // a promotion on each item, on the item itself: where the list is priced (in the shop: that shop only); while
+    // the promotion's details in a strip under the tile: where the list is priced (in the shop: that shop only); while
     // preparing, also the biggest saving at another followed branch
-    val promosOnTiles = app.necessityq.domain.Feature.PROMOS in features
-    val itemPromos = remember(promoOffers, priceBranchId, shopping) {
-        app.necessityq.domain.PromoOffers.perItem(promoOffers, priceBranchId, onlyPreferred = shopping)
+    val itemPromos = remember(promoOffers, priceBranchId, shopping, features) {
+        if (features.isOn(app.necessityq.domain.Feature.PROMOS, mode)) {
+            app.necessityq.domain.PromoOffers.perItem(promoOffers, priceBranchId, onlyPreferred = shopping)
+        } else emptyMap()
     }
     var showTileEditor by remember { mutableStateOf(false) }
 
@@ -302,8 +309,8 @@ fun ListScreen(
 
     // suggestion sections: collapsed by default, hidden while typing so the list itself stays visible
     val showSuggestions = !shopping && searchText.isBlank()
-    val showLow = showSuggestions && app.necessityq.domain.Feature.RUNNING_LOW in features
-    val showFrequent = showSuggestions && app.necessityq.domain.Feature.FREQUENT in features
+    val showLow = showSuggestions && features.isOn(app.necessityq.domain.Feature.RUNNING_LOW, mode)
+    val showFrequent = showSuggestions && features.isOn(app.necessityq.domain.Feature.FREQUENT, mode)
     // "כנראה נגמר בקרוב" opens by itself only while the list is empty; with items on the list it is one folded
     // line ("5 מוצרים כנראה נגמרים · הוספה ›") so the list starts near the top. Once tapped, the choice holds.
     var lowExpandedChoice by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<Boolean?>(null) }
@@ -313,8 +320,7 @@ fun ListScreen(
 
     // recipes whose ingredients are on the list: their servings can be changed (or the recipe removed) from here
     val mealData by vm.meals.collectAsStateWithLifecycle()
-    val showRecipes = !shopping && searchText.isBlank() && app.necessityq.domain.Feature.RECIPES_ON_LIST in features
-    val showPromos = !shopping && searchText.isBlank() && app.necessityq.domain.Feature.PROMOS in features
+    val showRecipes = !shopping && searchText.isBlank() && features.isOn(app.necessityq.domain.Feature.RECIPES_ON_LIST, mode)
     val recipesOnList = remember(mealData.dishes, snapshot?.lines) {
         val lines = snapshot?.lines.orEmpty()
         mealData.dishes.mapNotNull { d -> RecipeListSync.onList(lines, d).size.takeIf { it > 0 }?.let { d to it } }
@@ -343,7 +349,6 @@ fun ListScreen(
             (if (showAdvice) 1 else 0) +
             (if (showReminders) 1 else 0) +
             (if (showRecipes && recipesOnList.isNotEmpty()) 1 else 0) +
-            (if (showPromos && hasOffers) 1 else 0) +
             (if (showLow && snap.runningLow.isNotEmpty()) 1 else 0) +
             (if (showFrequent && snap.frequent.isNotEmpty()) 1 else 0) + 1
     } ?: 0
@@ -428,11 +433,14 @@ fun ListScreen(
                     )
                 }
                 HorizontalDivider()
-                DropdownMenuItem(
-                    text = { Text(if (display.showBought) "הסתרת מוצרים שסומנו או נמחקו" else "הצגת מוצרים שסומנו או נמחקו") },
-                    leadingIcon = { Icon(if (display.showBought) Icons.Default.VisibilityOff else Icons.Default.Visibility, null) },
-                    onClick = { showMore = false; vm.setDisplay(display.copy(showBought = !display.showBought)) },
-                )
+                // in the shop: what was already bought on this trip, at the bottom (the same setting as in הגדרות ← הרשימה)
+                if (shopping) {
+                    DropdownMenuItem(
+                        text = { Text(if (display.showBought) "הסתרת מה שכבר נקנה" else "הצגת מה שכבר נקנה (בתחתית)") },
+                        leadingIcon = { Icon(if (display.showBought) Icons.Default.VisibilityOff else Icons.Default.Visibility, null) },
+                        onClick = { showMore = false; vm.setDisplay(display.copy(showBought = !display.showBought)) },
+                    )
+                }
                 // what a tile shows, at this stage of use (the same sheet as in the settings)
                 DropdownMenuItem(
                     text = { Text("מה מוצג על כל פריט") },
@@ -676,11 +684,6 @@ fun ListScreen(
                 }
             }
 
-            // "יש למוצרים אלו מבצעים ב…": promotions on the list's items at the followed branches
-            if (showPromos && hasOffers) {
-                item(key = "promos") { PromoOffersCard(promoOffers, basketOffers, allBranches) }
-            }
-
             if (showLow && snap.runningLow.isNotEmpty()) {
                 item(key = "low") {
                     if (!lowExpanded) {
@@ -770,9 +773,9 @@ fun ListScreen(
             } else {
                 // the slot stays (empty) after the hint is learned, so row indexes do not shift
                 item(key = "hint") {
-                    if (showSwipeHint) Text(
-                        "משכו שמאלה: נקנה · ימינה: " + (if (shopping) "חסר" else "מחיקה") + " — והחזיקו עד שהטבעת מהבהבת. " +
-                            "אפשר גם לגעת בעיגול. ההסבר המלא: ⋮ ← עזרה",
+                    val hint = swipes.hint
+                    if (showSwipeHint && hint != null) Text(
+                        "$hint — והחזיקו עד שהטבעת מהבהבת. ההסבר המלא: ⋮ ← עזרה",
                         Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -812,8 +815,10 @@ fun ListScreen(
                                 tapMode = display.tapMode,
                                 price = prices[line.itemId],
                                 priceInfo = itemPrices[line.itemId],
-                                comparison = comparisons[line.itemId]?.takeIf { it.notable },
-                                promo = if (promosOnTiles) itemPromos[line.itemId]?.let { promoLabel(it, priceBranchId, allBranches) } else null,
+                                // only from the gap (₪) chosen in the settings
+                                comparison = comparisons[line.itemId]?.takeIf { compareOn && it.notable && it.reaches(display.compareMinShekels) },
+                                promo = line.itemId in promoItems,
+                                promoText = itemPromos[line.itemId]?.let { promoLabel(it, priceBranchId, allBranches) },
                                 lifted = isDragging,
                                 dragHandle = if (dragAvailable && TileElement.DRAG in tile) {
                                     {
@@ -836,7 +841,8 @@ fun ListScreen(
                                     }
                                 } else null,
                                 onBought = { vm.checkOff(line) },
-                                onRightSwipe = { if (shopping) vm.setMissing(line, !line.missing) else vm.delete(line) },
+                                left = swipeAction(swipes.left, line, chatOn, vm),
+                                right = swipeAction(swipes.right, line, chatOn, vm),
                                 onPlus = { vm.adjustQuantity(line, +1) },
                                 onMinus = { vm.adjustQuantity(line, -1) },
                                 onSetQuantity = { q, approved -> vm.changeQuantity(line, q, approved) },
@@ -848,7 +854,8 @@ fun ListScreen(
                 }
             }
 
-            if (display.showBought && snap.bought.isNotEmpty()) {
+            // what was bought shows only in the shop (while making the list nothing is marked bought)
+            if (shopping && display.showBought && snap.bought.isNotEmpty()) {
                 item(key = "bought_header") {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("נקנו (${snap.bought.size})", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
@@ -906,12 +913,11 @@ fun ListScreen(
         TileEditorSheet(
             mode = mode,
             // the stored tile (a feature turned off hides parts of it, but does not erase them)
-            layout = display.tile(mode),
-            onSave = { vm.setDisplay(vm.display.value.withTile(mode, it)); showTileEditor = false },
+            // as the list shows it: a part whose feature is off shows as hidden, and showing it turns the feature on
+            layout = features.tile(display.tile(mode), mode),
+            onSave = { vm.saveTile(mode, it); showTileEditor = false },
             onDismiss = { showTileEditor = false },
             onMoreSettings = { showTileEditor = false; onOpenDisplaySettings() },
-            blocked = features.hiddenElements(),
-            onEnableFeature = { vm.setFeatures(features.with(it, true)) },
         )
     }
     if (showGenerate) GenerateSheet(vm, onDismiss = { showGenerate = false })
@@ -1195,13 +1201,30 @@ private const val PUSH_SPEED_DP = 1500f
 private class SwipeAction(val label: String, val icon: ImageVector, val color: Color, val run: () -> Unit)
 
 /**
- * Physical-direction swipe: left = bought, right = missing (shopping) / delete (preparing).
- * The icon and the action's name sit at the edge of the phone the tile was pulled away from, with the
+ * What [choice] does to [line] (null = nothing: the tile does not move that way). צ'אט פוד opens the product's
+ * conversation; when צ'אט פוד is turned off, a swipe set to it does nothing.
+ */
+private fun swipeAction(choice: app.necessityq.domain.SwipeChoice, line: ListLine, chatOn: Boolean, vm: AppViewModel): SwipeAction? =
+    when (choice) {
+        app.necessityq.domain.SwipeChoice.NONE -> null
+        app.necessityq.domain.SwipeChoice.BOUGHT -> SwipeAction("נקנה", Icons.Default.Check, NqPalette.SwipeBought) { vm.checkOff(line) }
+        app.necessityq.domain.SwipeChoice.MISSING ->
+            SwipeAction(if (line.missing) "ביטול חסר" else "חסר", Icons.Default.ReportProblem, NqPalette.SwipeMissing) { vm.setMissing(line, !line.missing) }
+        app.necessityq.domain.SwipeChoice.REMOVE -> SwipeAction("הסרה", Icons.Default.Delete, NqPalette.SwipeDelete) { vm.delete(line) }
+        app.necessityq.domain.SwipeChoice.CHAT -> if (!chatOn) null else {
+            SwipeAction("צ'אט פוד", Icons.AutoMirrored.Filled.Chat, NqPalette.SwipeChat) { vm.requestOpenChat(line.itemId, line.displayName) }
+        }
+    }
+
+/**
+ * Physical-direction swipe: what each side does is chosen in the settings (by default, in the shop left = bought and
+ * right = missing; while making the list right = remove). A side with no action ([left] / [right] null) does not
+ * move. The icon and the action's name sit at the edge of the phone the tile was pulled away from, with the
  * instruction under the name: pull on → hold → release. The action runs when the tile is held past the
  * threshold until the ring fills; a forceful push runs it at once. Pulling back cancels.
  */
 @Composable
-private fun SwipeableTile(left: SwipeAction, right: SwipeAction, content: @Composable () -> Unit) {
+private fun SwipeableTile(left: SwipeAction?, right: SwipeAction?, content: @Composable () -> Unit) {
     val density = LocalDensity.current
     var width by remember { mutableFloatStateOf(1f) }
     // the drag writes the offset synchronously; once the finger lifts (or the gesture is cancelled) a single
@@ -1244,9 +1267,9 @@ private fun SwipeableTile(left: SwipeAction, right: SwipeAction, content: @Compo
     )
 
     Box(Modifier.onSizeChanged { width = it.width.toFloat().coerceAtLeast(1f) }) {
-        if (offset != 0f) {
-            val toRight = offset > 0
-            val action = if (toRight) right else left
+        val toRight = offset > 0
+        val action = if (offset == 0f) null else if (toRight) right else left
+        if (action != null) {
             Box(
                 Modifier.matchParentSize().clip(NqShapes.Tile).background(action.color).padding(horizontal = 18.dp),
                 contentAlignment = if (toRight) AbsoluteAlignment.CenterLeft else AbsoluteAlignment.CenterRight,
@@ -1286,8 +1309,11 @@ private fun SwipeableTile(left: SwipeAction, right: SwipeAction, content: @Compo
                 .absoluteOffset { IntOffset(offset.roundToInt(), 0) }
                 .draggable(
                     orientation = Orientation.Horizontal,
+                    // a tile with no action on either side does not move at all
+                    enabled = left != null || right != null,
                     state = rememberDraggableState { delta ->
-                        offset = (offset + delta).coerceIn(-width, width)
+                        // only towards a side that has an action
+                        offset = (offset + delta).coerceIn(if (left != null) -width else 0f, if (right != null) width else 0f)
                     },
                     onDragStarted = { dragging = true },
                     // also called when the gesture is cancelled (e.g. the list takes over to scroll)
@@ -1299,7 +1325,7 @@ private fun SwipeableTile(left: SwipeAction, right: SwipeAction, content: @Compo
                         val stillPast = abs(offset) >= width * 0.3f
                         dragging = false
                         releases++
-                        if (pushed || (held && stillPast)) (if (offset > 0) right else left).run()
+                        if (pushed || (held && stillPast)) (if (offset > 0) right else left)?.run()
                     },
                 ),
         ) { content() }
@@ -1320,12 +1346,16 @@ private fun ProductTile(
     priceInfo: app.necessityq.domain.ItemPriceInfo? = null,
     /** significantly dearer / cheaper here than at the household's other branches */
     comparison: app.necessityq.domain.PriceComparison? = null,
-    /** The item's promotion ("מבצע: 2 ב-10 ₪ · …"), in a strip under the tile; null = none. */
-    promo: String? = null,
+    /** a promotion on the product at one of the followed branches: a gift in the tile's top-right corner */
+    promo: Boolean = false,
+    /** The promotion's details ("מבצע: 2 ב-10 ₪ · …"), in a strip under the tile; null = none. */
+    promoText: String? = null,
     lifted: Boolean,
     dragHandle: (@Composable () -> Unit)?,
+    /** the check circle (in the shop only) */
     onBought: () -> Unit,
-    onRightSwipe: () -> Unit,
+    left: SwipeAction?,
+    right: SwipeAction?,
     onPlus: () -> Unit,
     onMinus: () -> Unit,
     onSetQuantity: ((Quantity?, Boolean) -> Unit)? = null,
@@ -1333,12 +1363,6 @@ private fun ProductTile(
     /** Opens the item's page: on a tap or a double tap, as chosen in the settings. */
     onOpen: () -> Unit,
 ) {
-    val right = if (shopping) {
-        SwipeAction(if (line.missing) "ביטול חסר" else "חסר", Icons.Default.ReportProblem, NqPalette.SwipeMissing, onRightSwipe)
-    } else {
-        SwipeAction("מחיקה", Icons.Default.Delete, NqPalette.SwipeDelete, onRightSwipe)
-    }
-    val left = SwipeAction("נקנה", Icons.Default.Check, NqPalette.SwipeBought, onBought)
     // the quantity buttons are a part of the tile ("תצוגה"), whatever a tap does
     val showStepper = TileElement.STEPPER in tile
     val showQuantityText = TileElement.QUANTITY in tile && !showStepper && line.quantity != null
@@ -1347,6 +1371,7 @@ private fun ProductTile(
 
     Column(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) {
         SwipeableTile(left = left, right = right) {
+          Box {
             Card(
                 shape = NqShapes.Tile,
                 border = when {
@@ -1372,8 +1397,9 @@ private fun ProductTile(
                     Column(Modifier.weight(1f).then(open).padding(start = 6.dp, end = 12.dp, top = 8.dp, bottom = 6.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             dragHandle?.invoke()
-                            if (TileElement.CHECK in tile) {
-                                val checkSize = if (shopping) 48.dp else 40.dp
+                            // marking bought is for the shop only
+                            if (shopping && TileElement.CHECK in tile) {
+                                val checkSize = 48.dp
                                 Box(Modifier.size(checkSize).clip(CircleShape).clickable(onClick = onBought), contentAlignment = Alignment.Center) {
                                     Box(Modifier.size(checkSize - 18.dp).border(2.dp, MaterialTheme.colorScheme.outline, CircleShape))
                                 }
@@ -1441,9 +1467,12 @@ private fun ProductTile(
                     }
                 }
             }
+            // a promotion on the product: a gift on the tile's top-right corner (its details are on the product page)
+            if (promo) PromoGift(Modifier.align(AbsoluteAlignment.TopRight).absoluteOffset(x = 5.dp, y = (-5).dp))
+          }
         }
-        // the item's promotion, right under it (while preparing and in the shop)
-        PromoStrip(promo = promo)
+        // the promotion's details, right under the tile (while preparing and in the shop)
+        PromoStrip(promo = promoText)
     }
 }
 
@@ -1764,6 +1793,18 @@ private fun promoLabel(o: app.necessityq.domain.PromoOffer, here: String?, all: 
     val where = if (o.branchId == here) "" else all.firstOrNull { it.id == o.branchId }?.let { " · ב" + app.necessityq.domain.BranchLocator.storeName(it) }.orEmpty()
     val stock = o.promotion.stockWarning?.let { " · $it" }.orEmpty()
     return "מבצע: ${o.promotion.shortLabel}$price$where$stock"
+}
+
+/** A product with a promotion: a small gift in the promotions' orange, on the tile's corner. */
+@Composable
+fun PromoGift(modifier: Modifier = Modifier) {
+    Box(
+        modifier.size(22.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondary)
+            .semantics { contentDescription = "יש מבצע על המוצר" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Default.CardGiftcard, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondary, modifier = Modifier.size(14.dp))
+    }
 }
 
 /** Promotion line right under a product tile; renders nothing when there is no promotion. */

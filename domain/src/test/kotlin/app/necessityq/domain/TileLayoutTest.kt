@@ -30,7 +30,8 @@ class TileLayoutTest {
     @Test
     fun `the default tile is simple - check, name, amount, price`() {
         val expected = setOf(TileElement.CHECK, TileElement.QUANTITY, TileElement.PRICE)
-        assertEquals(expected, TileLayout.defaultFor(ListMode.PLAN).shown)
+        // nothing is checked off while making the list
+        assertEquals(expected - TileElement.CHECK, TileLayout.defaultFor(ListMode.PLAN).shown)
         assertEquals(expected, TileLayout.defaultFor(ListMode.SHOP).shown)
         assertFalse(TileElement.LAST_BOUGHT in TileLayout.defaultFor(ListMode.PLAN))
         assertFalse(TileElement.STEPPER in TileLayout.defaultFor(ListMode.PLAN))

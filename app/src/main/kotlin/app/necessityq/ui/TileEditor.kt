@@ -80,10 +80,6 @@ fun TileEditorSheet(
     onSave: (TileLayout) -> Unit,
     onDismiss: () -> Unit,
     onMoreSettings: (() -> Unit)? = null,
-    /** Parts a feature that is off keeps off the list ([app.necessityq.domain.Features.hiddenElements]). */
-    blocked: Set<TileElement> = emptySet(),
-    /** Turns such a feature on, from the note under the sample. */
-    onEnableFeature: ((app.necessityq.domain.Feature) -> Unit)? = null,
 ) {
     var draft by remember(mode, layout) { mutableStateOf(layout) }
     var cutOff by remember { mutableStateOf(emptyList<TileElement>()) }
@@ -137,26 +133,8 @@ fun TileEditorSheet(
                     }
                 }
             }
-            // parts a feature that is off keeps off the list: shown here, but not on the list until it is on
-            val blockedShown = draft.shown.filter { it in blocked }
-            if (blockedShown.isNotEmpty()) {
-                Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        "לא יופיעו ברשימה כי היכולת שלהם כבויה: " + blockedShown.joinToString(", ") { it.label } + ".",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (onEnableFeature != null) {
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            blockedShown.mapNotNull { app.necessityq.domain.Features.featureFor(it) }.distinct().forEach { f ->
-                                androidx.compose.material3.AssistChip(onClick = { onEnableFeature(f) }, label = { Text("להדליק: " + f.label) })
-                            }
-                        }
-                    }
-                }
-            }
             Text(
-                "מוצגים ${draft.shown.size} מתוך ${TileElement.entries.size} רכיבים",
+                "מוצגים ${draft.shown.count { it.availableIn(mode) }} מתוך ${TileElement.of(mode).size} רכיבים",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -234,10 +212,12 @@ private fun SampleTile(
                 Part(TileElement.DRAG, layout, onToggle) {
                     Icon(Icons.Default.DragIndicator, null, tint = MaterialTheme.colorScheme.outline)
                 }
-                Part(TileElement.CHECK, layout, onToggle) {
-                    val size = if (shopping) 48.dp else 40.dp
-                    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
-                        Box(Modifier.size(size - 18.dp).border(2.dp, MaterialTheme.colorScheme.outline, CircleShape))
+                // an item is marked bought only in the shop: no check circle while making the list
+                if (shopping) {
+                    Part(TileElement.CHECK, layout, onToggle) {
+                        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                            Box(Modifier.size(30.dp).border(2.dp, MaterialTheme.colorScheme.outline, CircleShape))
+                        }
                     }
                 }
                 Spacer(Modifier.width(6.dp))

@@ -19,7 +19,22 @@ enum class TileElement(val label: String) {
     ADDED_BY("מי הוסיף"),
     ;
 
+    /** The feature ("הגדרות" ← "פיצ'רים") this part needs; null when it needs none. */
+    val feature: Feature?
+        get() = when (this) {
+            PRICE -> Feature.PRICES
+            CHAT -> Feature.CHAT
+            DRAG, LAST_BOUGHT, FREQUENCY -> Feature.TILE_EXTRAS
+            else -> null
+        }
+
+    /** The check circle marks an item bought, which is done only in the shop; every other part is in both stages. */
+    fun availableIn(mode: ListMode): Boolean = this != CHECK || mode == ListMode.SHOP
+
     companion object {
+        /** The parts a tile of [mode] can have. */
+        fun of(mode: ListMode): List<TileElement> = entries.filter { it.availableIn(mode) }
+
         /** Which tile part a badge belongs to. */
         fun forTag(kind: TagKind): TileElement = when (kind) {
             TagKind.MISSING, TagKind.LARGE_AMOUNT -> ALERTS
@@ -50,9 +65,11 @@ data class TileLayout(val shown: Set<TileElement>) {
         /** A simple tile: the check circle, the name, the amount and the price. Everything else is in "תצוגה". */
         val SIMPLE = TileLayout(setOf(TileElement.CHECK, TileElement.QUANTITY, TileElement.PRICE))
 
-        /** Both stages start from the simple tile; each can then be changed on its own. */
-        @Suppress("UNUSED_PARAMETER")
-        fun defaultFor(mode: ListMode): TileLayout = SIMPLE
+        /**
+         * Both stages start from the simple tile (without the check circle while making the list, where nothing is
+         * marked bought); each can then be changed on its own.
+         */
+        fun defaultFor(mode: ListMode): TileLayout = TileLayout(SIMPLE.shown.filter { it.availableIn(mode) }.toSet())
 
         /** Null when nothing was stored; unknown names (from a newer version) are ignored. */
         fun decode(text: String?): TileLayout? {

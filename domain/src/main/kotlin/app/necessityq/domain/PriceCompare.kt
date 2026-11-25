@@ -42,6 +42,19 @@ data class PriceComparison(
         }
     val notable: Boolean get() = level != PriceLevel.FAIR
 
+    /**
+     * The gap in shekels between the price here and the other branches (their median), in the prices' own unit (a
+     * package, or the published weight of a product sold by weight).
+     */
+    val amountGap: Double
+        get() {
+            val mid = (here.low + here.high) / 2
+            return if (1 + diff <= 0) mid else kotlin.math.abs(mid - mid / (1 + diff))
+        }
+
+    /** Shown to a household that wants a comparison only from a gap of [minShekels] (0 = always). */
+    fun reaches(minShekels: Int): Boolean = minShekels <= 0 || amountGap + 0.005 >= minShekels
+
     /** The cheapest of all compared branches (this one included). */
     val cheapestBranchId: String
         get() = (others + here).minByOrNull { (it.low + it.high) / 2 }!!.branchId
