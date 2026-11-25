@@ -83,7 +83,6 @@ import app.necessityq.domain.HebrewStem
 import app.necessityq.domain.LineStatus
 import app.necessityq.domain.MealPlanner
 import app.necessityq.domain.NutritionFood
-import app.necessityq.domain.QuickEntryParser
 import app.necessityq.domain.RecipeListSync
 import app.necessityq.domain.Recipes
 import kotlinx.coroutines.delay
@@ -226,6 +225,7 @@ fun RecipeScreen(vm: AppViewModel, dishId: String, onBack: () -> Unit, onEdit: (
                     editing = editing,
                     onToggleEdit = { editing = !editing },
                     pantry = data.pantry,
+                    buy = data.buy,
                     openLines = openLines,
                     ownIds = ownIds,
                     removed = removed,
@@ -288,7 +288,7 @@ fun RecipeScreen(vm: AppViewModel, dishId: String, onBack: () -> Unit, onEdit: (
         // ---- bottom: into the list, or how it is on the list ----
         Box(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(horizontal = 16.dp, vertical = 10.dp)) {
             if (!recipeOnList) {
-                val preview = RecipeListPreview.of(lines, dish, servings, data.pantry)
+                val preview = RecipeListPreview.of(lines, dish, servings, data.pantry, data.buy)
                 val fresh = preview.count { it.kind == RecipeListPreview.Kind.NEW }
                 val merged = preview.count { it.kind == RecipeListPreview.Kind.MERGE }
                 val enabled = preview.any { it.kind != RecipeListPreview.Kind.AT_HOME }
@@ -341,7 +341,7 @@ fun RecipeScreen(vm: AppViewModel, dishId: String, onBack: () -> Unit, onEdit: (
             RecipeReviewSheet(
                 dishName = dish.name,
                 servings = servings,
-                rows = RecipeListPreview.of(lines, dish, servings, data.pantry),
+                rows = RecipeListPreview.of(lines, dish, servings, data.pantry, data.buy),
                 onConfirm = { chosen ->
                     reviewOpen = false
                     vm.addRecipeToList(dish.id, servings, only = chosen)
@@ -451,6 +451,7 @@ private fun IngredientsSection(
     editing: Boolean,
     onToggleEdit: () -> Unit,
     pantry: Set<String>,
+    buy: Set<String>,
     openLines: Map<String, app.necessityq.domain.ListLine>,
     ownIds: Set<String>,
     removed: List<String>,
@@ -481,7 +482,7 @@ private fun IngredientsSection(
             }
             dish.ingredients.forEachIndexed { i, text ->
                 if (i > 0) androidx.compose.material3.HorizontalDivider(color = NqTheme.colors.hairline)
-                val parsed = remember(text) { QuickEntryParser.parse(text) }
+                val parsed = remember(text) { Recipes.parse(text) }
                 val name = parsed?.item?.displayName ?: text
                 val shown = parsed?.quantity?.let { Recipes.scale(it, factor) }
                 val amount = shown?.format() ?: "לפי הטעם"
@@ -489,7 +490,7 @@ private fun IngredientsSection(
                 val line = id?.let { openLines[it] }
                 val state = when {
                     id == null -> null
-                    id in pantry -> IngredientState.AT_HOME
+                    id in pantry || (id !in buy && parsed != null && app.necessityq.domain.Staples.assumedAtHome(parsed.item, shown)) -> IngredientState.AT_HOME
                     id in ownIds -> IngredientState.ON_LIST
                     line != null -> IngredientState.MERGE
                     else -> IngredientState.BUY
@@ -829,7 +830,7 @@ fun RecipeEditScreen(vm: AppViewModel, dishId: String?, onBack: () -> Unit, onSa
             Text("מרכיבים", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Text("כותבים כמו ברשימה: \"4 ביצים\", \"500 גרם פסטה\", \"בצל\".", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             ingredients.forEachIndexed { i, text ->
-                val parsed = remember(text) { QuickEntryParser.parse(text) }
+                val parsed = remember(text) { Recipes.parse(text) }
                 OutlinedTextField(
                     text,
                     { v -> ingredients[i] = v; if (i == ingredients.lastIndex && v.isNotBlank()) ingredients.add("") },

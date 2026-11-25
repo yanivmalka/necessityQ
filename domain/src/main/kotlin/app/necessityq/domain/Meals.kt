@@ -149,10 +149,19 @@ data class MealData(
     val plan: MealPlan = MealPlan(),
     /** Item ids the household always has at home ("יש בבית"): recipes and the menu leave them off the list. */
     val pantry: Set<String> = emptySet(),
+    /** Item ids the household said it does need to buy, although recipes assume it is at home ([Staples]). */
+    val buy: Set<String> = emptySet(),
 ) {
+    /** Left off the list: marked "יש בבית", or a staple the household has not said it needs ([Staples]). */
+    fun isAtHome(ingredient: ScaledIngredient): Boolean = isAtHome(ingredient.item, ingredient.quantity)
+
+    fun isAtHome(item: ItemIdentity, quantity: Quantity?): Boolean =
+        item.id in pantry || (item.id !in buy && Staples.assumedAtHome(item, quantity))
+
     fun rating(memberId: String, dishId: String): Int? = ratings[memberId]?.get(dishId)
 
-    fun withPantry(itemId: String, atHome: Boolean): MealData = copy(pantry = if (atHome) pantry + itemId else pantry - itemId)
+    fun withPantry(itemId: String, atHome: Boolean): MealData =
+        if (atHome) copy(pantry = pantry + itemId, buy = buy - itemId) else copy(pantry = pantry - itemId, buy = buy + itemId)
 
     fun withRating(memberId: String, dishId: String, stars: Int?): MealData {
         val mine = ratings[memberId].orEmpty()
@@ -319,7 +328,9 @@ object MealPlanner {
             mealsOn(data, d).filter { !it.cooked }.mapNotNull { meal ->
                 byId[meal.dishId]?.let { dish -> dish to (meal.servings ?: dish.plannedServings) }
             }
-        }.flatMap { (dish, servings) -> Recipes.scaled(dish, servings, skip = data.pantry).map { it to dish.name } }
+        }.flatMap { (dish, servings) ->
+            Recipes.scaled(dish, servings).filterNot { data.isAtHome(it) }.map { it to dish.name }
+        }
     }
 
     /** "What can we cook from what we bought": dishes ordered by the share of ingredients already bought. */
@@ -347,13 +358,16 @@ data class ScaledIngredient(val item: ItemIdentity, val quantity: Quantity?)
 
 /** Recipe arithmetic: parse ingredient lines and scale them to a number of servings. */
 object Recipes {
-    fun identity(text: String): ItemIdentity? = QuickEntryParser.parse(text)?.item
+    /** One ingredient line read as a recipe line: kitchen units and preparation words understood ([RecipeLine]). */
+    fun parse(text: String): ParsedEntry? = RecipeLine.parse(text)
+
+    fun identity(text: String): ItemIdentity? = parse(text)?.item
 
     /** The dish's ingredients for [servings] (the recipe's own amounts × servings / yield), without the item ids in [skip]. */
     fun scaled(dish: Dish, servings: Int, skip: Set<String> = emptySet()): List<ScaledIngredient> {
         val factor = servings.toDouble() / dish.servings.coerceAtLeast(1)
         return dish.ingredients.mapNotNull { text ->
-            val parsed = QuickEntryParser.parse(text) ?: return@mapNotNull null
+            val parsed = parse(text) ?: return@mapNotNull null
             if (parsed.item.id in skip) return@mapNotNull null
             ScaledIngredient(parsed.item, parsed.quantity?.let { scale(it, factor) })
         }.distinctBy { it.item.id }
@@ -397,7 +411,7 @@ object Recipes {
 
     /** One ingredient line as shown for [servings]: "6 ביצים" for "4 ביצים" ×1.5. */
     fun display(dish: Dish, text: String, servings: Int): String {
-        val parsed = QuickEntryParser.parse(text) ?: return text
+        val parsed = parse(text) ?: return text
         val q = parsed.quantity ?: return parsed.item.displayName
         val factor = servings.toDouble() / dish.servings.coerceAtLeast(1)
         val scaled = scale(q, factor) ?: q
@@ -505,7 +519,7 @@ object RecipeEdits {
      */
     fun adjust(dish: Dish, index: Int, servings: Int, direction: Int): Dish {
         val line = dish.ingredients.getOrNull(index) ?: return dish
-        val parsed = QuickEntryParser.parse(line) ?: return dish
+        val parsed = Recipes.parse(line) ?: return dish
         val shown = parsed.quantity?.let { Recipes.scale(it, factor(dish, servings)) }
         val next = if (shown == null) {
             if (direction > 0) Quantity.pieces(1) else return dish
@@ -524,7 +538,7 @@ object RecipeEdits {
 
     /** Adds an ingredient typed for the servings on screen ("300 גרם פטריות" for 6 servings); stored in the recipe's yield. */
     fun add(dish: Dish, typed: String, servings: Int): Dish {
-        val parsed = QuickEntryParser.parse(typed) ?: return dish
+        val parsed = Recipes.parse(typed) ?: return dish
         val stored = parsed.quantity?.let { format(toYield(it, dish, servings), nameOf(parsed)) } ?: typed.trim()
         return dish.copy(ingredients = dish.ingredients + stored)
     }
@@ -602,11 +616,12 @@ object RecipeListPreview {
         val after: Quantity? = null,
     )
 
-    fun of(lines: List<ListLine>, dish: Dish, servings: Int, pantry: Set<String>): List<Row> =
+    fun of(lines: List<ListLine>, dish: Dish, servings: Int, pantry: Set<String>, buy: Set<String> = emptySet()): List<Row> =
         Recipes.scaled(dish, servings).map { ing ->
             val open = lines.firstOrNull { it.status == LineStatus.NEEDED && it.itemId == ing.item.id }
             when {
-                ing.item.id in pantry -> Row(ing.item, ing.quantity, Kind.AT_HOME)
+                ing.item.id in pantry || (ing.item.id !in buy && Staples.assumedAtHome(ing.item, ing.quantity)) ->
+                    Row(ing.item, ing.quantity, Kind.AT_HOME)
                 open != null -> {
                     val now = open.quantity
                     val after = when {

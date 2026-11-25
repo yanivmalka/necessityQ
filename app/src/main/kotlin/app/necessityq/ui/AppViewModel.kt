@@ -509,7 +509,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             var skip = dish.listSkip
             if (from == null) {
                 val all = app.necessityq.domain.Recipes.scaled(dish, servings)
-                val chosen = all.filter { if (only != null) it.item.id in only else it.item.id !in data.pantry }
+                val chosen = all.filter { if (only != null) it.item.id in only else !data.isAtHome(it) }
                 chosen.forEach { ing ->
                     container.service.add(hid, uid, ing.item, ing.quantity, LineSource.RECIPE, current, recipe = dish.name)
                     current = container.service.snapshot(hid).first().lines

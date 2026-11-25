@@ -7,7 +7,7 @@ import org.junit.Test
 class MenuListSyncTest {
     private fun id(text: String) = ItemIdentity.fromText(text).id
     private val shakshuka = Dish("a", "שקשוקה", listOf("8 ביצים", "6 עגבניות", "בצל"), servings = 4)
-    private val salad = Dish("b", "סלט", listOf("4 עגבניות", "בצל", "שמן זית"), servings = 4)
+    private val salad = Dish("b", "סלט", listOf("4 עגבניות", "בצל", "טחינה", "שמן זית"), servings = 4)
     private val soup = Dish("c", "מרק", listOf("300 גרם בצל"), servings = 4)
 
     private fun menu(vararg meals: Pair<Int, Dish>): List<Pair<ScaledIngredient, String>> {
@@ -39,8 +39,10 @@ class MenuListSyncTest {
         assertEquals(Quantity.pieces(10), lines.qty("עגבניות"))
         // "בצל" with no amount is one onion in each recipe
         assertEquals(Quantity.pieces(2), lines.qty("בצל"))
-        // a bottle of oil has no amount to add up
-        assertEquals(null, lines.qty("שמן זית"))
+        // a jar of tahini has no amount to add up
+        assertEquals(null, lines.qty("טחינה"))
+        // oil is a staple: the menu does not put it on the list
+        assertTrue(lines.none { it.itemId == id("שמן זית") })
         assertEquals(setOf("שקשוקה", "סלט"), lines.first { it.itemId == id("עגבניות") }.recipeParts.map { it.dish }.toSet())
     }
 

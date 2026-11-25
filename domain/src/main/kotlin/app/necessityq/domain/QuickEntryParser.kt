@@ -20,7 +20,7 @@ data class ParsedEntry(
  */
 object QuickEntryParser {
 
-    private val wordNumbers: Map<String, Double> = mapOf(
+    internal val wordNumbers: Map<String, Double> = mapOf(
         "רבע" to 0.25, "חצי" to 0.5,
         "אחד" to 1.0, "אחת" to 1.0,
         "שניים" to 2.0, "שתיים" to 2.0, "שני" to 2.0, "שתי" to 2.0, "זוג" to 2.0,
@@ -31,7 +31,7 @@ object QuickEntryParser {
     )
 
     /** Unit words, compared by [HebrewText.matchKey] (quotes/apostrophes removed). */
-    private val unitWords: Map<String, QuantityUnit> = mapOf(
+    internal val unitWords: Map<String, QuantityUnit> = mapOf(
         "קג" to QuantityUnit.KILOGRAM, "קילו" to QuantityUnit.KILOGRAM, "קילוגרם" to QuantityUnit.KILOGRAM, "kg" to QuantityUnit.KILOGRAM,
         "גרם" to QuantityUnit.GRAM, "גר" to QuantityUnit.GRAM, "g" to QuantityUnit.GRAM,
         "ליטר" to QuantityUnit.LITER, "ליטרים" to QuantityUnit.LITER, "l" to QuantityUnit.LITER,

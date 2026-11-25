@@ -1428,6 +1428,18 @@ private fun ProductTile(
                                         )
                                     }
                                 }
+                                // a recipe's exact need, rounded up to what the shop sells ("לקנות 1.5 ליטר · צריך 1.1 ליטר")
+                                val toBuy = line.toBuy
+                                val need = line.quantity
+                                if (toBuy != null && need != null && toBuy != need) {
+                                    Text(
+                                        "לקנות ${toBuy.format()} · צריך ${need.format()}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(top = 2.dp),
+                                    )
+                                }
                                 if (tags.isNotEmpty() || chat != null) {
                                     FlowRow(
                                         Modifier.padding(top = 3.dp),
