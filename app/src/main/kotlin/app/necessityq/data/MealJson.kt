@@ -55,6 +55,7 @@ object MealJson {
         val overrides: List<O> = emptyList(),
         val cooked: List<String> = emptyList(),
         val pantry: List<String> = emptyList(),
+        val buy: List<String> = emptyList(),
     )
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -88,6 +89,7 @@ object MealJson {
             overrides = data.plan.overrides.map { O(it.epochDay, it.slot.name, it.dishId, it.audience.toList(), it.servings) },
             cooked = data.plan.cooked.toList(),
             pantry = data.pantry.toList(),
+            buy = data.buy.toList(),
         ),
     )
 
@@ -123,6 +125,7 @@ object MealJson {
                 cooked = r.cooked.toSet(),
             ),
             pantry = r.pantry.toSet(),
+            buy = r.buy.toSet(),
         )
     }
 }

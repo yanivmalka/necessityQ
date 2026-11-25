@@ -76,6 +76,12 @@ data class ListLine(
     val identity: ItemIdentity get() = ItemIdentity(name, variant, category)
     val displayName: String get() = identity.displayName
 
+    /**
+     * What to put in the basket for this line: a recipe's exact need rounded up to what the shop sells
+     * ([PackSizes]); the line's own [quantity] when someone typed it or the item has no pack sizes.
+     */
+    val toBuy: Quantity? get() = if (isFromRecipe || isFromMenu) PackSizes.toBuy(name, quantity) else quantity
+
     /** Generated from past purchases rather than added by a person. */
     val isAuto: Boolean get() = source == LineSource.AUTO
 
