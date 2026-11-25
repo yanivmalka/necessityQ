@@ -80,4 +80,48 @@ class PackSizesTest {
         assertEquals(kilos(1.0), line(LineSource.MENU).toBuy)
         assertEquals(kilos(0.5), line(LineSource.MANUAL).toBuy)
     }
+
+    @Test fun `every catalogue item is either given pack sizes or left as it is on purpose`() {
+        val undecided = Catalog.items.map { HebrewText.matchKey(it.name) }
+            .filter { it !in PackSizes.packagedNames && it !in PackSizes.notPacked }
+        assertEquals("catalogue items with no decision in PackSizes", emptyList<String>(), undecided)
+        val both = Catalog.items.map { HebrewText.matchKey(it.name) }.filter { it in PackSizes.packagedNames && it in PackSizes.notPacked }
+        assertEquals(emptyList<String>(), both)
+    }
+
+    @Test fun `aliases reach the rule of their catalogue item`() {
+        assertEquals(liters(1.0), PackSizes.toBuy("שמן חמניות", ml(300.0)))
+        assertEquals(grams(500.0), PackSizes.toBuy("ספגטי", grams(350.0)))
+        assertEquals(grams(500.0), PackSizes.toBuy("קוטג", grams(300.0)))
+    }
+
+    @Test fun `dairy`() {
+        assertEquals(grams(250.0), PackSizes.toBuy("קוטג'", grams(200.0)))
+        assertEquals(grams(500.0), PackSizes.toBuy("קוטג'", grams(300.0)))
+        assertEquals(grams(200.0), PackSizes.toBuy("גבינת שמנת", grams(150.0)))
+        assertEquals(grams(400.0), PackSizes.toBuy("גבינת שמנת", grams(250.0)))
+        assertEquals(grams(400.0), PackSizes.toBuy("מוצרלה", grams(300.0)))
+        assertEquals(grams(400.0), PackSizes.toBuy("יוגורט", grams(245.0)))
+        assertEquals(grams(200.0), PackSizes.toBuy("חמאה", grams(125.0)))
+        assertEquals(grams(400.0), PackSizes.toBuy("חמאה", grams(250.0)))
+    }
+
+    @Test fun `pantry`() {
+        assertEquals(grams(140.0), PackSizes.toBuy("רסק עגבניות", grams(50.0)))
+        assertEquals(grams(420.0), PackSizes.toBuy("רסק עגבניות", grams(300.0))) // three small cans cover it with less left over than one big one
+        assertEquals(grams(500.0), PackSizes.toBuy("רסק עגבניות", grams(450.0)))
+        assertEquals(grams(280.0), PackSizes.toBuy("רסק עגבניות", grams(200.0)))
+        assertEquals(grams(250.0), PackSizes.toBuy("דבש", grams(100.0)))
+        assertEquals(grams(100.0), PackSizes.toBuy("שוקולד", grams(90.0)))
+        assertEquals(grams(200.0), PackSizes.toBuy("שוקולד", grams(150.0)))
+        assertEquals(kilos(1.0), PackSizes.toBuy("טחינה", grams(600.0)))
+        assertEquals(grams(200.0), PackSizes.toBuy("קפה", grams(150.0)))
+    }
+
+    @Test fun `drinks and frozen`() {
+        assertEquals(liters(1.5), PackSizes.toBuy("מים מינרליים", liters(1.2)))
+        assertEquals(ml(750.0), PackSizes.toBuy("יין", ml(500.0)))
+        assertEquals(grams(800.0), PackSizes.toBuy("ירקות קפואים", grams(500.0)))
+        assertEquals(liters(1.0), PackSizes.toBuy("גלידה", ml(600.0)))
+    }
 }

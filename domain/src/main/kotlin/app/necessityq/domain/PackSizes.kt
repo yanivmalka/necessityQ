@@ -21,17 +21,51 @@ object PackSizes {
     private fun v(vararg ml: Long, head: Boolean = false) = Rule(Dimension.VOLUME, ml.toList(), head)
     private fun c(vararg pieces: Long) = Rule(Dimension.COUNT, pieces.toList())
 
-    /** Keyed by the name as [HebrewText.matchKey] writes it. */
+    /**
+     * Every catalogue item that is sold in fixed packs and that a recipe can ask for by weight, volume or count.
+     * Keyed by the catalogue's name ([Catalog.items]); aliases ("שמן קנולה", "ספגטי") reach it through [Catalog.lookup].
+     * Sizes are the ones on Israeli shelves; to change what the app rounds to, change them here.
+     */
     private val rules: Map<String, Rule> = listOf(
         // חלב וביצים
-        "חלב" to v(1000, 1500, head = true), "שמנת מתוקה" to v(250, 500), "שמנת חמוצה" to w(200), "קוטג'" to w(250),
-        "חמאה" to w(200), "גבינה לבנה" to w(250, 500), "ביצים" to c(6, 12, 30), "ביצה" to c(6, 12, 30),
+        "חלב" to v(1000, 1500, head = true), "שמנת מתוקה" to v(250, 500), "שמנת חמוצה" to w(200), "קוטג'" to w(250, 500),
+        "חמאה" to w(200), "גבינה לבנה" to w(250, 500), "גבינת שמנת" to w(200), "מוצרלה" to w(200, 400),
+        "יוגורט" to w(200, 500), "לבן" to w(200, 500, 1000), "ביצים" to c(6, 12, 30), "ביצה" to c(6, 12, 30),
         // מזווה
         "קמח" to w(1000, head = true), "סוכר" to w(1000, head = true), "סוכר חום" to w(500), "אבקת סוכר" to w(500),
         "מלח" to w(1000), "אורז" to w(500, 1000, head = true), "פסטה" to w(500, head = true), "סולת" to w(1000),
-        "עדשים" to w(500, head = true), "קוסקוס" to w(500), "שיבולת שועל" to w(500), "טחינה" to w(500),
+        "עדשים" to w(500, head = true), "קוסקוס" to w(500), "שיבולת שועל" to w(500), "טחינה" to w(500, 1000),
         "שמן" to v(1000), "שמן קנולה" to v(1000), "שמן חמניות" to v(1000), "שמן זית" to v(500, 750),
+        "רסק עגבניות" to w(140, 500), "קטשופ" to w(500, 750), "מיונז" to w(500), "קפה" to w(100, 200),
+        "דבש" to w(250, 500), "ממרח שוקולד" to w(350, 750), "שוקולד" to w(100),
+        // דגני בוקר
+        "קורנפלקס" to w(375, 750),
+        // משקאות
+        "מים מינרליים" to v(500, 1500), "סודה" to v(1500), "מיץ" to v(1000, 1500), "משקה קל" to v(1500, 2000),
+        "מיץ ענבים" to v(750, 1000),
+        // קפואים
+        "ירקות קפואים" to w(400, 800), "גלידה" to v(500, 1000),
     ).associate { (name, rule) -> HebrewText.matchKey(name) to rule }
+
+    /**
+     * The rest of the catalogue, and why a recipe's amount of it is left as it is:
+     *  - sold loose by weight or by the piece: produce, fresh meat and fish, deli cheese, bakery;
+     *  - sold in packs that vary too much by brand and shop to round to (cereal, snacks, frozen pastry, desserts);
+     *  - not food, so no recipe or menu asks for them (cleaning, toiletries, baby).
+     */
+    internal val notPacked: Set<String> = listOf(
+        "עגבניות", "מלפפונים", "בצל", "שום", "תפוחי אדמה", "גזר", "פלפל", "חסה", "פטרוזיליה", "כוסברה", "לימון", "בננות",
+        "תפוחים", "תפוזים", "אבוקדו", "קישואים", "בטטה",
+        "גבינה צהובה", "גבינה בולגרית", "מעדנים",
+        "לחם", "לחם מלא", "פיתות", "לחמניות", "חלות", "טורטיות",
+        "חזה עוף", "שניצל", "כרעיים", "בשר טחון", "נקניקיות", "פסטרמה", "סלמון", "טונה",
+        "חומוס", "תבלינים", "תה", "דגני בוקר", "גרנולה", "עוגיות", "ביסלי", "במבה", "קרקרים", "חטיפי דגנים", "בורקס",
+        "נייר טואלט", "מגבות נייר", "סבון כלים", "אבקת כביסה", "מרכך כביסה", "שקיות אשפה", "נייר כסף", "חומר ניקוי",
+        "סבון ידיים", "שמפו", "משחת שיניים", "מברשות שיניים", "דאודורנט", "חיתולים", "מגבונים", "תמ\"ל",
+    ).map(HebrewText::matchKey).toSet()
+
+    /** Catalogue names that have a pack rule. */
+    internal val packagedNames: Set<String> get() = rules.keys
 
     /** The head-word keys, longest first, so "שיבולת שועל" is tried before "שיבולת". */
     private val headKeys: List<String> = rules.filterValues { it.head }.keys.sortedByDescending { it.length }
