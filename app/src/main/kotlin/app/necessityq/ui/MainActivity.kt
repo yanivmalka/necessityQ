@@ -79,6 +79,7 @@ class MainActivity : ComponentActivity() {
                 // a themed ground for the whole app, so text everywhere (also in full-page dialogs such as a
                 // צ'אט פוד conversation) takes the theme's ink: light on the dark theme, dark on the light one
                 Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) { Root(vm) }
+                CrashReportDialog()
             }
         }
         openChatFrom(intent)

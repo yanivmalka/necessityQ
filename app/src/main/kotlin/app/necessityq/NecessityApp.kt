@@ -8,6 +8,7 @@ class NecessityApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        app.necessityq.platform.CrashReport.install(this)
         container = AppContainer(this)
     }
 }
