@@ -416,7 +416,9 @@ private fun Root(vm: AppViewModel) {
                             when (page) {
                                 null -> HorizontalPager(
                                     state = pager,
-                                    key = { tabs[it] },
+                                    // while the tabs change (a tab turned on or off) the pager may ask for a page the list does not
+                                    // have yet (or any more) for one frame: never index it blindly
+                                    key = { tabs.getOrNull(it) ?: it },
                                     // no swiping away from the list: a quick swipe on a tile (meant to change tab)
                                     // would mark it bought; the tabs below move between pages there
                                     userScrollEnabled = tabs.getOrNull(pager.currentPage).let { onPage ->
@@ -424,7 +426,8 @@ private fun Root(vm: AppViewModel) {
                                     },
                                     modifier = Modifier.fillMaxSize(),
                                 ) { index ->
-                                    when (tabs[index]) {
+                                    val tab = tabs.getOrNull(index) ?: return@HorizontalPager
+                                    when (tab) {
                                         Dest.LIST -> ListScreen(
                                             vm, household.name, modifier,
                                             onOpenMessages = { go(Dest.MESSAGES, from = Dest.LIST) },
