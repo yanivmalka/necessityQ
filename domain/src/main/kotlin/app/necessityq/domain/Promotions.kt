@@ -189,4 +189,16 @@ object PromoOffers {
         }
         return out.sortedWith(compareByDescending<PromoOffer> { it.percent }.thenBy { it.itemName })
     }
+
+    /**
+     * The one promotion shown on each item of the list: the one at [preferBranch] (the branch whose prices the list
+     * shows, or the shop you are in) when there is one there; otherwise — unless [onlyPreferred] (in the shop, where
+     * only that shop's promotions help) — the biggest saving at another followed branch.
+     */
+    fun perItem(offers: List<PromoOffer>, preferBranch: String?, onlyPreferred: Boolean): Map<String, PromoOffer> =
+        offers.groupBy { it.itemId }.mapNotNull { (itemId, list) ->
+            val here = list.filter { it.branchId == preferBranch }.maxByOrNull { it.percent }
+            val pick = here ?: if (onlyPreferred) null else list.maxByOrNull { it.percent }
+            pick?.let { itemId to it }
+        }.toMap()
 }

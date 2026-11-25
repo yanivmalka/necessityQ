@@ -66,7 +66,7 @@ fun AppIconPicker(vm: AppViewModel) {
             )
         }
         Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            Modifier.fillMaxWidth().fadingHorizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             AppIcon.entries.forEach { icon ->

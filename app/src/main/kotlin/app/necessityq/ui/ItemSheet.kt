@@ -133,6 +133,9 @@ fun ItemSheet(
 ) {
     // the page slides in from the left and, on closing, slides back out before it is removed
     val pageWindow = rememberSlidingPage(onClosed = onDismiss)
+    // closed again at once = opened by mistake (counted for the suggestion to open it with a double tap)
+    val openedAt = remember(itemId) { System.currentTimeMillis() }
+    androidx.compose.runtime.DisposableEffect(itemId) { onDispose { vm.noteItemPageClosed(openedAt) } }
     val snapshot by vm.snapshot.collectAsStateWithLifecycle()
     val favorites by vm.favorites.collectAsStateWithLifecycle()
     val allMessages by vm.itemMessages.collectAsStateWithLifecycle()
@@ -240,7 +243,7 @@ fun ItemSheet(
         }
         Column(
             Modifier.fillMaxWidth().weight(1f)
-                .verticalScroll(scroll).padding(horizontal = 16.dp, vertical = 4.dp),
+                .fadingVerticalScroll(scroll).padding(horizontal = 16.dp, vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             // first, in one row: bought (in the shop), missing (a toggle — filled while marked), remove, and the product's צ'אט פוד
@@ -275,7 +278,7 @@ fun ItemSheet(
                 } else {
                     Button(onClick = { vm.addByName(itemName) }, contentPadding = compact) { Text("הוספה לרשימה", maxLines = 1, softWrap = false) }
                 }
-                // צ'אט פוד can be turned off (הגדרות ← פיצ'רים)
+                // צ'אט פוד can be turned off (הגדרות ← יכולות)
                 if (app.necessityq.domain.Feature.CHAT in features) {
                     OutlinedButton(
                         onClick = { chat = itemId to (line?.displayName ?: itemName) },
@@ -473,7 +476,7 @@ internal fun MessageDetailsDialog(vm: AppViewModel, m: ItemMessage, onDismiss: (
         onDismissRequest = onDismiss,
         title = { Text("פרטי הודעה") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.verticalScroll(rememberScrollState())) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fadingVerticalScroll(rememberScrollState())) {
                 InfoLine("נכתבה על ידי", if (m.authorId == vm.me) "אני" else (names[m.authorId] ?: m.authorName))
                 InfoLine("נשלחה", fullFmt(m.atMillis))
                 m.editedAtMillis?.let { InfoLine("נערכה", fullFmt(it)) }
@@ -878,10 +881,12 @@ private fun ProductsPanel(
             val percents = remember(info) { app.necessityq.domain.ItemPrices.percents(info.candidates) }
             if (brands.size > 1) {
                 // the companies: the common ones first, then the less known; one line that scrolls sideways
+                val brandRow = androidx.compose.foundation.lazy.rememberLazyListState()
                 androidx.compose.foundation.lazy.LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
-                    modifier = Modifier.fillMaxWidth(),
+                    state = brandRow,
+                    modifier = Modifier.fillMaxWidth().fadingEdges(brandRow, horizontal = true),
                 ) {
                     item { FilterChip(selected = brand == null, onClick = { brand = null }, label = { Text("כל החברות") }) }
                     items(brands, key = { it }) { b ->
@@ -891,7 +896,7 @@ private fun ProductsPanel(
             }
             if (percents.size > 1) {
                 Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+                    Modifier.fillMaxWidth().fadingHorizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     percents.forEach { p -> FilterChip(selected = pct == p, onClick = { pct = if (pct == p) null else p }, label = { Text(p) }) }
@@ -902,7 +907,7 @@ private fun ProductsPanel(
             }
             // the products scroll up and down under the choosers, the edges fading where there is more
             val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-            Box(Modifier.fillMaxWidth().weight(1f, fill = false).verticalFadingEdges(listState)) {
+            Box(Modifier.fillMaxWidth().weight(1f, fill = false).fadingEdges(listState, horizontal = false)) {
                 LazyColumn(Modifier.fillMaxWidth(), state = listState, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp)) {
                     items(filtered, key = { it.code }) { c ->
                         val chosen = info.preferred?.code == c.code
@@ -1066,7 +1071,7 @@ private fun BranchQuotesStrip(vm: AppViewModel, chosen: app.necessityq.domain.Br
         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
     )
     Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        Modifier.fillMaxWidth().fadingHorizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         quotes.forEach { q ->
@@ -1136,7 +1141,7 @@ private fun UnitChooser(
 ) {
     val label = { u: app.necessityq.domain.QuantityUnit -> if (u == app.necessityq.domain.QuantityUnit.PACKAGE) "מארז" else u.label }
     // one line: scrolls sideways rather than wrapping
-    Row(modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    Row(modifier.fadingHorizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         androidx.compose.material3.FilterChip(selected = current == null, onClick = { onChoose(null) }, label = { Text("ללא") })
         shown.forEach { u ->
             androidx.compose.material3.FilterChip(selected = current == u, onClick = { onChoose(u) }, label = { Text(label(u)) })
@@ -1189,26 +1194,3 @@ private fun LargeAmountNotice(message: String, onConfirm: () -> Unit) {
     }
 }
 
-/** Fades the top / bottom edge of a scrolling list out to nothing, each only while there is more to scroll that way. */
-private fun Modifier.verticalFadingEdges(state: androidx.compose.foundation.lazy.LazyListState, length: androidx.compose.ui.unit.Dp = 28.dp): Modifier =
-    this
-        .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
-        .drawWithContent {
-            drawContent()
-            val fade = length.toPx().coerceAtMost(size.height / 3)
-            if (state.canScrollBackward) {
-                drawRect(
-                    Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black, startY = 0f, endY = fade),
-                    size = androidx.compose.ui.geometry.Size(size.width, fade),
-                    blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
-                )
-            }
-            if (state.canScrollForward) {
-                drawRect(
-                    Brush.verticalGradient(0f to Color.Black, 1f to Color.Transparent, startY = size.height - fade, endY = size.height),
-                    topLeft = androidx.compose.ui.geometry.Offset(0f, size.height - fade),
-                    size = androidx.compose.ui.geometry.Size(size.width, fade),
-                    blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
-                )
-            }
-        }

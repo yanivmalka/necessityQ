@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,6 +19,7 @@ import app.necessityq.ui.icons.Icons
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -57,43 +59,84 @@ import kotlin.math.roundToInt
 
 // ---------- Onboarding ----------
 
+/**
+ * The welcome page of a new user: what the app is, in three lines, then a new household or joining one. With [demo]
+ * (the replay of the first run, "הדגמת התחלה"), nothing is created or joined: both buttons go on to the questions.
+ */
 @Composable
-fun OnboardingScreen(vm: AppViewModel, account: Account, modifier: Modifier = Modifier) {
+fun OnboardingScreen(vm: AppViewModel, account: Account, modifier: Modifier = Modifier, demo: Boolean = false) {
     var name by remember { mutableStateOf("הבית שלנו") }
     var code by remember { mutableStateOf("") }
     Column(
-        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
+        modifier.fillMaxSize().fadingVerticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        if (demo) {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("הדגמת התחלה", fontWeight = FontWeight.Bold)
+                    Text(
+                        "כך רואה את האפליקציה משתמש חדש. שום בית לא ייווצר ושום דבר לא יימחק: הרשימה, הבית וההיסטוריה שלך נשמרים. " +
+                            "בסוף השאלות ייקבעו היכולות לפי התשובות.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(onClick = { vm.endFirstRunReplay(restore = true) }) { Text("יציאה מההדגמה") }
+                }
+            }
+        }
         Text("necessityQ", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.primary)
-        Text("רשימת קניות משותפת שלומדת מה הבית צורך ומציעה מה להוסיף.")
+        Text("רשימת הקניות של הבית, שלומדת מה אתם צורכים", style = MaterialTheme.typography.titleMedium)
+        listOf(
+            "כל בני הבית רואים ומעדכנים את אותה רשימה, בזמן אמת.",
+            "האפליקציה לומדת כל כמה זמן אתם קונים כל מוצר, ומזכירה לפני שהוא נגמר.",
+            "אם תרצו: מחירים בסניף שלכם, מבצעים ותפריט שבועי.",
+        ).forEach { line ->
+            Row(verticalAlignment = Alignment.Top) {
+                Text("✓", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(8.dp))
+                Text(line, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
         Spacer(Modifier.height(12.dp))
         Text("בית חדש", style = MaterialTheme.typography.titleMedium)
         OutlinedTextField(name, { name = it }, label = { Text("שם הבית") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        Button(onClick = { vm.createHousehold(name) }, modifier = Modifier.fillMaxWidth()) { Text("יצירת בית") }
+        Button(
+            onClick = { if (demo) vm.replayOnboardingDone() else vm.createHousehold(name) },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("יצירת בית") }
 
         Spacer(Modifier.height(12.dp))
         Text("הצטרפות לבית קיים", style = MaterialTheme.typography.titleMedium)
         if (vm.isShared) {
+            Text(
+                "מישהו מהבית שלח לכם קישור? פתחו אותו והצטרפות תהיה בנגיעה. אפשר גם להקליד את הקוד שבהודעה.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             OutlinedTextField(
                 code, { code = it.uppercase().take(6) },
                 label = { Text("קוד הצטרפות (6 תווים)") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
             )
-            OutlinedButton(onClick = { vm.joinHousehold(code) }, enabled = code.length == 6, modifier = Modifier.fillMaxWidth()) {
-                Text("הצטרפות")
-            }
+            OutlinedButton(
+                onClick = { if (demo) vm.replayOnboardingDone() else vm.joinHousehold(code) },
+                enabled = demo || code.length == 6,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("הצטרפות") }
         } else {
             Text(
                 "גרסה זו נבנתה ללא שרת סנכרון, ולכן הרשימה נשמרת במכשיר זה בלבד.",
                 style = MaterialTheme.typography.bodySmall,
             )
         }
-        if (vm.supportsAccounts) {
+        if (vm.supportsAccounts && !demo) {
             Spacer(Modifier.height(12.dp))
+            Text(
+                "כבר הייתה לכם רשימה בטלפון אחר? התחברו עם אותו חשבון Google כדי לחזור אליה.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             AccountCard(vm, account)
         }
-        Spacer(Modifier.height(12.dp))
-        UpdateCard(vm)
     }
 }
 
@@ -179,7 +222,8 @@ fun HistoryScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
 
     Column(modifier.fillMaxSize()) {
         TopAppBar(navigationIcon = { BackNavButton() }, title = { Text("היסטוריה והרגלי קנייה") })
-        LazyColumn(Modifier.fillMaxSize()) {
+        val historyList = androidx.compose.foundation.lazy.rememberLazyListState()
+        LazyColumn(Modifier.fillMaxSize().fadingEdges(historyList, horizontal = false), state = historyList) {
             if (stats.isEmpty()) {
                 item {
                     Text(

@@ -138,9 +138,9 @@ class MainActivity : ComponentActivity() {
 /** Screens of the app. The first four are the bottom-bar tabs; the rest open from the "הבית" hub. */
 private enum class Dest(val title: String) {
     LIST("רשימה"), MENU("תפריט"), PRICES("מחירים"), HOME("הבית"),
-    HOUSEHOLD("הבית ומשתתפים"), MESSAGES("צ'אט פוד"), HISTORY("היסטוריה"), ACCOUNT("חשבון"),
+    HOUSEHOLD("בני הבית ושיתוף"), MESSAGES("צ'אט פוד"), HISTORY("היסטוריה"), ACCOUNT("חשבון"),
     SETTINGS("הגדרות"), APPEARANCE("הגדרות"), UPDATES("עדכונים"), ABOUT("אודות"),
-    FAMILY_MEMBER("בן/בת משפחה"),
+    FAMILY_MEMBER("בן/בת משפחה"), HELP("עזרה: איך משתמשים"), SUGGESTIONS("הצעות שדחיתם"),
 }
 
 /** The bottom-bar tabs (their order, and the one the app opens on, are chosen in the settings). */
@@ -167,7 +167,7 @@ private fun Root(vm: AppViewModel) {
     // system messages lie in layers: a new one does not hide (or drop) the previous one and its "ביטול"
     val systemMessages = remember { SystemMessagesState() }
     LaunchedEffect(Unit) { vm.messages.collect { systemMessages.show(it) } }
-    LaunchedEffect(Unit) { vm.undo.collect { event -> systemMessages.show(event.text, event.undo) } }
+    LaunchedEffect(Unit) { vm.undo.collect { event -> systemMessages.show(event.text, event.undo, event.label) } }
 
     // notifications (Android 13+) — asked in context (a second member, the first "חסר" or tag), once per run
     val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -196,7 +196,9 @@ private fun Root(vm: AppViewModel) {
     }
 
     // the opening screen stays until the list and its prices are in (once per launch; kept across rotation)
-    var started by rememberSaveable { mutableStateOf(false) }
+    // ("הדגמת התחלה" shows it again: [AppViewModel.introRun] is bumped)
+    val introRun by vm.introRun.collectAsStateWithLifecycle()
+    var started by rememberSaveable(introRun) { mutableStateOf(false) }
     if (!started) {
         val step by vm.startupStep.collectAsStateWithLifecycle()
         val palette by vm.palette.collectAsStateWithLifecycle()
@@ -209,9 +211,11 @@ private fun Root(vm: AppViewModel) {
         is Session.Error -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(s.message) }
         is Session.SignedIn -> {
             val household = s.household
-            if (household == null) {
+            val replay by vm.firstRunReplay.collectAsStateWithLifecycle()
+            if (household == null || replay == AppViewModel.FirstRunReplay.ONBOARDING) {
                 Scaffold(snackbarHost = { SystemMessagesHost(systemMessages) }) { padding ->
-                    OnboardingScreen(vm, s.account, Modifier.padding(padding))
+                    // a replayed first run shows the welcome page without creating anything
+                    OnboardingScreen(vm, s.account, Modifier.padding(padding), demo = household != null)
                 }
                 // opened from a join link: one tap joins (the code can still be typed by hand)
                 val pendingJoin by vm.pendingJoin.collectAsStateWithLifecycle()
@@ -234,7 +238,7 @@ private fun Root(vm: AppViewModel) {
             /** Where the back arrow of a secondary page leads; null on the tabs. */
             var backTo by rememberSaveable { mutableStateOf<Dest?>(null) }
             // the settings tab to open on: notifications when coming from the household's notification row
-            var settingsTab by rememberSaveable { mutableStateOf(SettingsTab.LIST) }
+            var settingsTab by rememberSaveable { mutableStateOf(SettingsTab.FEATURES) }
             /** The family member whose profile is open ("" = a new member). */
             var familyMember by rememberSaveable { mutableStateOf("") }
             val unread by vm.unreadTotal.collectAsStateWithLifecycle()
@@ -245,7 +249,7 @@ private fun Root(vm: AppViewModel) {
                 chatRequest?.let { openChat = it; vm.consumeOpenChatRequest() }
             }
 
-            // the "תפריט" and "מחירים" tabs can be turned off (הגדרות ← פיצ'רים): with both off, two tabs are left
+            // the "תפריט" and "מחירים" tabs can be turned off (הגדרות ← יכולות): with both off, two tabs are left
             val features by vm.features.collectAsStateWithLifecycle()
             val tabOrder by vm.tabOrder.collectAsStateWithLifecycle()
             val tabs = remember(features, tabOrder) {
@@ -299,6 +303,35 @@ private fun Root(vm: AppViewModel) {
                 if (shoppingOnList) vm.setMode(ListMode.PLAN) else back()
             }
 
+            val declinedAdvice by vm.declinedAdvice.collectAsStateWithLifecycle()
+            // which features are used: one nobody opens for a month is offered to be hidden ("הצעות")
+            LaunchedEffect(dest) {
+                when (dest) {
+                    Dest.MENU -> vm.noteUsed(app.necessityq.domain.Feature.MENU_TAB)
+                    Dest.PRICES -> vm.noteUsed(app.necessityq.domain.Feature.PRICES_TAB)
+                    Dest.MESSAGES -> vm.noteUsed(app.necessityq.domain.Feature.CHAT)
+                    else -> Unit
+                }
+            }
+            LaunchedEffect(openChat) { if (openChat != null) vm.noteUsed(app.necessityq.domain.Feature.CHAT) }
+            // after the first-run questions, a household that shops together goes straight on to inviting
+            val openInvite by vm.openInvite.collectAsStateWithLifecycle()
+            LaunchedEffect(openInvite) {
+                if (openInvite) {
+                    vm.consumeOpenInvite()
+                    go(Dest.HOUSEHOLD, from = Dest.HOME)
+                }
+            }
+
+            // a suggestion to pick a branch opens the "מחירים" tab — once it is among the tabs (it may have just been turned on)
+            var pricesRequested by remember { mutableStateOf(false) }
+            LaunchedEffect(pricesRequested, tabs) {
+                if (pricesRequested && Dest.PRICES in tabs) {
+                    pricesRequested = false
+                    go(Dest.PRICES)
+                }
+            }
+
             val hubEntries = listOf(
                 listOf(
                     HubEntry(Dest.HOUSEHOLD.title, Icons.Default.Group) { go(Dest.HOUSEHOLD, from = Dest.HOME) },
@@ -307,9 +340,15 @@ private fun Root(vm: AppViewModel) {
                     }.takeIf { app.necessityq.domain.Feature.CHAT in features },
                     HubEntry(Dest.HISTORY.title, Icons.Default.History) { go(Dest.HISTORY, from = Dest.HOME) },
                 ).filterNotNull(),
+                listOfNotNull(
+                    HubEntry(Dest.HELP.title, Icons.Default.Info) { go(Dest.HELP, from = Dest.HOME) },
+                    HubEntry(Dest.SUGGESTIONS.title, Icons.Default.AutoAwesome, badge = declinedAdvice.size.toString()) {
+                        go(Dest.SUGGESTIONS, from = Dest.HOME)
+                    }.takeIf { declinedAdvice.isNotEmpty() },
+                ),
                 listOf(
                     HubEntry(Dest.ACCOUNT.title, Icons.Default.AccountCircle) { go(Dest.ACCOUNT, from = Dest.HOME) },
-                    HubEntry(Dest.SETTINGS.title, Icons.Default.Tune) { settingsTab = SettingsTab.LIST; go(Dest.SETTINGS, from = Dest.HOME) },
+                    HubEntry(Dest.SETTINGS.title, Icons.Default.Tune) { settingsTab = SettingsTab.FEATURES; go(Dest.SETTINGS, from = Dest.HOME) },
                 ),
                 listOf(
                     HubEntry(
@@ -389,6 +428,8 @@ private fun Root(vm: AppViewModel) {
                                             vm, household.name, modifier,
                                             onOpenMessages = { go(Dest.MESSAGES, from = Dest.LIST) },
                                             onOpenDisplaySettings = { settingsTab = SettingsTab.LIST; go(Dest.SETTINGS, from = Dest.LIST) },
+                                            onOpenPrices = { pricesRequested = true },
+                                            onOpenHelp = { go(Dest.HELP, from = Dest.LIST) },
                                         )
                                         Dest.MENU -> MenuScreen(vm, modifier, onInnerPage = { menuInnerPage = it })
                                         Dest.PRICES -> PricesScreen(vm, modifier)
@@ -408,9 +449,11 @@ private fun Root(vm: AppViewModel) {
                                 Dest.ACCOUNT -> AccountScreen(vm, s.account, modifier)
                                 // "מראה" is a part of the settings' "האפליקציה" tab now
                                 Dest.SETTINGS -> SettingsScreen(vm, modifier, settingsTab)
-                                Dest.APPEARANCE -> SettingsScreen(vm, modifier, SettingsTab.APP)
+                                Dest.APPEARANCE -> SettingsScreen(vm, modifier, SettingsTab.LOOK)
                                 Dest.UPDATES -> UpdatesScreen(vm, modifier)
                                 Dest.ABOUT -> AboutScreen(modifier)
+                                Dest.HELP -> HelpScreen(modifier)
+                                Dest.SUGGESTIONS -> DeclinedSuggestionsScreen(vm, modifier, onOpenPrices = { pricesRequested = true })
                                 Dest.FAMILY_MEMBER -> MemberScreen(vm, familyMember.ifEmpty { null }, onBack = { back() }, modifier = modifier)
                                 // the tabs are never a page of their own (they live in the pager)
                                 Dest.LIST, Dest.MENU, Dest.PRICES, Dest.HOME -> Unit
@@ -427,16 +470,16 @@ private fun Root(vm: AppViewModel) {
                     text = {
                         Text(
                             if (code == household.joinCode) "הקישור הוא לבית \"${household.name}\", שכבר הצטרפת אליו."
-                            else "כדי להצטרף לבית אחר צריך קודם לצאת מ\"${household.name}\" (הבית ← הבית ומשתתפים ← יציאה מהבית), ואז לפתוח שוב את הקישור.",
+                            else "כדי להצטרף לבית אחר צריך קודם לצאת מ\"${household.name}\" (הבית ← בני הבית ושיתוף ← יציאה מהבית), ואז לפתוח שוב את הקישור.",
                         )
                     },
                     confirmButton = { androidx.compose.material3.TextButton(onClick = vm::consumeJoin) { Text("הבנתי") } },
                 )
             }
 
-            // the first run asks once how much of the app to show; everything can be turned on again in the settings
+            // the first run asks a few questions about the household's habits; everything can change later in the settings
             val featuresChosen by vm.featuresChosen.collectAsStateWithLifecycle()
-            if (!featuresChosen) FeaturesQuestion(onChoose = vm::setFeatures)
+            if (!featuresChosen) FirstRunQuestions(onDone = vm::finishFirstRun)
 
             // a conversation opened from the messages or a notification: its own page, with the product's page a tap away
             var openProduct by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -455,28 +498,6 @@ private fun Root(vm: AppViewModel) {
             }
         }
     }
-}
-
-/** First run: "רשימה פשוטה" (only the list) or "הכול". Each feature is a switch in "הגדרות" ← "פיצ'רים". */
-@Composable
-private fun FeaturesQuestion(onChoose: (app.necessityq.domain.Features) -> Unit) {
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = {},
-        properties = androidx.compose.ui.window.DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
-        title = { Text("איך להתחיל?") },
-        text = {
-            Text(
-                "רשימה פשוטה: רק הרשימה והבית, בלי מחירים, תפריט, צ'אט והצעות. הכול: כל מה שהאפליקציה יודעת לעשות. " +
-                    "אפשר תמיד להדליק או לכבות כל דבר ב\"הגדרות\" ← \"פיצ'רים\".",
-            )
-        },
-        confirmButton = {
-            androidx.compose.material3.TextButton(onClick = { onChoose(app.necessityq.domain.Features.ALL) }) { Text("הכול") }
-        },
-        dismissButton = {
-            androidx.compose.material3.TextButton(onClick = { onChoose(app.necessityq.domain.Features.SIMPLE) }) { Text("רשימה פשוטה") }
-        },
-    )
 }
 
 /** The background download, shown above the tabs on every screen: animated icon, progress, stop. */

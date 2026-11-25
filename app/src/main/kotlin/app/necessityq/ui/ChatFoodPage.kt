@@ -154,7 +154,7 @@ fun ChatFoodPage(
                 }
             }
             Column(
-                Modifier.fillMaxWidth().weight(1f).verticalScroll(scroll).padding(horizontal = 12.dp, vertical = 4.dp),
+                Modifier.fillMaxWidth().weight(1f).fadingVerticalScroll(scroll).padding(horizontal = 12.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (thread.isEmpty() && typingHere.isEmpty()) {

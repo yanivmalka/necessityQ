@@ -90,7 +90,7 @@ fun TripPlanSheet(vm: AppViewModel, onDismiss: () -> Unit) {
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
+            Modifier.fillMaxWidth().fadingVerticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text("איפה הכי משתלם לקנות?", style = MaterialTheme.typography.titleLarge)
@@ -162,7 +162,8 @@ fun TripPlanSheet(vm: AppViewModel, onDismiss: () -> Unit) {
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.width(120.dp),
                     )
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    val thresholdRow = androidx.compose.foundation.lazy.rememberLazyListState()
+                    LazyRow(Modifier.fadingEdges(thresholdRow, horizontal = true), state = thresholdRow, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         items(listOf(20, 50, 100, 200)) { v ->
                             FilterChip(
                                 selected = settings.threshold == v,
@@ -427,7 +428,10 @@ fun PromoOffersCard(offers: List<PromoOffer>, basket: List<Pair<String, Promotio
 /** While shopping a split trip: one chip per stop (its items), and "הכל". */
 @Composable
 fun TripStopsRow(stops: List<String>, active: String?, counts: Map<String, Int>, all: List<PriceBranch>, onSelect: (String?) -> Unit) {
+    val stopRow = androidx.compose.foundation.lazy.rememberLazyListState()
     LazyRow(
+        Modifier.fadingEdges(stopRow, horizontal = true),
+        state = stopRow,
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {

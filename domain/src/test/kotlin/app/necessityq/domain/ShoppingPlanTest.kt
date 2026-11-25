@@ -141,4 +141,23 @@ class ShoppingPlanTest {
         assertEquals(listOf("b"), PromoOffers.basket(bp, now, includeMembers = false).map { it.id })
         assertEquals(listOf("b", "c"), PromoOffers.basket(bp, now, includeMembers = true).map { it.id })
     }
+
+    @Test
+    fun `each item shows one promotion, the one where the list is priced when there is one`() {
+        fun offer(item: String, branch: String, regular: Double, promo: Double) =
+            PromoOffer(item, item, branch, Promotion("p$item$branch", "מבצע", setOf("x")), prod("x", regular), regular, promo)
+        val offers = listOf(
+            offer("milk", "a", 10.0, 9.0), // 10% here
+            offer("milk", "b", 10.0, 5.0), // 50% elsewhere
+            offer("bread", "b", 10.0, 8.0), // only elsewhere
+        )
+        val planning = PromoOffers.perItem(offers, preferBranch = "a", onlyPreferred = false)
+        assertEquals("a", planning["milk"]?.branchId)
+        assertEquals("b", planning["bread"]?.branchId)
+        // in the shop: only that shop's promotions
+        val shopping = PromoOffers.perItem(offers, preferBranch = "a", onlyPreferred = true)
+        assertEquals(setOf("milk"), shopping.keys)
+        // no branch of its own: the biggest saving
+        assertEquals("b", PromoOffers.perItem(offers, preferBranch = null, onlyPreferred = false)["milk"]?.branchId)
+    }
 }

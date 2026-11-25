@@ -58,7 +58,8 @@ fun FamilyCard(vm: AppViewModel, onOpenMember: (memberId: String?) -> Unit) {
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text("המשפחה", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        val familyRow = androidx.compose.foundation.lazy.rememberLazyListState()
+        LazyRow(Modifier.fadingEdges(familyRow, horizontal = true), state = familyRow, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             items(data.members, key = { it.id }) { m ->
                 val isMe = m.linkedUserId != null && m.linkedUserId == vm.me
                 val photo = m.linkedUserId?.let { uid -> participants.firstOrNull { it.userId == uid }?.photo }

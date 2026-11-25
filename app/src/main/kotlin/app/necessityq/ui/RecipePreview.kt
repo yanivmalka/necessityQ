@@ -84,7 +84,7 @@ fun RecipePreviewSheet(
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).navigationBarsPadding(),
+            Modifier.fillMaxWidth().fadingVerticalScroll(rememberScrollState()).padding(horizontal = 20.dp).navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -278,7 +278,7 @@ fun ImportMethodSheet(vm: AppViewModel, dish: app.necessityq.domain.Dish, onDism
     var replaceIngredients by remember { mutableStateOf(dish.nutritionCode != null) }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).navigationBarsPadding(),
+            Modifier.fillMaxWidth().fadingVerticalScroll(rememberScrollState()).padding(horizontal = 20.dp).navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text("אופן הכנה ל${dish.name}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)

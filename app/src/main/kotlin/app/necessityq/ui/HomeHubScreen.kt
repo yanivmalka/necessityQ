@@ -54,7 +54,7 @@ fun HomeHubScreen(
     val members by vm.members.collectAsStateWithLifecycle()
     Column(
         modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
-            .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 20.dp),
+            .fadingVerticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Column(Modifier.padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {

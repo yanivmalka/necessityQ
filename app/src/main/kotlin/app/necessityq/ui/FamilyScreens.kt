@@ -191,7 +191,7 @@ fun MemberScreen(vm: AppViewModel, memberId: String?, onBack: () -> Unit, modifi
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
         )
         Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+            Modifier.fadingVerticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {

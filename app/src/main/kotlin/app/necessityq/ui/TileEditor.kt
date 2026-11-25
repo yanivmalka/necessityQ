@@ -87,7 +87,7 @@ fun TileEditorSheet(
         Column(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Column(Modifier.padding(horizontal = 16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("תצוגת האריח · ${mode.label}", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    Text("מה מוצג על כל פריט · ${mode.label}", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                     // a real (outlined) button, so it does not read as a caption beside the title; greyed out
                     // while the draft already is the default
                     OutlinedButton(
@@ -134,7 +134,7 @@ fun TileEditorSheet(
                 }
             }
             Text(
-                "מוצגים ${draft.shown.count { it.availableIn(mode) }} מתוך ${TileElement.of(mode).size}",
+                "מוצגים ${draft.shown.count { it.availableIn(mode) }} מתוך ${TileElement.of(mode).size} רכיבים",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp),

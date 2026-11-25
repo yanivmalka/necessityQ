@@ -46,7 +46,7 @@ fun PalettePicker(vm: AppViewModel) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            Modifier.fillMaxWidth().fadingHorizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             AppPalette.entries.forEach { p ->

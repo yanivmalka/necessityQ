@@ -193,7 +193,7 @@ fun RecipeScreen(vm: AppViewModel, dishId: String, onBack: () -> Unit, onEdit: (
         }
 
         Column(
-            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+            Modifier.weight(1f).fadingVerticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             val stars = data.members.mapNotNull { data.rating(it.id, dish.id) }.filter { it > 0 }
@@ -686,8 +686,10 @@ private fun RecipeReviewSheet(
                 Text("מה ייכנס לרשימה", style = MaterialTheme.typography.titleLarge)
                 Text("$dishName · $servings מנות", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            val ingredientList = androidx.compose.foundation.lazy.rememberLazyListState()
             LazyColumn(
-                Modifier.weight(1f, fill = false),
+                Modifier.weight(1f, fill = false).fadingEdges(ingredientList, horizontal = false),
+                state = ingredientList,
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
@@ -801,7 +803,7 @@ fun RecipeEditScreen(vm: AppViewModel, dishId: String?, onBack: () -> Unit, onSa
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
         )
         Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+            Modifier.fadingVerticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             OutlinedTextField(
@@ -961,10 +963,12 @@ fun RecipeSearchScreen(vm: AppViewModel, onBack: () -> Unit, onOpen: (String) ->
             Spacer(Modifier.height(4.dp))
         }
 
+        val searchList = androidx.compose.foundation.lazy.rememberLazyListState()
         LazyColumn(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().fadingEdges(searchList, horizontal = false),
+            state = searchList,
         ) {
             if (debounced.isEmpty()) {
                 item {

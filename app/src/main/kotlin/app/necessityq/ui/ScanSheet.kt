@@ -97,7 +97,7 @@ fun ScanSheet(vm: AppViewModel) {
     val scanAgain = rememberBarcodeScan(vm) { vm.onScanned(it) }
     ModalBottomSheet(onDismissRequest = vm::closeScan, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 24.dp),
+            Modifier.fillMaxWidth().fadingVerticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             ScanContent(vm, r)

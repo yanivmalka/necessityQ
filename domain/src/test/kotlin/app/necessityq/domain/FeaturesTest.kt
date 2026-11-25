@@ -74,4 +74,21 @@ class FeaturesTest {
         assertFalse(f.isOn(Feature.PRICES, ListMode.SHOP))
         assertTrue(TileElement.PRICE in f.tile(TileLayout(setOf(TileElement.PRICE)), ListMode.PLAN))
     }
+
+    @Test
+    fun `the simple list keeps the reminders, the recommended choice adds prices`() {
+        assertTrue(Feature.RUNNING_LOW in Features.SIMPLE)
+        assertFalse(Feature.MENU_TAB in Features.SIMPLE)
+        assertTrue(Feature.PRICES in Features.RECOMMENDED)
+        assertFalse(Feature.CHAT in Features.RECOMMENDED)
+    }
+
+    @Test
+    fun `first-run answers turn on what they describe`() {
+        assertEquals(setOf(Feature.RUNNING_LOW, Feature.FREQUENT), FirstRunAnswers.DEFAULT.features().plan)
+        val all = FirstRunAnswers(FirstRunQuestion.entries.toSet()).features()
+        // every feature but the advanced one is reachable from the questions
+        assertEquals(Feature.entries.toSet() - Feature.TILE_EXTRAS, all.plan)
+        assertEquals(Features(emptySet()), FirstRunAnswers(emptySet()).features())
+    }
 }

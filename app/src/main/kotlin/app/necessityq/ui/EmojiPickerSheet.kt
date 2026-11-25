@@ -83,7 +83,7 @@ fun EmojiPickerSheet(current: String?, onPick: (String) -> Unit, onDismiss: () -
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(46.dp),
                 state = grid,
-                modifier = Modifier.fillMaxWidth().height(300.dp).padding(horizontal = 8.dp),
+                modifier = Modifier.fillMaxWidth().height(300.dp).padding(horizontal = 8.dp).fadingEdges(grid, horizontal = false),
             ) {
                 categories.forEach { c ->
                     item(key = "title:${c.name}", span = { GridItemSpan(maxLineSpan) }) {

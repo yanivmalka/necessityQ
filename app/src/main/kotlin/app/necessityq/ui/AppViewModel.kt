@@ -352,8 +352,11 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     // ---------- undo ----------
 
-    /** A reversible action just done; its message has its own "ביטול" for half a minute. */
-    class UndoEvent(val text: String, val undo: () -> Unit)
+    /**
+     * A reversible action just done; its message has its own "ביטול" for half a minute. Also a message with another
+     * one-tap action ([label]), such as "עדכון" on a new version.
+     */
+    class UndoEvent(val text: String, val label: String = "ביטול", val undo: () -> Unit)
     // every undo is kept (the old queue of four dropped the rest)
     private val _undo = MutableSharedFlow<UndoEvent>(extraBufferCapacity = 64)
     val undo: SharedFlow<UndoEvent> = _undo
@@ -582,13 +585,178 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     }
     fun setStartTab(tab: app.necessityq.domain.AppTab) { prefs.startTab = tab; startTab.value = tab }
 
-    /** Which features are on; the first run asks once ("רשימה פשוטה" or "הכול"). */
+    /** Which features are on; the first run asks a few questions about the household's habits ([finishFirstRun]). */
     val features = MutableStateFlow(prefs.features)
     val featuresChosen = MutableStateFlow(prefs.featuresChosen)
     fun setFeatures(value: app.necessityq.domain.Features) {
+        val now = System.currentTimeMillis()
+        // a feature just turned on is not offered to be hidden before it had its month
+        app.necessityq.domain.Feature.entries.filter { it in value && it !in features.value }.forEach { prefs.markEnabled(it, now) }
         prefs.features = value
         features.value = value
         featuresChosen.value = true
+        refreshAdvice()
+    }
+
+    /** The first-run questions answered: their features, and — for a shared household — straight on to inviting. */
+    fun finishFirstRun(value: app.necessityq.domain.Features, invite: Boolean) {
+        endFirstRunReplay(restore = false)
+        setFeatures(value)
+        if (invite && isShared) openInvite.value = true
+    }
+
+    /** Set after the first-run questions when the household shops together: the household page opens, to invite. */
+    val openInvite = MutableStateFlow(false)
+    fun consumeOpenInvite() { openInvite.value = false }
+
+    // ---------- "הדגמת התחלה": the first run again, as a new user sees it ----------
+
+    enum class FirstRunReplay { ONBOARDING, QUESTIONS }
+
+    val firstRunReplay = MutableStateFlow(prefs.firstRunReplay?.let { n -> FirstRunReplay.entries.firstOrNull { it.name == n } })
+
+    /** Bumped when the replay starts: the opening screen is shown again. */
+    val introRun = MutableStateFlow(0)
+
+    /** Only the accounts in [app.necessityq.domain.FirstRunDemo] may replay the first run. */
+    fun canReplayFirstRun(account: app.necessityq.domain.Account): Boolean = app.necessityq.domain.FirstRunDemo.allowed(account.email)
+
+    /**
+     * Starts the replay: the opening screen, the welcome page (nothing is created there) and the questions, with
+     * the hints and suggestions as on a new install. The list, the household and the history are not touched.
+     */
+    fun startFirstRunReplay() {
+        if (firstRunReplay.value == null) prefs.replayBackup = features.value.encodeOff() + "\n" + features.value.encodeShopOff()
+        prefs.firstRunReplay = FirstRunReplay.ONBOARDING.name
+        prefs.swipeHintSeen = 0
+        prefs.advisor = app.necessityq.domain.AdvisorState(since = System.currentTimeMillis())
+        prefs.clearUsage()
+        firstRunReplay.value = FirstRunReplay.ONBOARDING
+        featuresChosen.value = false
+        introRun.value = introRun.value + 1
+        refreshAdvice()
+    }
+
+    /** The welcome page of the replay was passed ("יצירת בית" / "הצטרפות" do nothing there): on to the questions. */
+    fun replayOnboardingDone() {
+        prefs.firstRunReplay = FirstRunReplay.QUESTIONS.name
+        firstRunReplay.value = FirstRunReplay.QUESTIONS
+    }
+
+    /** Leaves the replay; [restore] = left early, so the features go back to what they were. */
+    fun endFirstRunReplay(restore: Boolean) {
+        if (firstRunReplay.value == null) return
+        val backup = prefs.replayBackup
+        prefs.firstRunReplay = null
+        prefs.replayBackup = null
+        firstRunReplay.value = null
+        if (restore && backup != null) {
+            val parts = backup.split('\n')
+            val before = app.necessityq.domain.Features.decodeOff(parts[0], parts.getOrNull(1))
+            prefs.features = before
+            features.value = before
+        }
+        featuresChosen.value = prefs.featuresChosen
+    }
+
+    // ---------- suggestions: features that would probably help, from how the app is used ----------
+
+    private val _advice = MutableStateFlow<app.necessityq.domain.FeatureSuggestion?>(null)
+    /** The one suggestion card to show above the list (at most one, and a new one only a week after the last answer). */
+    val advice: StateFlow<app.necessityq.domain.FeatureSuggestion?> = _advice
+
+    private val _declinedAdvice = MutableStateFlow(prefs.advisor.declined)
+    /** Suggestions answered "לא תודה": listed in "הבית" ← "הצעות שדחיתם", where they can be taken after all. */
+    val declinedAdvice: StateFlow<Set<String>> = _declinedAdvice
+
+    private fun usageSignals(): app.necessityq.domain.UsageSignals {
+        val now = System.currentTimeMillis()
+        val month = 30L * 24 * 60 * 60 * 1000
+        fun recent(event: String) = prefs.usageEvents(event).count { now - it < month }
+        val stats = snapshot.value?.stats?.values.orEmpty()
+        val routine = stats.filter { it.classification == app.necessityq.domain.Classification.ROUTINE && it.cadenceDays != null }
+            .sortedByDescending { it.confidence }
+            .map { app.necessityq.domain.RoutineItem(it.identity.displayName, kotlin.math.round(it.cadenceDays ?: 0.0).toInt()) }
+        val repeated = purchases.value.filter { now - it.boughtAtMillis < month }
+            .groupBy { it.itemId }
+            .map { (_, list) -> list.first().name to list.map { java.time.Instant.ofEpochMilli(it.boughtAtMillis).atZone(java.time.ZoneId.systemDefault()).toLocalDate() }.distinct().size }
+            .sortedByDescending { it.second }
+        val allFeatures = app.necessityq.domain.Feature.entries
+        return app.necessityq.domain.UsageSignals(
+            routine = routine,
+            repeated = repeated,
+            choseStore = currentStoreId.value != null,
+            scans = recent("scan"),
+            followedBranches = selectedPriceBranches.value.size,
+            members = memberNames.value.size.coerceAtLeast(1),
+            missingMarks = recent("missing"),
+            quickCloses = recent("quick_close"),
+            doubleTap = display.value.tapMode == app.necessityq.platform.TapMode.DOUBLE,
+            lastUsed = allFeatures.associateWith { prefs.usedAt(it) }.filterValues { it > 0 },
+            enabledAt = allFeatures.associateWith { prefs.enabledAt(it) }.filterValues { it > 0 },
+        )
+    }
+
+    /** Works out the card to show; called when the list opens and after every answer. */
+    fun refreshAdvice() {
+        // not while the first run is (re)played: the questions come first
+        if (!featuresChosen.value) { _advice.value = null; return }
+        val state = prefs.advisor
+        _declinedAdvice.value = state.declined
+        _advice.value = runCatching {
+            app.necessityq.domain.FeatureAdvisor.next(features.value, usageSignals(), state, System.currentTimeMillis())
+        }.getOrNull()
+    }
+
+    /** "להדליק" / "להסתיר" / …: does what the suggestion offers; [openPrices] opens the "מחירים" tab. */
+    fun acceptAdvice(s: app.necessityq.domain.FeatureSuggestion, openPrices: () -> Unit) {
+        prefs.advisor = prefs.advisor.accepted(System.currentTimeMillis())
+        applyAdvice(s.id, openPrices)
+        _messages.tryEmit("אפשר לשנות את זה בכל זמן ב\"הבית\" ← \"הגדרות\" ← \"יכולות\"")
+    }
+
+    /** Does what the suggestion [id] offers (also from the list of declined suggestions). */
+    fun applyAdvice(id: String, openPrices: () -> Unit) {
+        val feature = app.necessityq.domain.FeatureAdvisor.featureOf(id)
+        when (app.necessityq.domain.FeatureAdvisor.kindOf(id)) {
+            app.necessityq.domain.AdviceKind.TURN_ON -> feature?.let { setFeatures(features.value.with(it, true)) }
+            app.necessityq.domain.AdviceKind.TURN_OFF -> feature?.let { setFeatures(features.value.with(it, false)) }
+            app.necessityq.domain.AdviceKind.DOUBLE_TAP -> setDisplay(display.value.copy(tapMode = app.necessityq.platform.TapMode.DOUBLE))
+            app.necessityq.domain.AdviceKind.PICK_BRANCH -> {
+                if (app.necessityq.domain.Feature.PRICES_TAB !in features.value) {
+                    setFeatures(features.value.with(app.necessityq.domain.Feature.PRICES_TAB, true))
+                }
+                openPrices()
+            }
+        }
+        refreshAdvice()
+    }
+
+    /** "אולי אחר כך": the card goes, and this suggestion may come back in two weeks. */
+    fun laterAdvice(s: app.necessityq.domain.FeatureSuggestion) {
+        prefs.advisor = prefs.advisor.later(s.id, System.currentTimeMillis())
+        refreshAdvice()
+    }
+
+    /** "לא תודה": never offered again (it stays in "הצעות שדחיתם"). */
+    fun declineAdvice(s: app.necessityq.domain.FeatureSuggestion) {
+        prefs.advisor = prefs.advisor.decline(s.id, System.currentTimeMillis())
+        refreshAdvice()
+    }
+
+    /** Takes a declined suggestion back into the ones that may be offered. */
+    fun restoreAdvice(id: String) {
+        prefs.advisor = prefs.advisor.restore(id)
+        refreshAdvice()
+    }
+
+    /** A feature was used (its tab or page opened): it is not offered to be hidden. */
+    fun noteUsed(feature: app.necessityq.domain.Feature) = prefs.markUsed(feature, System.currentTimeMillis())
+
+    /** An item's page was closed; open for under two and a half seconds counts as opened by mistake. */
+    fun noteItemPageClosed(openedAtMillis: Long) {
+        val now = System.currentTimeMillis()
+        if (now - openedAtMillis < 2_500L) prefs.addUsageEvent("quick_close", now)
     }
 
     /**
@@ -1305,6 +1473,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun setMissing(line: ListLine, missing: Boolean) {
         val (hid, uid, _) = ctx() ?: return
         if (missing) askNotificationsInContext()
+        if (missing) prefs.addUsageEvent("missing", System.currentTimeMillis())
         launchSafe { container.service.setMissing(hid, uid, line, missing) }
         if (missing) _undo.tryEmit(UndoEvent("${line.displayName} סומן כחסר") { setMissing(line, false) })
     }
@@ -1344,6 +1513,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     /** A code read by the camera: price at the branch you are in, and what it is on the list. */
     fun onScanned(raw: String?) {
         if (raw == null) return
+        prefs.addUsageEvent("scan", System.currentTimeMillis())
         if (app.necessityq.domain.Barcodes.normalize(raw) == null) {
             _messages.tryEmit("זה לא נראה כמו ברקוד של מוצר: $raw")
             return
@@ -2032,7 +2202,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                     _update.value = when {
                         release == null -> UpdateState.UpToDate
                         Releases.isNewer(release.versionCode, BuildConfig.VERSION_CODE) -> {
-                            if (!manual) _messages.tryEmit("יצאה גרסה חדשה ${release.versionName} — ב\"הבית\" ← \"עדכונים\" אפשר לעדכן")
+                            // one tap on "עדכון" downloads and installs, without going to "עדכונים"
+                            if (!manual) _undo.tryEmit(UndoEvent("יצאה גרסה חדשה ${release.versionName}", label = "עדכון") { updateNow() })
                             UpdateState.Available(release)
                         }
                         else -> UpdateState.UpToDate
@@ -2070,7 +2241,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                 }
                 _update.value = UpdateState.Ready(release, file)
                 container.notifier.updateReady(release.versionName, container.updater.installIntent(file))
-                if (prefs.autoInstallUpdates) _pendingInstall.value = file
+                if (prefs.autoInstallUpdates || installWhenReady) _pendingInstall.value = file
+                installWhenReady = false
             } catch (e: kotlinx.coroutines.CancellationException) {
                 container.notifier.cancelUpdate()
                 throw e
@@ -2078,6 +2250,22 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                 container.notifier.cancelUpdate()
                 _update.value = UpdateState.Failed(e.message ?: "ההורדה נכשלה")
             }
+        }
+    }
+
+    /** "עדכון" was tapped on the new-version message: the installer opens as soon as the download ends. */
+    private var installWhenReady = false
+
+    /**
+     * "עדכון" on the new-version message: downloads the update and opens the installer when it is in (or at once,
+     * when it was already downloaded) — no need to go to "עדכונים" and tap "התקנה".
+     */
+    fun updateNow() {
+        when (val s = _update.value) {
+            is UpdateState.Ready -> _pendingInstall.value = s.file
+            is UpdateState.Downloading -> installWhenReady = true
+            is UpdateState.Available, is UpdateState.Stopped -> { installWhenReady = true; downloadUpdate() }
+            else -> Unit
         }
     }
 
