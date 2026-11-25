@@ -134,7 +134,7 @@ fun TileEditorSheet(
                 }
             }
             Text(
-                "מוצגים ${draft.shown.size} מתוך ${TileElement.entries.size}",
+                "מוצגים ${draft.shown.count { it.availableIn(mode) }} מתוך ${TileElement.of(mode).size}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -212,10 +212,12 @@ private fun SampleTile(
                 Part(TileElement.DRAG, layout, onToggle) {
                     Icon(Icons.Default.DragIndicator, null, tint = MaterialTheme.colorScheme.outline)
                 }
-                Part(TileElement.CHECK, layout, onToggle) {
-                    val size = if (shopping) 48.dp else 40.dp
-                    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
-                        Box(Modifier.size(size - 18.dp).border(2.dp, MaterialTheme.colorScheme.outline, CircleShape))
+                // an item is marked bought only in the shop: no check circle while making the list
+                if (shopping) {
+                    Part(TileElement.CHECK, layout, onToggle) {
+                        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                            Box(Modifier.size(30.dp).border(2.dp, MaterialTheme.colorScheme.outline, CircleShape))
+                        }
                     }
                 }
                 Spacer(Modifier.width(6.dp))

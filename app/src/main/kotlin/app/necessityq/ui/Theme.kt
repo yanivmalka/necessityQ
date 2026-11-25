@@ -41,6 +41,9 @@ object NqPalette {
     /** Reveal behind a tile swiped right while preparing: delete. */
     val SwipeDelete = Color(0xFFD92D20)
 
+    /** Reveal behind a tile swiped to open its צ'אט פוד. */
+    val SwipeChat = Color(0xFF1D5FA8)
+
     /** Icon, ring and label on the swipe reveals, and the unread count on the chat pill. */
     val OnAction = Color.White
 

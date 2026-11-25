@@ -106,8 +106,22 @@ class MainActivity : ComponentActivity() {
         vm.requestOpenChat(itemId, itemName)
     }
 
+    /**
+     * Set while the app itself opens another screen (a photo picker, sharing, a link, the installer): stopping for it
+     * is not the user leaving the app. Every launch from the activity (also through the activity-result launchers)
+     * passes through [startActivityForResult].
+     */
+    private var openingOther = false
+
+    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+    override fun startActivityForResult(intent: android.content.Intent, requestCode: Int, options: Bundle?) {
+        openingOther = true
+        super.startActivityForResult(intent, requestCode, options)
+    }
+
     override fun onStart() {
         super.onStart()
+        openingOther = false
         app.necessityq.platform.MentionAlerter.appVisible = true
         // Android often keeps the app in memory, so "opening" it is usually a return to the foreground
         vm.onForeground()
@@ -115,6 +129,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         app.necessityq.platform.MentionAlerter.appVisible = false
+        // a new app icon waits until the user leaves the app (home, recents, back): switching it closes the app
+        if (!isChangingConfigurations && !openingOther) app.necessityq.platform.AppIcons.applyPending(this)
         super.onStop()
     }
 }

@@ -591,6 +591,16 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         featuresChosen.value = true
     }
 
+    /**
+     * Saves what the tiles of [mode] show. A part shown there whose feature is off (the price, with prices off) turns
+     * that feature on for [mode], so what was chosen is what the list shows.
+     */
+    fun saveTile(mode: app.necessityq.domain.ListMode, layout: app.necessityq.domain.TileLayout) {
+        setDisplay(display.value.withTile(mode, layout))
+        val allowed = features.value.allowing(layout, mode)
+        if (allowed != features.value) setFeatures(allowed)
+    }
+
     /** The swipe hint ("משכו שמאלה…") is shown the first three times the list opens with items. */
     fun swipeHintDue(): Boolean = prefs.swipeHintSeen < 3
     fun countSwipeHint() { prefs.swipeHintSeen = prefs.swipeHintSeen + 1 }
