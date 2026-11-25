@@ -9,7 +9,7 @@ package app.necessityq.domain
 object FirstRunDemo {
     private val ALLOWED = setOf(
         "40c85837a7aba20d4fef2b365d7a3dbd4280213df5fe0f42cab6396860a9dccc",
-        "350f6c7a35213facdb808bb1f3ba05f96368052542ee26a95c65ef1513d764fc",
+        "67151aa6293e5e39fdaaed1e7ef29242bc9dc2ba706824a71d1bf74644d73e40",
     )
 
     fun allowed(email: String?): Boolean = email?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }?.let { sha256(it) in ALLOWED } == true
