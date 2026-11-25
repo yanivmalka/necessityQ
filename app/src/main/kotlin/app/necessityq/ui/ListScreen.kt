@@ -257,6 +257,12 @@ fun ListScreen(
     // the suggestion card is worked out again as the data it is based on comes in
     LaunchedEffect(snapshot?.stats?.size, features, followedForAdvice.size) { vm.refreshAdvice() }
     val showAdvice = !shopping && advice != null
+    // a promotion on each item, on the item itself: where the list is priced (in the shop: that shop only); while
+    // preparing, also the biggest saving at another followed branch
+    val promosOnTiles = app.necessityq.domain.Feature.PROMOS in features
+    val itemPromos = remember(promoOffers, priceBranchId, shopping) {
+        app.necessityq.domain.PromoOffers.perItem(promoOffers, priceBranchId, onlyPreferred = shopping)
+    }
     var showTileEditor by remember { mutableStateOf(false) }
 
     // Local copy of the rows so a drag can move items immediately; re-synced from the live data when idle.
@@ -807,6 +813,7 @@ fun ListScreen(
                                 price = prices[line.itemId],
                                 priceInfo = itemPrices[line.itemId],
                                 comparison = comparisons[line.itemId]?.takeIf { it.notable },
+                                promo = if (promosOnTiles) itemPromos[line.itemId]?.let { promoLabel(it, priceBranchId, allBranches) } else null,
                                 lifted = isDragging,
                                 dragHandle = if (dragAvailable && TileElement.DRAG in tile) {
                                     {
@@ -1313,6 +1320,8 @@ private fun ProductTile(
     priceInfo: app.necessityq.domain.ItemPriceInfo? = null,
     /** significantly dearer / cheaper here than at the household's other branches */
     comparison: app.necessityq.domain.PriceComparison? = null,
+    /** The item's promotion ("מבצע: 2 ב-10 ₪ · …"), in a strip under the tile; null = none. */
+    promo: String? = null,
     lifted: Boolean,
     dragHandle: (@Composable () -> Unit)?,
     onBought: () -> Unit,
@@ -1433,8 +1442,8 @@ private fun ProductTile(
                 }
             }
         }
-        // Reserved strip under the tile for a promotion from the price database (none yet).
-        PromoStrip(promo = null)
+        // the item's promotion, right under it (while preparing and in the shop)
+        PromoStrip(promo = promo)
     }
 }
 
@@ -1746,7 +1755,18 @@ fun PriceComparisonPill(c: app.necessityq.domain.PriceComparison, modifier: Modi
     )
 }
 
-/** Promotion line right under a product tile; renders nothing until there is a promotion. */
+/**
+ * The text of an item's promotion: what it is, the price with it, where (when it is not the branch the list shows)
+ * and a stock warning when it depends on stock.
+ */
+private fun promoLabel(o: app.necessityq.domain.PromoOffer, here: String?, all: List<app.necessityq.domain.PriceBranch>): String {
+    val price = " · ${app.necessityq.domain.PriceData.formatPrice(o.promoUnit)} במקום ${app.necessityq.domain.PriceData.formatPrice(o.regular)}"
+    val where = if (o.branchId == here) "" else all.firstOrNull { it.id == o.branchId }?.let { " · ב" + app.necessityq.domain.BranchLocator.storeName(it) }.orEmpty()
+    val stock = o.promotion.stockWarning?.let { " · $it" }.orEmpty()
+    return "מבצע: ${o.promotion.shortLabel}$price$where$stock"
+}
+
+/** Promotion line right under a product tile; renders nothing when there is no promotion. */
 @Composable
 fun PromoStrip(promo: String?) {
     if (promo == null) return

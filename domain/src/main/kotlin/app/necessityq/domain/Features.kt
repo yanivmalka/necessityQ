@@ -47,8 +47,8 @@ enum class Feature(val label: String, val description: String, val group: Featur
         FeatureGroup.SAVING,
     ),
     PROMOS(
-        "כרטיס המבצעים",
-        "מבצעים בסניף שלכם על מוצרים שהבית קונה.",
+        "מבצעים",
+        "מבצעים על המוצרים שברשימה: על כל פריט עצמו, ובכרטיס מסכם בראש הרשימה.",
         FeatureGroup.SAVING,
     ),
     RECIPES_ON_LIST(
