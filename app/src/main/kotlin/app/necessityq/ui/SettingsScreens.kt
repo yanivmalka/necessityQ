@@ -13,6 +13,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -29,6 +35,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -100,6 +109,7 @@ fun PageScaffold(title: String, modifier: Modifier = Modifier, content: @Composa
 fun AccountScreen(vm: AppViewModel, account: Account, modifier: Modifier = Modifier) = PageScaffold("חשבון", modifier) {
     if (vm.supportsAccounts) AccountCard(vm, account)
     else Text("גרסה זו פועלת במצב מכשיר יחיד, ללא חשבון.")
+    PermissionsCard()
 }
 
 @Composable
@@ -118,13 +128,22 @@ enum class SettingsTab(val label: String) {
 }
 
 /**
- * The settings, in three tabs switched at the top of the page ([SettingsTab]); it opens on [initialTab]. Within a
- * tab the settings are grouped in cards, the most important first.
+ * The settings, in three tabs ([SettingsTab]) switched at the top of the page or by swiping sideways between them;
+ * it opens on [initialTab]. Within a tab the settings are grouped in cards, the most important first.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier, initialTab: SettingsTab = SettingsTab.LIST) {
-    var tab by rememberSaveable(initialTab) { mutableStateOf(initialTab) }
+    val pager = rememberPagerState(initialPage = initialTab.ordinal) { SettingsTab.entries.size }
+    val scope = rememberCoroutineScope()
+    // opened again on another tab (e.g. "התראות" from the household page) while the page is still here
+    var appliedTab by rememberSaveable { mutableStateOf(initialTab) }
+    LaunchedEffect(initialTab) {
+        if (initialTab != appliedTab) {
+            appliedTab = initialTab
+            pager.scrollToPage(initialTab.ordinal)
+        }
+    }
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         TopAppBar(
             navigationIcon = { BackNavButton() },
@@ -132,15 +151,23 @@ fun SettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier, initialTab: 
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
         )
         Box(Modifier.padding(horizontal = 16.dp)) {
-            SegmentedTabs(SettingsTab.entries.map { it.label }, tab.ordinal) { tab = SettingsTab.entries[it] }
+            // while swiping, the tab lights up as soon as the swipe would land on it
+            SegmentedTabs(SettingsTab.entries.map { it.label }, pager.targetPage) { page ->
+                scope.launch { pager.animateScrollToPage(page) }
+            }
         }
-        // each tab scrolls on its own, from its top
-        key(tab) {
+        HorizontalPager(
+            state = pager,
+            modifier = Modifier.fillMaxSize(),
+            verticalAlignment = Alignment.Top,
+            key = { SettingsTab.entries[it].name },
+        ) { page ->
+            // each tab scrolls on its own, from its top
             Column(
-                Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                when (tab) {
+                when (SettingsTab.entries[page]) {
                     SettingsTab.LIST -> ListSettings(vm)
                     SettingsTab.APP -> AppSettings(vm)
                     SettingsTab.NOTIFY -> NotifySettings(vm)
@@ -150,10 +177,11 @@ fun SettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier, initialTab: 
     }
 }
 
-/** "הרשימה": what a tap on an item does, what each tile shows, the order of the list, prices and recommendations. */
+/** "הרשימה": what a tap and a swipe on an item do, what each tile shows, the order of the list, prices and recommendations. */
 @Composable
 private fun ListSettings(vm: AppViewModel) {
     val current by vm.display.collectAsStateWithLifecycle()
+    val features by vm.features.collectAsStateWithLifecycle()
     SettingsCard("נגיעה בפריט", "מה קורה כשנוגעים בפריט ברשימה.") {
         app.necessityq.platform.TapMode.entries.forEach { mode ->
             Row(
@@ -169,28 +197,31 @@ private fun ListSettings(vm: AppViewModel) {
         }
     }
 
+    // what each tile shows, per stage: the stage is chosen with the same switch as on the list
+    var tileMode by rememberSaveable { mutableStateOf(ListMode.PLAN) }
     var editing by remember { mutableStateOf<ListMode?>(null) }
     SettingsCard("מה להציג על כל פריט ברשימה", "לכל שלב תצוגה משלו. נגיעה ברכיב באריח לדוגמה מסתירה או מחזירה אותו.") {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ListMode.entries.forEach { m ->
-                OutlinedButton(onClick = { editing = m }, modifier = Modifier.weight(1f)) {
-                    Text("${m.label} · ${current.tile(m).shown.size}/${TileElement.entries.size}")
-                }
-            }
+        ModeSwitch(shopping = tileMode == ListMode.SHOP, onSelect = { tileMode = it }, modifier = Modifier.padding(vertical = 4.dp))
+        val shown = features.tile(current.tile(tileMode), tileMode)
+        OutlinedButton(onClick = { editing = tileMode }, modifier = Modifier.fillMaxWidth()) {
+            Text("עריכת האריח · ${tileMode.label} · ${shown.shown.size}/${TileElement.of(tileMode).size}")
         }
     }
     editing?.let { m ->
         TileEditorSheet(
             mode = m,
-            layout = current.tile(m),
-            onSave = { vm.setDisplay(current.withTile(m, it)); editing = null },
+            // as the list shows it: a part whose feature is off shows as hidden, and showing it turns the feature on
+            layout = features.tile(current.tile(m), m),
+            onSave = { vm.saveTile(m, it); editing = null },
             onDismiss = { editing = null },
         )
     }
 
+    SwipeSettings(vm, current, features)
+
     SettingsCard("סדר הרשימה") {
         OptionRow("מוצרי קירור והקפאה בסוף הרשימה", current.chilledLast) { vm.setDisplay(current.copy(chilledLast = it)) }
-        OptionRow("מוצרים שסומנו או נמחקו (מחוקים בקו) בתחתית הרשימה", current.showBought) { vm.setDisplay(current.copy(showBought = it)) }
+        OptionRow("בקנייה: מה שכבר נקנה בקנייה הזו בתחתית הרשימה (מחוק בקו)", current.showBought) { vm.setDisplay(current.copy(showBought = it)) }
     }
 
     SettingsCard("מחירים") {
@@ -227,6 +258,70 @@ private fun ListSettings(vm: AppViewModel) {
     }
 }
 
+/**
+ * "החלקה על פריט": what pulling a tile to the left and to the right does, per stage (the same switch as on the list).
+ * While making the list a swipe removes an item or does nothing; in the shop it can also mark bought or missing, or
+ * open the product's צ'אט פוד — and both sides may do the same. Choosing צ'אט פוד while it is off asks to turn it on.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun SwipeSettings(vm: AppViewModel, current: app.necessityq.platform.DisplayOptions, features: app.necessityq.domain.Features) {
+    var mode by rememberSaveable { mutableStateOf(ListMode.PLAN) }
+    /** A swipe set to צ'אט פוד while it is off: (stage, actions) waiting for "להדליק?". */
+    var askChat by remember { mutableStateOf<Pair<ListMode, app.necessityq.domain.SwipeActions>?>(null) }
+    val chatOn = app.necessityq.domain.Feature.CHAT in features
+    SettingsCard(
+        "החלקה על פריט",
+        "מה קורה כשמושכים אריח הצידה ומחזיקים עד שהטבעת מתמלאת (או דוחפים בכוח). אפשר לבחור לכל צד ולכל שלב.",
+    ) {
+        ModeSwitch(shopping = mode == ListMode.SHOP, onSelect = { mode = it }, modifier = Modifier.padding(vertical = 4.dp))
+        val actions = current.swipe(mode)
+        fun choose(next: app.necessityq.domain.SwipeActions) {
+            val wantsChat = next.left == app.necessityq.domain.SwipeChoice.CHAT || next.right == app.necessityq.domain.SwipeChoice.CHAT
+            if (wantsChat && !chatOn) askChat = mode to next else vm.setDisplay(current.withSwipe(mode, next))
+        }
+        listOf("החלקה שמאלה" to true, "החלקה ימינה" to false).forEach { (title, left) ->
+            Text(title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
+            androidx.compose.foundation.layout.FlowRow(
+                Modifier.padding(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                app.necessityq.domain.SwipeChoice.of(mode).forEach { choice ->
+                    val selected = (if (left) actions.left else actions.right) == choice
+                    androidx.compose.material3.FilterChip(
+                        selected = selected,
+                        onClick = { choose(if (left) actions.copy(left = choice) else actions.copy(right = choice)) },
+                        label = { Text(choice.label) },
+                    )
+                }
+            }
+        }
+        if (mode == ListMode.PLAN) {
+            Text(
+                "בהכנת רשימה עוד לא קונים, ולכן החלקה רק מסירה פריט (או לא עושה כלום). סימון נקנה וחסר — בקנייה.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+            )
+        }
+    }
+    askChat?.let { (m, next) ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { askChat = null },
+            title = { Text("צ'אט פוד כבוי") },
+            text = { Text("כדי שהחלקה תפתח את צ'אט פוד של המוצר צריך להדליק את צ'אט פוד. להדליק אותו?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.setFeatures(vm.features.value.with(app.necessityq.domain.Feature.CHAT, true))
+                    vm.setDisplay(vm.display.value.withSwipe(m, next))
+                    askChat = null
+                }) { Text("להדליק") }
+            },
+            dismissButton = { TextButton(onClick = { askChat = null }) { Text("לא עכשיו") } },
+        )
+    }
+}
+
 /** "האפליקציה": its look (theme, colours, icon), which features are on, and the order of the tabs. */
 @Composable
 private fun AppSettings(vm: AppViewModel) {
@@ -238,28 +333,133 @@ private fun AppSettings(vm: AppViewModel) {
         }
     }
 
+    FeatureSettings(vm)
+
+    SettingsCard("סדר הלשוניות") { TabOrderSettings(vm) }
+}
+
+/**
+ * "פיצ'רים": the features of the whole app, then those of one stage of the list — chosen with the same switch as on
+ * the list, so a feature can be on for making the list and off in the shop (or the other way round). A feature
+ * that has nothing to do with a stage is not offered there. The "!" beside each name explains what it adds.
+ */
+@Composable
+private fun FeatureSettings(vm: AppViewModel) {
     val features by vm.features.collectAsStateWithLifecycle()
+    val display by vm.display.collectAsStateWithLifecycle()
+    var mode by rememberSaveable { mutableStateOf(ListMode.PLAN) }
     SettingsCard(
         "פיצ'רים",
-        "כל פיצ'ר אפשר לכבות ולהדליק בחזרה בכל זמן. כששתי הלשוניות \"תפריט\" ו\"מחירים\" כבויות, נשארות למטה שתי לשוניות: הרשימה והבית.",
+        "כל פיצ'ר אפשר לכבות ולהדליק בחזרה בכל זמן. נגיעה ב-! ליד השם מסבירה מה הוא מוסיף. כששתי הלשוניות " +
+            "\"תפריט\" ו\"מחירים\" כבויות, נשארות למטה שתי לשוניות: הרשימה והבית.",
     ) {
         Row(Modifier.padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { vm.setFeatures(app.necessityq.domain.Features.SIMPLE) }) { Text("רשימה פשוטה") }
             OutlinedButton(onClick = { vm.setFeatures(app.necessityq.domain.Features.ALL) }) { Text("הכול") }
         }
-        app.necessityq.domain.Feature.entries.forEach { feature ->
-            val on = feature in features
-            Row(
-                Modifier.fillMaxWidth().clickable { vm.setFeatures(features.with(feature, !on)) }.padding(start = 4.dp, top = 2.dp, bottom = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(feature.label, modifier = Modifier.weight(1f))
-                androidx.compose.material3.Switch(checked = on, onCheckedChange = { vm.setFeatures(features.with(feature, it)) })
+        Text("בכל האפליקציה", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
+        app.necessityq.domain.Feature.appWide.forEach { feature ->
+            FeatureRow(feature, on = features.isOn(feature, ListMode.PLAN)) { vm.setFeatures(features.with(feature, it)) }
+        }
+        Text("ברשימה", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
+        ModeSwitch(shopping = mode == ListMode.SHOP, onSelect = { mode = it }, modifier = Modifier.padding(vertical = 4.dp))
+        app.necessityq.domain.Feature.of(mode).forEach { feature ->
+            val on = features.isOn(feature, mode)
+            FeatureRow(feature, on = on) { vm.setFeatures(features.with(feature, mode, it)) }
+            if (feature == app.necessityq.domain.Feature.BRANCH_COMPARE && on) {
+                CompareThreshold(display.compareMinShekels) { vm.setDisplay(display.copy(compareMinShekels = it)) }
             }
         }
     }
+}
 
-    SettingsCard("סדר הלשוניות") { TabOrderSettings(vm) }
+/** One feature: the "!" that explains it (right of the name, in Hebrew), its name and its switch. */
+@Composable
+private fun FeatureRow(feature: app.necessityq.domain.Feature, on: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable { onChange(!on) }.padding(top = 2.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        FeatureInfoButton(feature)
+        Text(feature.label, modifier = Modifier.weight(1f))
+        androidx.compose.material3.Switch(checked = on, onCheckedChange = onChange)
+    }
+}
+
+/**
+ * A small "!" in a ring: a tap opens a floating box over the page with everything the feature adds; a tap anywhere
+ * else (or back) closes it.
+ */
+@Composable
+private fun FeatureInfoButton(feature: app.necessityq.domain.Feature) {
+    var open by remember { mutableStateOf(false) }
+    val primary = MaterialTheme.colorScheme.primary
+    Box {
+        Box(
+            Modifier.size(36.dp).clip(CircleShape)
+                .clickable(onClickLabel = "מה ${feature.label} מוסיף") { open = true },
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(Modifier.size(20.dp).border(1.5.dp, primary, CircleShape), contentAlignment = Alignment.Center) {
+                Text("!", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.ExtraBold, color = primary)
+            }
+        }
+        if (open) {
+            val below = with(androidx.compose.ui.platform.LocalDensity.current) { 38.dp.roundToPx() }
+            androidx.compose.ui.window.Popup(
+                alignment = Alignment.TopStart,
+                offset = androidx.compose.ui.unit.IntOffset(0, below),
+                onDismissRequest = { open = false },
+                properties = androidx.compose.ui.window.PopupProperties(focusable = true),
+            ) {
+                Column(
+                    Modifier.widthIn(max = 300.dp)
+                        .shadow(10.dp, NqShapes.Panel)
+                        .clip(NqShapes.Panel)
+                        .background(MaterialTheme.colorScheme.surface)
+                        .border(1.dp, NqTheme.colors.hairline, NqShapes.Panel)
+                        .clickable { open = false }
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(feature.label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text(feature.description, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        when (feature.scope) {
+                            app.necessityq.domain.FeatureScope.APP -> "בכל האפליקציה"
+                            app.necessityq.domain.FeatureScope.PLAN -> "בהכנת רשימה"
+                            app.necessityq.domain.FeatureScope.SHOP -> "בקנייה"
+                            app.necessityq.domain.FeatureScope.BOTH -> "בהכנת רשימה ובקנייה — לכל אחד מתג משלו"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** From which gap (₪) between the household's branches the comparison is shown: always, or 1–20 ₪. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun CompareThreshold(current: Int, onChange: (Int) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(start = 40.dp, end = 4.dp, bottom = 6.dp)) {
+        Text(
+            "להציג השוואה כשההפרש בין הסופרים שלך הוא לפחות:",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(0, 1, 2, 3, 5, 10, 20).forEach { amount ->
+                androidx.compose.material3.FilterChip(
+                    selected = current == amount,
+                    onClick = { onChange(amount) },
+                    label = { Text(if (amount == 0) "כל הפרש בולט" else "$amount ₪") },
+                )
+            }
+        }
+    }
 }
 
 /** "התראות": צ'אט פוד (who is notified, and how it sounds), and who hears about an item marked missing. */
@@ -317,6 +517,101 @@ private fun SettingsCard(title: String, hint: String? = null, content: @Composab
         }
         Spacer(Modifier.height(4.dp))
         content()
+    }
+}
+
+/** A permission the app can ask for from the account page. */
+private enum class AppPermission(val label: String, val hint: String, val permissions: List<String>) {
+    NOTIFICATIONS(
+        "שליחת התראות",
+        "הודעות בצ'אט פוד, מוצר שסומן חסר, ועדכון שהורד.",
+        if (android.os.Build.VERSION.SDK_INT >= 33) listOf(android.Manifest.permission.POST_NOTIFICATIONS) else emptyList(),
+    ),
+    LOCATION(
+        "מיקום",
+        "סניפים קרובים במחירים, וזיהוי שאתם בסניף כדי לעבור לקנייה בנגיעה.",
+        listOf(android.Manifest.permission.ACCESS_COARSE_LOCATION, android.Manifest.permission.ACCESS_FINE_LOCATION),
+    ),
+    MICROPHONE(
+        "מיקרופון",
+        "הקלטת הודעות קוליות בצ'אט פוד.",
+        listOf(android.Manifest.permission.RECORD_AUDIO),
+    ),
+    ;
+
+    fun granted(context: android.content.Context): Boolean = when (this) {
+        NOTIFICATIONS -> androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()
+        else -> permissions.any {
+            androidx.core.content.ContextCompat.checkSelfPermission(context, it) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+    }
+}
+
+private tailrec fun android.content.Context.findActivity(): android.app.Activity? = when (this) {
+    is android.app.Activity -> this
+    is android.content.ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
+/**
+ * "הרשאות": notifications, location and the microphone, each with a switch showing whether it is allowed. Turning one
+ * on asks Android; one that Android no longer asks about (refused twice), and turning one off, open the app's page
+ * in the phone's settings. The switches are read again whenever the page comes back to the screen.
+ */
+@Composable
+private fun PermissionsCard() {
+    val context = LocalContext.current
+    var tick by remember { mutableStateOf(0) }
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { tick++ }
+    /** Permissions Android refused without asking: a tap opens the phone's settings instead. */
+    var blocked by remember { mutableStateOf(emptySet<AppPermission>()) }
+    var asking by remember { mutableStateOf<AppPermission?>(null) }
+    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions(),
+    ) { result ->
+        val p = asking ?: return@rememberLauncherForActivityResult
+        asking = null
+        tick++
+        val activity = context.findActivity()
+        val refused = result.isNotEmpty() && result.values.none { it }
+        if (refused && activity != null && p.permissions.none { androidx.core.app.ActivityCompat.shouldShowRequestPermissionRationale(activity, it) }) {
+            blocked = blocked + p
+        }
+    }
+    fun openSettings(p: AppPermission) {
+        val intent = if (p == AppPermission.NOTIFICATIONS && android.os.Build.VERSION.SDK_INT >= 26) {
+            Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+        } else {
+            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
+        }
+        runCatching { context.startActivity(intent) }
+    }
+    SettingsCard("הרשאות", "מה האפליקציה רשאית לעשות בטלפון. אפשר להדליק מכאן; כיבוי נעשה בהגדרות הטלפון, שנפתחות בנגיעה.") {
+        AppPermission.entries.forEach { p ->
+            val granted = remember(tick) { p.granted(context) }
+            fun toggle() {
+                when {
+                    granted -> openSettings(p)
+                    p.permissions.isEmpty() || p in blocked -> openSettings(p)
+                    else -> { asking = p; launcher.launch(p.permissions.toTypedArray()) }
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth().clickable { toggle() }.padding(start = 4.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(p.label)
+                    Text(
+                        if (!granted && p in blocked) "נחסם — אפשר להדליק בהגדרות הטלפון (נגיעה פותחת אותן)" else p.hint,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                androidx.compose.material3.Switch(checked = granted, onCheckedChange = { toggle() })
+            }
+        }
     }
 }
 

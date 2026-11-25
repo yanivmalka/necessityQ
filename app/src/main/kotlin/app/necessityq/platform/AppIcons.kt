@@ -21,8 +21,15 @@ enum class AppIcon(val alias: String, val label: String) {
 /**
  * Switches the launcher icon: exactly one alias is enabled at a time, the chosen shape in the app's palette, so the
  * icon on the phone's home screen has the same colour as the app.
+ *
+ * Android closes the app when the alias it was opened from is turned off, so a choice is not applied at once: it is
+ * kept as pending ([request], [requestPalette]) and applied when the user leaves the app ([applyPending], from the
+ * activity's onStop) — never by closing the app under the user's hand.
  */
 object AppIcons {
+    private const val PREFS = "necessityq-icon"
+    private const val PENDING = "pending"
+
     private fun aliasName(icon: AppIcon, palette: AppPalette) =
         icon.alias + if (palette == AppPalette.MARKET) "" else palette.name.lowercase().replaceFirstChar { it.uppercase() }
 
@@ -40,35 +47,57 @@ object AppIcons {
         }
 
     /** The shape and palette of the icon the launcher shows now. */
-    private fun currentPair(context: Context): Pair<AppIcon, AppPalette> {
+    private fun shownPair(context: Context): Pair<AppIcon, AppPalette> {
         val pm = context.packageManager
         return all().firstOrNull { (icon, palette) -> enabled(pm, context, icon, palette) } ?: (AppIcon.DEFAULT to AppPalette.MARKET)
     }
 
-    /** The icon shape the launcher shows now. */
-    fun current(context: Context): AppIcon = currentPair(context).first
+    private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    /**
-     * Shows [icon] in [palette] on the launcher. The new alias is enabled first, so the app always has a launcher
-     * entry, and only aliases whose state changes are touched.
-     */
-    fun set(context: Context, icon: AppIcon, palette: AppPalette) {
-        val pm = context.packageManager
-        if (!enabled(pm, context, icon, palette)) {
-            pm.setComponentEnabledSetting(
-                component(context, icon, palette), PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP,
-            )
-        }
-        all().filter { it != (icon to palette) }.forEach { (i, p) ->
-            if (enabled(pm, context, i, p)) {
-                pm.setComponentEnabledSetting(component(context, i, p), PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)
-            }
-        }
+    /** The icon chosen but not applied yet (it is applied when the user leaves the app); null when none is waiting. */
+    private fun pendingPair(context: Context): Pair<AppIcon, AppPalette>? {
+        val text = prefs(context).getString(PENDING, null) ?: return null
+        val icon = AppIcon.entries.firstOrNull { it.name == text.substringBefore(':') } ?: return null
+        val palette = AppPalette.entries.firstOrNull { it.name == text.substringAfter(':') } ?: return null
+        return icon to palette
     }
 
-    /** Recolours the launcher icon to [palette], keeping its shape; nothing happens when it already matches. */
-    fun matchPalette(context: Context, palette: AppPalette) {
-        val (icon, shown) = currentPair(context)
-        if (shown != palette) set(context, icon, palette)
+    /** The icon shape the launcher will show: the one waiting to be applied, or the one shown now. */
+    fun current(context: Context): AppIcon = (pendingPair(context) ?: shownPair(context)).first
+
+    /** Whether a chosen icon is waiting for the user to leave the app. */
+    fun hasPending(context: Context): Boolean = pendingPair(context)?.let { it != shownPair(context) } == true
+
+    /** Chooses [icon] in [palette]; the launcher shows it once the user leaves the app. */
+    fun request(context: Context, icon: AppIcon, palette: AppPalette) {
+        val edit = prefs(context).edit()
+        if (shownPair(context) == (icon to palette)) edit.remove(PENDING) else edit.putString(PENDING, "${icon.name}:${palette.name}")
+        edit.apply()
+    }
+
+    /** Recolours the chosen icon to [palette], keeping its shape; applied once the user leaves the app. */
+    fun requestPalette(context: Context, palette: AppPalette) = request(context, current(context), palette)
+
+    /**
+     * Applies the waiting icon, if any. Called when the user leaves the app: the new alias is enabled first, so the
+     * app always has a launcher entry, and only aliases whose state changes are touched.
+     */
+    fun applyPending(context: Context) {
+        val (icon, palette) = pendingPair(context) ?: return
+        prefs(context).edit().remove(PENDING).apply()
+        if (shownPair(context) == (icon to palette)) return
+        runCatching {
+            val pm = context.packageManager
+            if (!enabled(pm, context, icon, palette)) {
+                pm.setComponentEnabledSetting(
+                    component(context, icon, palette), PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP,
+                )
+            }
+            all().filter { it != (icon to palette) }.forEach { (i, p) ->
+                if (enabled(pm, context, i, p)) {
+                    pm.setComponentEnabledSetting(component(context, i, p), PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)
+                }
+            }
+        }
     }
 }

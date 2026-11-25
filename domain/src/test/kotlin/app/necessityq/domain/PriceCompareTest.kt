@@ -30,6 +30,15 @@ class PriceCompareTest {
     }
 
     @Test
+    fun `the gap in shekels decides from which amount a comparison is shown`() {
+        val c = PriceComparisons.product(p("729", "x", 10.0), "a", mapOf("b" to mapOf("729" to p("729", "x", 8.0))))!!
+        assertEquals(2.0, c.amountGap, 1e-9)
+        assertTrue(c.reaches(0))
+        assertTrue(c.reaches(2))
+        assertTrue(!c.reaches(3))
+    }
+
+    @Test
     fun `a small gap is about the same`() {
         val c = PriceComparisons.product(p("729", "x", 10.4), "a", mapOf("b" to mapOf("729" to p("729", "x", 10.0))))!!
         assertEquals(PriceLevel.FAIR, c.level)
