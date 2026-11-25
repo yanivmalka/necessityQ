@@ -3,6 +3,11 @@
 ## אחרי מיזוג ל-main: בניית APK
 - אחרי כל מיזוג של שינויים באפליקציה (`app/`, `domain/`) ל-`main`, מחכים שההרצה של "Android CI/CD" על `main` תסתיים בהצלחה, ואז מפעילים ידנית את בניית ה-APK: workflow "Build APK" (`build-apk.yml`), `workflow_dispatch`, על `main`.
 - בודקים את תוצאת הבנייה. אם היא נכשלת (קומפילציה או lint) — מתקנים בענף חדש מ-`main`, ממזגים ומריצים שוב.
+- הבנייה מריצה רק את בדיקות ה-lint הקריטיות (lintVital). דוח lint מלא: מסמנים `full_lint` בהפעלה (כדקה נוספת).
+
+## סמלים (Material icons)
+- אין תלות ב-`material-icons-extended`: R8 עבר על אלפי הסמלים שבה בכל בנייה, וזה האט אותה בדקות. הסמלים שבשימוש נמצאים ב-`app/src/main/kotlin/app/necessityq/ui/icons/Icons.kt`, שנוצר על ידי `tools/material_icons.py`, ואין לערוך אותו ידנית.
+- סמל חדש: כותבים בקוד `Icons.Default.Name` (או `Icons.AutoMirrored.Filled.Name`) עם `import app.necessityq.ui.icons.Icons`, ומריצים את הסקריפט (ההוראות בראש הקובץ). בלי הרצה הקומפילציה נכשלת.
 - מספר הגרסה (`versionCode`, תג `v0.1.N`) הוא מספר ההרצה של "Build APK" ועוד 200. לא מעבירים את הבנייה ל-workflow אחר בלי לשמור שהמספר ימשיך לעלות.
 - שינוי בתיעוד בלבד (README, WISHLIST, הקובץ הזה) לא מצריך בנייה.
 

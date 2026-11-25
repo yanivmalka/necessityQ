@@ -1,9 +1,17 @@
 name: Build APK
 
-# The APK: lint, signed release build and a GitHub Release. Started by hand:
+# The APK: signed release build and a GitHub Release. Started by hand:
 # Actions → "Build APK" → "Run workflow" (on main, to publish a release).
+# The domain unit tests are not run here: "Android CI/CD" runs them on every push and PR, before this build.
+# Lint: assembleRelease always runs the fatal checks (lintVital), which fail the build on errors that would break
+# the app. The full lint report takes about a minute more, so it runs only when "full_lint" is ticked.
 on:
   workflow_dispatch:
+    inputs:
+      full_lint:
+        description: "Full lint report (about a minute longer)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -56,15 +64,18 @@ jobs:
             echo "::warning::KEYSTORE_BASE64 is not set: this APK is signed with the public dev keystore and will not be published as a release."
           fi
 
-      - name: Unit tests (domain)
-        run: ./gradlew :domain:test --stacktrace
-
-      - name: Lint + build release APK
+      - name: Build release APK
         env:
           SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
           SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
           SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
-        run: ./gradlew :app:lintRelease :app:assembleRelease --stacktrace
+          FULL_LINT: ${{ inputs.full_lint }}
+        run: |
+          if [ "$FULL_LINT" = "true" ]; then
+            ./gradlew :app:lintRelease :app:assembleRelease --stacktrace
+          else
+            ./gradlew :app:assembleRelease --stacktrace
+          fi
 
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk necessityQ-${{ env.VERSION_CODE }}.apk
@@ -78,9 +89,7 @@ jobs:
         if: always()
         with:
           name: reports
-          path: |
-            domain/build/reports/tests
-            app/build/reports/lint-results-release.html
+          path: app/build/reports/lint-results-release*.html
           if-no-files-found: ignore
 
       - name: Publish GitHub Release
