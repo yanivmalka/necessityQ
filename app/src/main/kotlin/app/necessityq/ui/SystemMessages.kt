@@ -32,8 +32,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 
-/** One system message: what happened to which item ("חלב הושלם"), and its own "ביטול" when it can be undone. */
-class SystemMessage(val id: Long, val text: String, val undo: (() -> Unit)?)
+/**
+ * One system message: what happened to which item ("חלב הושלם"), and its own "ביטול" when it can be undone — or
+ * another one-tap action ([actionLabel]), such as "עדכון" on a new version.
+ */
+class SystemMessage(val id: Long, val text: String, val undo: (() -> Unit)?, val actionLabel: String = "ביטול")
 
 /** How long a message stays on screen when nobody touches it. */
 const val MESSAGE_VISIBLE_MS = 30_000L
@@ -46,8 +49,8 @@ class SystemMessagesState {
     val messages = mutableStateListOf<SystemMessage>()
     private var nextId = 0L
 
-    fun show(text: String, undo: (() -> Unit)? = null) {
-        messages.add(SystemMessage(nextId++, text, undo))
+    fun show(text: String, undo: (() -> Unit)? = null, actionLabel: String = "ביטול") {
+        messages.add(SystemMessage(nextId++, text, undo, actionLabel))
     }
 
     fun dismiss(message: SystemMessage) {
@@ -153,7 +156,7 @@ private fun MessageCard(message: SystemMessage, top: Boolean, modifier: Modifier
                         },
                         enabled = top,
                         colors = ButtonDefaults.textButtonColors(contentColor = SnackbarDefaults.actionColor),
-                    ) { Text("ביטול", fontWeight = FontWeight.SemiBold) }
+                    ) { Text(message.actionLabel, fontWeight = FontWeight.SemiBold) }
                 }
             },
         ) { Text(message.text) }

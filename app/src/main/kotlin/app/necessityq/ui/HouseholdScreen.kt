@@ -112,7 +112,7 @@ fun HouseholdScreen(
             },
         )
         Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(16.dp),
+            Modifier.fadingVerticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             // the account has its own page; here only a small row that leads to it
@@ -505,9 +505,10 @@ fun UpdateCard(vm: AppViewModel) {
 
 @Composable
 private fun UpdateOption(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }, verticalAlignment = Alignment.CenterVertically) {
-        androidx.compose.material3.Checkbox(checked = checked, onCheckedChange = onChange)
-        Text(label)
+    // on / off settings are switches all over the app (several choices are radio buttons, picking people is checkboxes)
+    Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, modifier = Modifier.weight(1f))
+        androidx.compose.material3.Switch(checked = checked, onCheckedChange = onChange)
     }
 }
 

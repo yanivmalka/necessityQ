@@ -54,7 +54,7 @@ fun AppIconPicker(vm: AppViewModel) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            Modifier.fillMaxWidth().fadingHorizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             AppIcon.entries.forEach { icon ->

@@ -126,7 +126,7 @@ private fun BranchesTab(vm: AppViewModel, branches: List<PriceBranch>, selected:
                 Text("  הצגה לפי המיקום שלי")
             }
         } else {
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fadingHorizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("רדיוס:")
                 listOf(2.0, 5.0, 10.0, 25.0).forEach { r ->
                     FilterChip(selected = radiusKm == r, onClick = { radiusKm = r }, label = { Text("${r.toInt()} ק\"מ") })
@@ -156,7 +156,8 @@ private fun BranchesTab(vm: AppViewModel, branches: List<PriceBranch>, selected:
             style = MaterialTheme.typography.bodySmall,
         )
     }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)) {
+    val branchList = androidx.compose.foundation.lazy.rememberLazyListState()
+    LazyColumn(Modifier.fillMaxSize().fadingEdges(branchList, horizontal = false), state = branchList, contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)) {
         if (pinned.isNotEmpty()) {
             item(key = "pinned-title") { BranchSectionTitle("במעקב · ${pinned.size}") }
             items(pinned, key = { "pinned-" + it.branch.id }) { nb -> BranchRow(nb, true, status[nb.branch.id]) { vm.toggleBranch(nb.branch.id) } }
@@ -242,7 +243,7 @@ private fun ProductsTab(vm: AppViewModel, mine: List<PriceBranch>, status: Map<S
     val anyLoading = ids.any { it in loading }
 
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fadingHorizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (mine.size > 1) FilterChip(selected = allChosen, onClick = { chosenRaw = mineIds.joinToString(",") }, label = { Text("הכל") })
             mine.forEach { b ->
                 val on = b.id in ids
@@ -292,7 +293,8 @@ private fun ProductsTab(vm: AppViewModel, mine: List<PriceBranch>, status: Map<S
         if (loadedCount == 0 && !anyLoading) Text("המחירים עוד לא נטענו. נסו לרענן בעוד כמה דקות.", style = MaterialTheme.typography.bodySmall)
         if (!searching && debounced.isNotBlank() && loadedCount > 0 && results.isEmpty()) Text("לא נמצאו מוצרים.", style = MaterialTheme.typography.bodySmall)
     }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val productList = androidx.compose.foundation.lazy.rememberLazyListState()
+    LazyColumn(Modifier.fillMaxSize().fadingEdges(productList, horizontal = false), state = productList, contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         items(results, key = { r -> "${r.product.internalCode}:${r.at.keys.first()}:${r.product.code}" }) { r ->
             if (comparing) CompareCard(r, chosen, onAdd = { vm.addProductToList(r.product) })
             else ProductCard(r.product, all[ids.first()]?.rangeDays ?: 90, singleComparisons[r.product.code], mine, onAdd = { vm.addProductToList(r.product) })

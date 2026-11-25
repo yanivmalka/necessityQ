@@ -80,6 +80,10 @@ fun TileEditorSheet(
     onSave: (TileLayout) -> Unit,
     onDismiss: () -> Unit,
     onMoreSettings: (() -> Unit)? = null,
+    /** Parts a feature that is off keeps off the list ([app.necessityq.domain.Features.hiddenElements]). */
+    blocked: Set<TileElement> = emptySet(),
+    /** Turns such a feature on, from the note under the sample. */
+    onEnableFeature: ((app.necessityq.domain.Feature) -> Unit)? = null,
 ) {
     var draft by remember(mode, layout) { mutableStateOf(layout) }
     var cutOff by remember { mutableStateOf(emptyList<TileElement>()) }
@@ -87,7 +91,7 @@ fun TileEditorSheet(
         Column(Modifier.fillMaxWidth().padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Column(Modifier.padding(horizontal = 16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("תצוגת האריח · ${mode.label}", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    Text("מה מוצג על כל פריט · ${mode.label}", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                     // a real (outlined) button, so it does not read as a caption beside the title; greyed out
                     // while the draft already is the default
                     OutlinedButton(
@@ -133,8 +137,26 @@ fun TileEditorSheet(
                     }
                 }
             }
+            // parts a feature that is off keeps off the list: shown here, but not on the list until it is on
+            val blockedShown = draft.shown.filter { it in blocked }
+            if (blockedShown.isNotEmpty()) {
+                Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        "לא יופיעו ברשימה כי היכולת שלהם כבויה: " + blockedShown.joinToString(", ") { it.label } + ".",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (onEnableFeature != null) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            blockedShown.mapNotNull { app.necessityq.domain.Features.featureFor(it) }.distinct().forEach { f ->
+                                androidx.compose.material3.AssistChip(onClick = { onEnableFeature(f) }, label = { Text("להדליק: " + f.label) })
+                            }
+                        }
+                    }
+                }
+            }
             Text(
-                "מוצגים ${draft.shown.size} מתוך ${TileElement.entries.size}",
+                "מוצגים ${draft.shown.size} מתוך ${TileElement.entries.size} רכיבים",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp),

@@ -187,6 +187,10 @@ fun ListScreen(
     modifier: Modifier = Modifier,
     onOpenMessages: () -> Unit = {},
     onOpenDisplaySettings: () -> Unit = {},
+    /** Opens the "מחירים" tab (a suggestion to pick a branch). */
+    onOpenPrices: () -> Unit = {},
+    /** Opens the help page ("איך משתמשים"). */
+    onOpenHelp: () -> Unit = {},
 ) {
     val snapshot by vm.snapshot.collectAsStateWithLifecycle()
     val query by vm.query.collectAsStateWithLifecycle()
@@ -204,7 +208,9 @@ fun ListScreen(
     val names by vm.memberNames.collectAsStateWithLifecycle()
     val pickRanks by vm.pickRanks.collectAsStateWithLifecycle()
     val collapsed by vm.collapsed.collectAsStateWithLifecycle()
-    val storePrompt by vm.storePrompt.collectAsStateWithLifecycle()
+    val storePromptAsked by vm.storePrompt.collectAsStateWithLifecycle()
+    val advice by vm.advice.collectAsStateWithLifecycle()
+    val followedForAdvice by vm.selectedPriceBranches.collectAsStateWithLifecycle()
     val stores by vm.stores.collectAsStateWithLifecycle()
     val currentStoreId by vm.currentStoreId.collectAsStateWithLifecycle()
     val descending by vm.descending.collectAsStateWithLifecycle()
@@ -240,12 +246,17 @@ fun ListScreen(
     var addOpen by remember { mutableStateOf(false) }
     val shopping = mode == ListMode.SHOP
     // each stage of use has its own tile (set in the "תצוגה" popup)
-    // features turned off (הגדרות ← פיצ'רים) leave the list: their cards, buttons and parts of the tile
+    // features turned off (הגדרות ← יכולות) leave the list: their cards, buttons and parts of the tile
     val features by vm.features.collectAsStateWithLifecycle()
     val tile = features.tile(display.tile(mode))
     val showTotal = display.showTotal && app.necessityq.domain.Feature.PRICES in features
     val chatOn = app.necessityq.domain.Feature.CHAT in features
     val tripPlanOn = app.necessityq.domain.Feature.TRIP_PLAN in features
+    // "איפה קונים היום?" is about the shop's prices: not asked while prices are off ("רשימה פשוטה")
+    val storePrompt = storePromptAsked && app.necessityq.domain.Feature.PRICES in features
+    // the suggestion card is worked out again as the data it is based on comes in
+    LaunchedEffect(snapshot?.stats?.size, features, followedForAdvice.size) { vm.refreshAdvice() }
+    val showAdvice = !shopping && advice != null
     var showTileEditor by remember { mutableStateOf(false) }
 
     // Local copy of the rows so a drag can move items immediately; re-synced from the live data when idle.
@@ -323,6 +334,7 @@ fun ListScreen(
     // LazyColumn items before the product rows (store prompt, reminders, recipes, suggestions, hint) — to find a row's index
     val leadingItems = snapshot?.let { snap ->
         (if (shopping && storePrompt) 1 else 0) +
+            (if (showAdvice) 1 else 0) +
             (if (showReminders) 1 else 0) +
             (if (showRecipes && recipesOnList.isNotEmpty()) 1 else 0) +
             (if (showPromos && hasOffers) 1 else 0) +
@@ -396,6 +408,7 @@ fun ListScreen(
         Box {
             IconButton(onClick = { showMore = true }) { Icon(Icons.Default.MoreVert, contentDescription = "פעולות על הרשימה", tint = tint) }
             DropdownMenu(expanded = showMore, onDismissRequest = { showMore = false }) {
+                // in groups: filling the list · what it shows · clearing it · settings and help
                 DropdownMenuItem(
                     text = { Text("יצירת רשימה מקניות עבר") },
                     leadingIcon = { Icon(Icons.Default.AutoAwesome, null) },
@@ -408,38 +421,40 @@ fun ListScreen(
                         onClick = { showMore = false; showTrip = true },
                     )
                 }
+                HorizontalDivider()
+                DropdownMenuItem(
+                    text = { Text(if (display.showBought) "הסתרת מוצרים שסומנו או נמחקו" else "הצגת מוצרים שסומנו או נמחקו") },
+                    leadingIcon = { Icon(if (display.showBought) Icons.Default.VisibilityOff else Icons.Default.Visibility, null) },
+                    onClick = { showMore = false; vm.setDisplay(display.copy(showBought = !display.showBought)) },
+                )
+                // what a tile shows, at this stage of use (the same sheet as in the settings)
+                DropdownMenuItem(
+                    text = { Text("מה מוצג על כל פריט") },
+                    leadingIcon = { Icon(Icons.Default.Tune, null) },
+                    onClick = { showMore = false; showTileEditor = true },
+                )
+                HorizontalDivider()
                 DropdownMenuItem(
                     text = { Text("סל מחזור" + (snapshot?.removed?.size?.takeIf { it > 0 }?.let { " ($it)" } ?: "")) },
                     leadingIcon = { Icon(Icons.Default.RestoreFromTrash, null) },
                     onClick = { showBin = true; showMore = false },
                 )
-                HorizontalDivider()
                 // one way to clear the list: the whole list, or only what was added automatically / by hand
                 DropdownMenuItem(
                     text = { Text("ניקוי הרשימה…") },
                     leadingIcon = { Icon(Icons.Default.DeleteSweep, null) },
                     onClick = { showReset = true; showMore = false },
                 )
-                // what a tile shows, at this stage of use (the same sheet as in the settings)
-                DropdownMenuItem(
-                    text = { Text("תצוגה") },
-                    leadingIcon = { Icon(Icons.Default.Tune, null) },
-                    onClick = { showMore = false; showTileEditor = true },
-                )
+                HorizontalDivider()
                 DropdownMenuItem(
                     text = { Text("הגדרות") },
                     leadingIcon = { Icon(Icons.Default.Settings, null) },
                     onClick = { showMore = false; onOpenDisplaySettings() },
                 )
                 DropdownMenuItem(
-                    text = { Text(if (display.showBought) "הסתרת מוצרים שסומנו/נמחקו" else "הצגת מוצרים שסומנו/נמחקו") },
-                    leadingIcon = { Icon(if (display.showBought) Icons.Default.VisibilityOff else Icons.Default.Visibility, null) },
-                    onClick = { showMore = false; vm.setDisplay(display.copy(showBought = !display.showBought)) },
-                )
-                DropdownMenuItem(
-                    text = { Text("סריקת ברקוד: מחיר והוספה") },
-                    leadingIcon = { Icon(Icons.Default.QrCodeScanner, null) },
-                    onClick = { showMore = false; scan() },
+                    text = { Text("עזרה: איך משתמשים") },
+                    leadingIcon = { Icon(Icons.Default.Info, null) },
+                    onClick = { showMore = false; onOpenHelp() },
                 )
             }
         }
@@ -614,7 +629,7 @@ fun ListScreen(
 
         val snap = snapshot
         LazyColumn(
-            Modifier.fillMaxWidth().weight(1f),
+            Modifier.fillMaxWidth().weight(1f).fadingEdges(listState, horizontal = false),
             state = listState,
             contentPadding = PaddingValues(bottom = 24.dp),
         ) {
@@ -625,6 +640,18 @@ fun ListScreen(
 
             if (shopping && storePrompt) {
                 item(key = "store_prompt") { StorePromptCard(vm) }
+            }
+
+            // a feature that would probably help, told from the household's own data (at most one, once a week)
+            advice?.takeIf { showAdvice }?.let { a ->
+                item(key = "advice") {
+                    AdviceCard(
+                        a,
+                        onAccept = { vm.acceptAdvice(a, onOpenPrices) },
+                        onLater = { vm.laterAdvice(a) },
+                        onDecline = { vm.declineAdvice(a) },
+                    )
+                }
             }
 
             if (showReminders) {
@@ -662,7 +689,10 @@ fun ListScreen(
                             onToggle = { lowExpandedChoice = false },
                             onAddAll = { snap.runningLow.forEach { vm.accept(it) } },
                         )
+                        val lowRow = androidx.compose.foundation.lazy.rememberLazyListState()
                         LazyRow(
+                            Modifier.fadingEdges(lowRow, horizontal = true),
+                            state = lowRow,
                             contentPadding = PaddingValues(horizontal = 16.dp),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
@@ -735,7 +765,8 @@ fun ListScreen(
                 // the slot stays (empty) after the hint is learned, so row indexes do not shift
                 item(key = "hint") {
                     if (showSwipeHint) Text(
-                        "משכו שמאלה: נקנה · ימינה: " + (if (shopping) "חסר" else "מחיקה") + " — והחזיקו עד שהטבעת מהבהבת",
+                        "משכו שמאלה: נקנה · ימינה: " + (if (shopping) "חסר" else "מחיקה") + " — והחזיקו עד שהטבעת מהבהבת. " +
+                            "אפשר גם לגעת בעיגול. ההסבר המלא: ⋮ ← עזרה",
                         Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -872,6 +903,8 @@ fun ListScreen(
             onSave = { vm.setDisplay(vm.display.value.withTile(mode, it)); showTileEditor = false },
             onDismiss = { showTileEditor = false },
             onMoreSettings = { showTileEditor = false; onOpenDisplaySettings() },
+            blocked = features.hiddenElements(),
+            onEnableFeature = { vm.setFeatures(features.with(it, true)) },
         )
     }
     if (showGenerate) GenerateSheet(vm, onDismiss = { showGenerate = false })
@@ -1047,7 +1080,8 @@ private fun RecycleBinSheet(removed: List<ListLine>, vm: AppViewModel, onDismiss
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (removed.isEmpty()) Text("הסל ריק.", Modifier.padding(vertical = 24.dp))
-            LazyColumn(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+            val binList = androidx.compose.foundation.lazy.rememberLazyListState()
+            LazyColumn(Modifier.fillMaxWidth().padding(bottom = 24.dp).fadingEdges(binList, horizontal = false), state = binList) {
                 items(removed, key = { "r_" + it.id }) { line ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -1426,8 +1460,10 @@ private fun ActiveFilterRow(filter: ListFilter, onChange: (ListFilter) -> Unit) 
         if (filter.withChatOnly) add("עם שיחה" to filter.copy(withChatOnly = false))
         filter.categories.sortedBy { it.order }.forEach { c -> add(c.label to filter.copy(categories = filter.categories - c)) }
     }
+    val chipRow = androidx.compose.foundation.lazy.rememberLazyListState()
     LazyRow(
-        Modifier.fillMaxWidth(),
+        Modifier.fillMaxWidth().fadingEdges(chipRow, horizontal = true),
+        state = chipRow,
         contentPadding = PaddingValues(horizontal = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1534,7 +1570,8 @@ private fun GenerateSheet(vm: AppViewModel, onDismiss: () -> Unit) {
                     TextButton(onClick = { chosen = emptySet() }) { Text("נקה") }
                 }
             }
-            LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+            val proposalList = androidx.compose.foundation.lazy.rememberLazyListState()
+            LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).fadingEdges(proposalList, horizontal = false), state = proposalList) {
                 items(proposal, key = { it.identity.id }) { item ->
                     val on = item.identity.id in chosen
                     Row(
@@ -2393,6 +2430,43 @@ private fun RecipeOnListRow(dish: Dish, count: Int, onServings: (Dish, Int) -> U
         }
         IconButton(onClick = { onRemove(dish) }) {
             Icon(Icons.Default.Close, contentDescription = "הסרת ${dish.name} מהרשימה", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/**
+ * A suggestion from the app ([app.necessityq.domain.FeatureAdvisor]): what would probably help and why — told from
+ * the household's own data. "לא תודה" never offers it again; "אולי אחר כך" brings it back in two weeks.
+ */
+@Composable
+private fun AdviceCard(
+    advice: app.necessityq.domain.FeatureSuggestion,
+    onAccept: () -> Unit,
+    onLater: () -> Unit,
+    onDecline: () -> Unit,
+) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).clip(NqShapes.Tile)
+            .background(MaterialTheme.colorScheme.primaryContainer).padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                advice.title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Text(advice.why, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Button(onClick = onAccept) { Text(advice.action) }
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = onLater) { Text("אולי אחר כך") }
+            TextButton(onClick = onDecline) { Text("לא תודה") }
         }
     }
 }

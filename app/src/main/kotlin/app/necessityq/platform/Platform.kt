@@ -85,17 +85,55 @@ class AppPrefs(context: Context) {
         get() = app.necessityq.domain.AppTab.entries.firstOrNull { it.name == p.getString("start_tab", null) } ?: app.necessityq.domain.AppTab.LIST
         set(v) = p.edit().putString("start_tab", v.name).apply()
 
-    /** Which features are on ("הגדרות" ← "פיצ'רים"). */
+    /** Which features are on ("הגדרות" ← "יכולות"). */
     var features: app.necessityq.domain.Features
         get() = app.necessityq.domain.Features.decodeOff(p.getString("features_off", null))
         set(v) = p.edit().putString("features_off", v.encodeOff()).putBoolean("features_chosen", true).apply()
 
     /**
-     * Whether the first-run question ("רשימה פשוטה" or "הכול") was answered. Someone who used the app before the
-     * question existed is not asked: everything stays on for them.
+     * Whether the first-run questions were answered. Someone who used the app before the questions existed is not
+     * asked: everything stays on for them. While the first run is replayed ([firstRunReplay]) they are asked again.
      */
     val featuresChosen: Boolean
-        get() = p.getBoolean("features_chosen", false) || !freshInstall
+        get() = firstRunReplay == null && (p.getBoolean("features_chosen", false) || !freshInstall)
+
+    /** "הדגמת התחלה": the stage of the replayed first run ("ONBOARDING" or "QUESTIONS"); null = not replaying. */
+    var firstRunReplay: String?
+        get() = p.getString("first_run_replay", null)
+        set(v) = p.edit().putString("first_run_replay", v).apply()
+
+    /** The features that were on before the first run was replayed (restored when the replay is left early). */
+    var replayBackup: String?
+        get() = p.getString("replay_backup", null)
+        set(v) = p.edit().putString("replay_backup", v).apply()
+
+    /** The suggestions' memory ([app.necessityq.domain.AdvisorState]); it starts watching on the first read. */
+    var advisor: app.necessityq.domain.AdvisorState
+        get() = app.necessityq.domain.AdvisorState.decode(p.getString("advisor", null)).let {
+            if (it.since > 0) it else it.copy(since = System.currentTimeMillis()).also { s -> advisor = s }
+        }
+        set(v) = p.edit().putString("advisor", v.encode()).apply()
+
+    /** Recent times (millis, newest last, at most 20) of a usage event: "scan", "missing", "quick_close". */
+    fun usageEvents(event: String): List<Long> =
+        p.getString("u_$event", "").orEmpty().split(',').mapNotNull { it.toLongOrNull() }
+
+    fun addUsageEvent(event: String, at: Long) =
+        p.edit().putString("u_$event", (usageEvents(event) + at).takeLast(20).joinToString(",")).apply()
+
+    fun clearUsage() {
+        val e = p.edit()
+        p.all.keys.filter { it.startsWith("u_") || it.startsWith("used_") || it.startsWith("enabled_") }.forEach { e.remove(it) }
+        e.apply()
+    }
+
+    /** When [feature] was last used (its tab or page opened), in millis; 0 = not since watching started. */
+    fun usedAt(feature: app.necessityq.domain.Feature): Long = p.getLong("used_" + feature.name, 0L)
+    fun markUsed(feature: app.necessityq.domain.Feature, at: Long) = p.edit().putLong("used_" + feature.name, at).apply()
+
+    /** When [feature] was last turned on, in millis; 0 = unknown (on since before watching started). */
+    fun enabledAt(feature: app.necessityq.domain.Feature): Long = p.getLong("enabled_" + feature.name, 0L)
+    fun markEnabled(feature: app.necessityq.domain.Feature, at: Long) = p.edit().putLong("enabled_" + feature.name, at).apply()
 
     /** "תצוגה בהירה במיוחד": off by default, so the app follows the phone (light or dark). */
     var brightTheme: Boolean

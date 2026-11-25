@@ -1186,7 +1186,7 @@ private fun MentionSuggestions(
         shadowElevation = 2.dp,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
+        Column(Modifier.heightIn(max = 220.dp).fadingVerticalScroll(rememberScrollState())) {
             members.forEachIndexed { i, member ->
                 if (i > 0) HorizontalDivider(color = NqTheme.colors.hairline)
                 val everyone = member.userId == Mentions.EVERYONE
@@ -1285,7 +1285,7 @@ internal fun ArchivedChatScreen(vm: AppViewModel, thread: List<ItemMessage>, onD
                 }
             }
             HorizontalDivider()
-            Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(scroll).padding(horizontal = 12.dp, vertical = 4.dp)) {
+            Column(Modifier.fillMaxWidth().weight(1f).fadingVerticalScroll(scroll).padding(horizontal = 12.dp, vertical = 4.dp)) {
                 ChatFoodThread(thread, vm, selectedId = selectedId, onSelect = { selectedId = it?.id }, onReply = {}, readOnly = true)
             }
             Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {

@@ -163,7 +163,7 @@ private fun MenuHome(vm: AppViewModel, modifier: Modifier, onOpen: (MenuPage) ->
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
         )
         Column(
-            Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 12.dp),
+            Modifier.fadingVerticalScroll(rememberScrollState()).padding(horizontal = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             // ---- planning ahead ----
@@ -202,7 +202,7 @@ private fun MenuHome(vm: AppViewModel, modifier: Modifier, onOpen: (MenuPage) ->
 
                 // date strip
                 val listState = rememberLazyListState()
-                LazyRow(state = listState, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                LazyRow(Modifier.fadingEdges(listState, horizontal = true), state = listState, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     items((0 until horizon).map { today.plusDays(it.toLong()) }, key = { it.toEpochDay() }) { date ->
                         val meals = MealPlanner.mealsOn(data, date.toEpochDay())
                         DayChip(date, isToday = date == today, selected = date.toEpochDay() == selected, meals = meals) { selected = date.toEpochDay() }
@@ -533,7 +533,7 @@ private fun PickDishDialog(vm: AppViewModel, data: MealData, epochDay: Long, slo
         onDismissRequest = onDismiss,
         title = { Text("${slot.label} · יום ${MealPlanner.dayNames[MealPlanner.weekdayIndex(date)]} ${date.format(shortDate)}") },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.fadingVerticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (data.members.isNotEmpty()) {
                     Text("מי אוכל (בלי בחירה = כולם)", style = MaterialTheme.typography.bodySmall)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
