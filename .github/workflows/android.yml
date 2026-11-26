@@ -52,8 +52,15 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # Robolectric downloads the Android runtime jar for the tests from Maven Central, which rate-limits (429):
+      # keep it between runs, and try once more if a download still fails
+      - uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-android-all-${{ hashFiles('gradle/libs.versions.toml') }}
+
       - name: Unit tests (app)
-        run: ./gradlew :app:testDebugUnitTest --stacktrace
+        run: ./gradlew :app:testDebugUnitTest --stacktrace || (sleep 30 && ./gradlew :app:testDebugUnitTest --stacktrace)
 
       - uses: actions/upload-artifact@v4
         if: failure()
