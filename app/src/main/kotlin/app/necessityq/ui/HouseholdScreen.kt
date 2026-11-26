@@ -51,6 +51,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -306,6 +308,8 @@ fun AccountCard(vm: AppViewModel, account: Account) {
                     Box(Modifier.clip(CircleShape).clickable { photoMenu = true }) {
                         ProfileAvatar(account.displayName ?: "?", account.photo, size = 64.dp)
                     }
+                    // a green dot: signed in with a Google account
+                    if (!account.isAnonymous) ConnectedDot(Modifier.align(Alignment.TopEnd), size = 16.dp)
                     Box(
                         Modifier.align(Alignment.BottomStart).size(22.dp)
                             .background(MaterialTheme.colorScheme.primary, CircleShape),
@@ -394,6 +398,18 @@ fun AccountCard(vm: AppViewModel, account: Account) {
             dismissButton = { TextButton(onClick = { editingName = false }) { Text("ביטול") } },
         )
     }
+}
+
+/** The small green dot on a profile picture of someone who is signed in (with a ring in the surface colour, to stand out). */
+@Composable
+fun ConnectedDot(modifier: Modifier = Modifier, size: androidx.compose.ui.unit.Dp = 14.dp) {
+    Box(
+        modifier.size(size)
+            .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+            .padding(2.dp)
+            .background(androidx.compose.ui.graphics.Color(0xFF2EB85C), CircleShape)
+            .semantics { contentDescription = "מחובר" },
+    )
 }
 
 /** A participant's round picture, or the first letter of the name on a coloured circle when there is none. */

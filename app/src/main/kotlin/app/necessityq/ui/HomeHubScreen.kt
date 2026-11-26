@@ -40,7 +40,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /** One row of the "הבית" hub. */
-class HubEntry(val title: String, val icon: ImageVector, val badge: String? = null, val onClick: () -> Unit)
+class HubEntry(val title: String, val icon: ImageVector, val badge: String? = null, val connected: Boolean = false, val onClick: () -> Unit)
 
 /** The "הבית" tab: the household, then the pages that used to live in the side drawer, in grouped cards. */
 @Composable
@@ -100,11 +100,15 @@ private fun HubRow(entry: HubEntry) {
         Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(onClick = entry.onClick).padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            Modifier.size(36.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(entry.icon, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(20.dp))
+        Box {
+            Box(
+                Modifier.size(36.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(entry.icon, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(20.dp))
+            }
+            // the account entry: a green dot while signed in
+            if (entry.connected) ConnectedDot(Modifier.align(Alignment.TopEnd), size = 13.dp)
         }
         Spacer(Modifier.width(14.dp))
         Text(entry.title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))

@@ -1165,11 +1165,18 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     val includeMemberPromos = MutableStateFlow(prefs.tripMembers)
     fun setIncludeMemberPromos(on: Boolean) { prefs.tripMembers = on; includeMemberPromos.value = on }
 
+    /** Branches whose promotions were tried at least once (loaded, or failed with nothing cached): the opening waits for the primary one. */
+    private val promosTried = MutableStateFlow<Set<String>>(emptySet())
+
+    /** The primary branch the promotions were matched to the list's items for (the opening screen waits for it). */
+    private val promosMatchedFor = MutableStateFlow<String?>(null)
+
     private fun loadPromotions(branchId: String) {
         viewModelScope.launch {
             runCatching { container.prices.promotions(branchId) }.getOrNull()?.let { p ->
                 if (branchPromotions.value[branchId]?.updatedAtMillis != p.updatedAtMillis) branchPromotions.update { it + (branchId to p) }
             }
+            promosTried.update { it + branchId }
         }
     }
 
@@ -1219,14 +1226,19 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     /** "יש למוצרים אלו מבצעים ב…": promotions on the list's items at the followed branches, biggest saving first. */
     val promoOffers: StateFlow<List<app.necessityq.domain.PromoOffer>> =
-        combine(branchItemInfos, branchPromotions, includeMemberPromos) { infos, promos, members -> Triple(infos, promos, members) }
-            .mapLatest { (infos, promos, members) ->
+        combine(branchItemInfos, branchPromotions, includeMemberPromos, promosTried) { infos, promos, members, tried -> PromoInputs(infos, promos, members, tried) }
+            .mapLatest { (infos, promos, members, tried) ->
                 val lines = snapshot.value?.lines.orEmpty()
-                app.necessityq.domain.PromoOffers.forList(lines, infos, promos, nowLocal(), members)
+                app.necessityq.domain.PromoOffers.forList(lines, infos, promos, nowLocal(), members).also {
+                    // matched to the list's items after the primary branch's promotions arrived: the opening may finish
+                    val primary = primaryBranchId.value
+                    if (primary != null && primary in tried && snapshot.value != null) promosMatchedFor.value = primary
+                }
             }
             .flowOn(kotlinx.coroutines.Dispatchers.Default)
             .catch { emit(emptyList()) }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+            // eager: computed while the opening screen still shows, so the list opens with its promotions
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     /** Whole-basket promotions of the followed branches ("10 ₪ הנחה בקנייה מעל 300 ₪"), as (branch id, promotion). */
     val basketOffers: StateFlow<List<Pair<String, app.necessityq.domain.Promotion>>> =
@@ -1351,6 +1363,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             primaryBranchId.collect { id ->
                 if (id != null) {
                     loadPrices(id)
+                    loadPromotions(id) // in parallel with the server's check, so the opening has them (the cached ones at least)
                     if (activeStop.value == null && hereBranch.value == null) prefs.lastPriceBranch = id
                 }
             }
@@ -1384,7 +1397,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     val startupStep: StateFlow<StartupStep> = combine(
         session, snapshot, selectedBranchesKnown,
         combine(primaryBranchId, branchPrices, pricesTried, pricedFor) { id, loaded, tried, priced -> PriceReady(id, id != null && id in loaded, id != null && id in tried, priced) },
-    ) { s, snap, branchesKnown, ready ->
+        promosMatchedFor,
+    ) { s, snap, branchesKnown, ready, promosFor ->
         val household = (s as? Session.SignedIn)?.household
         when {
             s is Session.Loading -> StartupStep.ACCOUNT
@@ -1393,7 +1407,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             !branchesKnown -> StartupStep.PRICES
             ready.branchId == null -> StartupStep.READY
             // loaded and already matched to the list's items: the first screen shows the prices
-            ready.loaded && ready.pricedFor == ready.branchId -> StartupStep.READY
+            // (and the promotions matched too, so the gift marks and the strips are there from the first frame)
+            ready.loaded && ready.pricedFor == ready.branchId -> if (promosFor == ready.branchId) StartupStep.READY else StartupStep.PRICES
             // nothing cached and the download failed: open without prices
             !ready.loaded && ready.tried -> StartupStep.READY
             else -> StartupStep.PRICES
@@ -2343,6 +2358,13 @@ private data class TripInputs(
     val settings: AppViewModel.TripSettings,
     val followed: List<String>,
 )
+private data class PromoInputs(
+    val infos: Map<String, Map<String, app.necessityq.domain.ItemPriceInfo>>,
+    val promos: Map<String, app.necessityq.domain.BranchPromotions>,
+    val members: Boolean,
+    val tried: Set<String>,
+)
+
 private data class PriceReady(val branchId: String?, val loaded: Boolean, val tried: Boolean, val pricedFor: String?)
 private data class CompareInputs(
     val infos: Map<String, app.necessityq.domain.ItemPriceInfo>,
