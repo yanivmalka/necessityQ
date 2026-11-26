@@ -1143,6 +1143,22 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /**
+     * [searchProducts] in steps: the first hits come at once (the quick pass over each branch), then more are added
+     * as the slower pass finishes. Collecting stops the work (a new query cancels it). Off the main thread.
+     */
+    fun searchProductsProgressive(branchIds: List<String>, query: String): kotlinx.coroutines.flow.Flow<List<app.necessityq.domain.ProductAcross>> = kotlinx.coroutines.flow.flow {
+        val loaded = branchPrices.value
+        val chosen = branchIds.mapNotNull { id -> loaded.at(id) }
+        if (chosen.isEmpty() || query.isBlank()) { emit(emptyList()); return@flow }
+        val byId = chosen.associateBy { it.branchId }
+        val indexes = chosen.map { it.branchId to indexFor(it) }
+        val stages = app.necessityq.domain.ProductSearch.stages(indexes, { id -> byId[id]?.let(::codesFor).orEmpty() }, query)
+        for (step in stages) {
+            emit(step)
+        }
+    }.flowOn(kotlinx.coroutines.Dispatchers.Default)
+
     /** One product at [branchId] against the same barcode at the household's other followed branches. Off the main thread. */
     suspend fun compareProducts(
         products: List<app.necessityq.domain.BranchProduct>,

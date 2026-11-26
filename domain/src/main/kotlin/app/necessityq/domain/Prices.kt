@@ -170,6 +170,26 @@ object PriceData {
     }
 
     /**
+     * [search] over a branch's [ProductIndex] (its keys and stems are computed once, so this is a scan of strings). Two
+     * passes: [stems] false = the words are contained in the name, brand or barcode (fast, nearly always what the user
+     * meant); true = only the products the first pass did not find, by their stems ("עגבניות" finds "עגבניה").
+     */
+    fun searchIndexed(index: ProductIndex, query: String, limit: Int = 100, stems: Boolean = false): List<BranchProduct> {
+        val words = HebrewText.matchKey(query).split(' ').filter { it.isNotBlank() }
+        if (words.isEmpty()) return emptyList()
+        val queryStems = if (stems) HebrewStem.words(query) else emptyList()
+        val code = query.trim()
+        val hits = ArrayList<BranchProduct>()
+        for (i in index.entries.indices) {
+            val (p, key) = index.entries[i]
+            val direct = p.code == code || words.all { key.contains(it) || p.code.contains(it) }
+            val hit = if (stems) !direct && queryStems.all { s -> HebrewStem.matchesAny(index.stems[i], s) } else direct
+            if (hit) hits += p
+        }
+        return hits.sortedWith(compareBy<BranchProduct>({ if (it.code == code) 0 else 1 }, { it.name.length }, { it.price })).take(limit)
+    }
+
+    /**
      * Range of one barcode over several branches (internal chain codes are not compared), in the price unit of the
      * first branch that sells it (see [rangeIn]).
      */

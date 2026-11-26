@@ -59,6 +59,11 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
+/** Product hits for [query]; [done] when every step of the search has finished. */
+private data class SearchResults(val query: String, val items: List<app.necessityq.domain.ProductAcross>, val done: Boolean)
+
+private const val PRODUCT_SEARCH_DELAY_MS = 120L
+
 private enum class PricesTab(val label: String) { BRANCHES("סניפים קרובים"), PRODUCTS("מוצרים ומחירים") }
 
 /** Branches near the user (from the price-transparency files) and product prices with ranges per chosen branch. */
@@ -257,7 +262,8 @@ private fun ProductsTab(
         }
     }
     LaunchedEffect(query) {
-        if (query.isNotBlank()) kotlinx.coroutines.delay(AppViewModel.SEARCH_DELAY_MS)
+        // short: the results come in steps, so a search started too early only costs a cancelled step
+        if (query.isNotBlank()) kotlinx.coroutines.delay(PRODUCT_SEARCH_DELAY_MS)
         debounced = query.trim()
     }
     val all by vm.branchPrices.collectAsStateWithLifecycle()
@@ -268,15 +274,18 @@ private fun ProductsTab(
     val versions = ids.map { all[it]?.updatedAtMillis }
     val otherVersions = mineIds.map { all[it]?.updatedAtMillis }
     // the results with the text they answer, so "not found" is not shown while a search is still running
-    val searched by produceState("" to emptyList<app.necessityq.domain.ProductAcross>(), ids, versions, debounced) {
-        value = debounced to vm.searchProducts(ids, debounced)
+    // the hits come in steps (the quick pass first, more as the slower pass finishes); the earlier hits stay until the first step arrives
+    val searched by produceState(SearchResults("", emptyList(), true), ids, versions, debounced) {
+        value = value.copy(done = false)
+        vm.searchProductsProgressive(ids, debounced).collect { value = SearchResults(debounced, it, false) }
+        value = SearchResults(debounced, value.items.takeIf { value.query == debounced }.orEmpty(), true)
     }
-    val results = searched.second
+    val results = searched.items
     // one branch: each product against the same barcode at the household's other branches
     val singleComparisons by produceState(emptyMap<String, app.necessityq.domain.PriceComparison>(), results, comparing, otherVersions) {
         value = if (comparing || results.isEmpty()) emptyMap() else vm.compareProducts(results.map { it.product }, ids.first())
     }
-    val searching = query.trim() != debounced || searched.first != debounced
+    val searching = query.trim() != debounced || !searched.done || searched.query != debounced
     val scan = rememberBarcodeScan(vm) { code -> query = app.necessityq.domain.Barcodes.normalize(code) ?: code }
     val anyLoading = ids.any { it in loading }
 

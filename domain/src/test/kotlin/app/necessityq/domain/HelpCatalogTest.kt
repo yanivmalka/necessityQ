@@ -64,3 +64,22 @@ class MemberPresenceTest {
         assertTrue(!member(null).isActive(now))
     }
 }
+
+class ProductSearchStagesTest {
+    private fun p(code: String, name: String, price: Double = 5.0) =
+        BranchProduct(code = code, name = name, brand = "", packageSize = null, unit = "", weighted = false, internalCode = false, price = price, unitPrice = null, since = "", low = price, high = price)
+
+    @Test
+    fun `stages come quick pass first and end where the full search ends`() {
+        val a = listOf(p("1", "עגבניה שרי"), p("2", "עגבניות מרוסקות"), p("3", "חלב"))
+        val b = listOf(p("1", "עגבניה שרי"))
+        val idx = listOf("a" to ProductIndex("a", 1, a), "b" to ProductIndex("b", 1, b))
+        val codes = mapOf("a" to PriceComparisons.byCode(a), "b" to PriceComparisons.byCode(b))
+        val steps = ProductSearch.stages(idx, { codes[it].orEmpty() }, "עגבניות").toList()
+        // "עגבניות" is contained only in the second name: found by the quick pass; the singular needs the stem pass
+        assertEquals(listOf("2"), steps.first().map { it.product.code })
+        assertEquals(setOf("1", "2"), steps.last().map { it.product.code }.toSet())
+        val full = ProductSearch.across(listOf("a" to a, "b" to b), codes, "עגבניות").map { it.product.code }
+        assertEquals(full.toSet(), steps.last().map { it.product.code }.toSet())
+    }
+}
