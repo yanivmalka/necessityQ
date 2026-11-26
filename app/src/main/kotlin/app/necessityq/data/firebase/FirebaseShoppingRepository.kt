@@ -181,6 +181,6 @@ class FirebaseShoppingRepository(
 
     override suspend fun suppress(householdId: String, suppression: SuggestionSuppression) {
         suppressionsRef(householdId).document(suppression.itemId)
-            .set(mapOf("untilEpochDay" to suppression.untilEpochDay, "dismissals" to suppression.dismissals))
+            .set(mapOf("untilEpochDay" to suppression.untilEpochDay, "dismissals" to suppression.dismissals, "atHome" to suppression.atHome))
     }
 }

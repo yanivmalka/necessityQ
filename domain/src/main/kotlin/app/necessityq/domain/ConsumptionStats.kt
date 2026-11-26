@@ -34,6 +34,8 @@ data class ItemStats(
     val classification: Classification,
     /** Recency-weighted purchase frequency, used to rank quick-add chips. */
     val frequencyScore: Double,
+    /** How many people the household was when it bought [typicalQuantity] (median); null when not recorded. */
+    val typicalPeople: Double? = null,
 ) {
     /** True when the last purchase is an estimate because later trips were not documented. */
     val lastPurchaseEstimated: Boolean get() = estimatedLastPurchase != lastPurchase
@@ -97,7 +99,8 @@ class ConsumptionStatsEngine(
         // latest purchase and ignore trips in another one, so "750 g" is never read as 750 pieces.
         val dim = trips.lastOrNull { it.baseAmount != null }?.quantity?.dimension
         val knownAmounts = trips.filter { it.quantity?.dimension == dim }.mapNotNull { it.baseAmount }
-        val typicalBase = if (dim == null || knownAmounts.isEmpty()) null else median(knownAmounts)
+        // an amount the household really bought (never the average of two trips: 1 and 2 bottles are not 1.5)
+        val typicalBase = if (dim == null || knownAmounts.isEmpty()) null else observedMedian(knownAmounts)
         // a median far beyond any home purchase of this item is a slip in the data (750 יח' of cottage cheese)
         val typicalQuantity = QuantityNorms.homeSized(
             latestIdentity.name, latestIdentity.category, typicalBase?.let { Quantity.fromBase(it, dim!!) },
@@ -192,6 +195,9 @@ class ConsumptionStatsEngine(
             confidence = confidence,
             classification = classification,
             frequencyScore = frequencyScore,
+            typicalPeople = purchases.sortedBy { it.boughtAtMillis }.takeLast(maxTrips * 2)
+                .mapNotNull { it.householdPeople?.takeIf { n -> n > 0.0 } }
+                .takeIf { it.isNotEmpty() }?.let(::median),
         )
     }
 
@@ -218,6 +224,12 @@ class ConsumptionStatsEngine(
             val sorted = values.sorted()
             val mid = sorted.size / 2
             return if (sorted.size % 2 == 0) (sorted[mid - 1] + sorted[mid]) / 2.0 else sorted[mid]
+        }
+
+        /** The median as one of the values themselves: the lower middle one when their number is even. */
+        fun observedMedian(values: List<Double>): Double {
+            require(values.isNotEmpty())
+            return values.sorted()[(values.size - 1) / 2]
         }
 
         fun weightedMedian(values: List<Double>, weights: List<Double>): Double {

@@ -55,7 +55,7 @@ class StatsAndSuggestionsTest {
         )
         val stats = engine.compute(purchases, start.plusDays(4)).values.single()
         assertEquals(2, stats.purchaseDays)
-        assertEquals(Quantity.pieces(1.5), stats.typicalQuantity) // median of 2 (same day) and 1
+        assertEquals(Quantity.pieces(1), stats.typicalQuantity) // 2 (same day) and 1: an amount really bought, not 1.5
     }
 
     @Test fun `typical quantity ignores purchases in another dimension`() {
@@ -70,7 +70,7 @@ class StatsAndSuggestionsTest {
         assertEquals(Quantity.pieces(1), stats.typicalQuantity) // median of 1, 1, 2 — the 750 g trip is left out
         // the latest purchase decides the dimension
         val grams = purchases.dropLast(1) + purchase("גבינה לבנה", start.plusDays(21), Quantity(500.0, QuantityUnit.GRAM))
-        assertEquals(Quantity(625.0, QuantityUnit.GRAM), engine.compute(grams, start.plusDays(21)).values.single().typicalQuantity)
+        assertEquals(Quantity(500.0, QuantityUnit.GRAM), engine.compute(grams, start.plusDays(21)).values.single().typicalQuantity)
     }
 
     @Test fun `stock-up does not slow the cadence`() {

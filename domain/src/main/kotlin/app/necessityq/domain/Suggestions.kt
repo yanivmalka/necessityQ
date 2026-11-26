@@ -14,6 +14,8 @@ data class Suggestion(
     val quantity: Quantity?,
     val score: Double,
     val reason: String,
+    /** Where [quantity] came from when it is not just the usual purchase ("לפי 4 נפשות", "לשבוע: פעמיים"). */
+    val quantityNote: String? = null,
 )
 
 /**
@@ -193,20 +195,31 @@ data class SuggestionAccuracy(val bought: Int, val rejected: Int, val open: Int)
          */
         fun rejectionsByItem(lines: Collection<ListLine>, sinceMillis: Long): Map<String, Int> =
             lines.filter {
-                (it.source == LineSource.SUGGESTED || it.source == LineSource.QUICK_ADD) && it.recipe == null &&
-                    it.status == LineStatus.REMOVED && it.removedFrom != LineStatus.BOUGHT &&
+                it.isFromSuggestion && it.status == LineStatus.REMOVED && it.removedFrom != LineStatus.BOUGHT &&
+                    it.removedReason != RemoveReason.RESET &&
                     (it.removedAtMillis ?: 0L) >= sinceMillis
             }.groupingBy { it.itemId }.eachCount()
+
+        /**
+         * A line the app proposed: a suggestion card, a quick-add chip, or the reviewed list from past purchases
+         * ([LineSource.AUTO]). Older versions tagged menu lines as suggestions ([ListLine.recipe]).
+         */
+        private val ListLine.isFromSuggestion: Boolean
+            get() = (source == LineSource.SUGGESTED || source == LineSource.QUICK_ADD || source == LineSource.AUTO) && recipe == null
 
         fun of(lines: Collection<ListLine>): SuggestionAccuracy {
             var bought = 0; var rejected = 0; var open = 0
             for (l in lines) {
-                if (l.source != LineSource.SUGGESTED && l.source != LineSource.QUICK_ADD) continue
-                if (l.recipe != null) continue // older versions tagged menu lines as suggestions
+                if (!l.isFromSuggestion) continue
                 when (l.status) {
                     LineStatus.BOUGHT -> bought++
                     LineStatus.NEEDED -> open++
-                    LineStatus.REMOVED -> if (l.removedFrom == LineStatus.BOUGHT) bought++ else rejected++
+                    // clearing the whole list says nothing about one suggestion
+                    LineStatus.REMOVED -> when {
+                        l.removedFrom == LineStatus.BOUGHT -> bought++
+                        l.removedReason == RemoveReason.RESET -> Unit
+                        else -> rejected++
+                    }
                 }
             }
             return SuggestionAccuracy(bought, rejected, open)
