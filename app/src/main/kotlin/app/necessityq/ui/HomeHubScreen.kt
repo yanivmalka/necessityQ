@@ -69,7 +69,11 @@ fun HomeHubScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 if (members.isNotEmpty()) {
-                    MemberAvatars(members.map { it.displayName }, size = 36.dp, max = 5, photos = members.map { it.photo })
+                    val now = rememberNowMillis()
+                    MemberAvatars(
+                        members.map { it.displayName }, size = 36.dp, max = 5, photos = members.map { it.photo },
+                        active = members.map { it.userId == vm.me || it.isActive(now) },
+                    )
                 } else {
                     MemberAvatars(names.values.toList(), size = 36.dp, max = 5)
                 }
@@ -120,13 +124,14 @@ private val AvatarColors = listOf(Color(0xFF0B6E4F), Color(0xFFB45309), Color(0x
 
 /** Overlapping initials of household members; the first name sits on the right. */
 @Composable
-fun MemberAvatars(names: List<String>, size: Dp = 32.dp, max: Int = 3, photos: List<String?> = emptyList()) {
+fun MemberAvatars(names: List<String>, size: Dp = 32.dp, max: Int = 3, photos: List<String?> = emptyList(), active: List<Boolean> = emptyList()) {
     val shown = names.take(max)
     val ring = MaterialTheme.colorScheme.background
     Row(Modifier.semantics { contentDescription = "${names.size} בני בית" }) {
         shown.forEachIndexed { index, name ->
+            Box(Modifier.offset(x = if (index == 0) 0.dp else (-10 * index).dp)) {
             Box(
-                Modifier.offset(x = if (index == 0) 0.dp else (-10 * index).dp)
+                Modifier
                     .size(size).clip(CircleShape).background(ring).padding(2.dp)
                     .clip(CircleShape).background(AvatarColors[index % AvatarColors.size]),
                 contentAlignment = Alignment.Center,
@@ -138,6 +143,9 @@ fun MemberAvatars(names: List<String>, size: Dp = 32.dp, max: Int = 3, photos: L
                     fontWeight = FontWeight.SemiBold,
                     fontSize = (size.value * 0.42f).sp,
                 )
+            }
+            // in the app right now
+            if (active.getOrNull(index) == true) ConnectedDot(Modifier.align(Alignment.TopEnd), size = (size.value * 0.36f).dp)
             }
         }
     }

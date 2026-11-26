@@ -78,6 +78,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.zIndex
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -1372,6 +1375,10 @@ private fun ProductTile(
     // produce counted in pieces: estimated weight (the price next to it is per kilo / 100 g)
     val weight = if (TileElement.WEIGHT in tile) app.necessityq.domain.PieceWeights.estimate(line.name, line.quantity) else null
 
+    // with "two taps to open", a single tap opens the promotion strip (and a second one opens the page)
+    val promoOnTap = tapMode == TapMode.DOUBLE && promoText != null
+    var promoOpen by remember(line.itemId) { mutableStateOf(false) }
+
     Column(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) {
         SwipeableTile(left = left, right = right) {
           Box {
@@ -1393,7 +1400,7 @@ private fun ProductTile(
                 Row {
                     // the category is shown by the group header's dot; auto-generated lines carry an "אוטומטי" tag
                     val open = if (tapMode == TapMode.DOUBLE) {
-                        Modifier.combinedClickable(onClick = {}, onDoubleClick = onOpen)
+                        Modifier.combinedClickable(onClick = { if (promoOnTap) promoOpen = !promoOpen }, onDoubleClick = onOpen)
                     } else {
                         Modifier.clickable(onClickLabel = "פתיחת דף הפריט", onClick = onOpen)
                     }
@@ -1486,8 +1493,10 @@ private fun ProductTile(
             if (promo) PromoGift(Modifier.align(AbsoluteAlignment.TopRight).absoluteOffset(x = 5.dp, y = (-5).dp))
           }
         }
-        // the promotion's details, right under the tile (while preparing and in the shop)
-        PromoStrip(promo = promoText)
+        // the promotion's details, right under the tile (while preparing and in the shop); with "two taps" only after a tap
+        AnimatedVisibility(visible = promoText != null && (!promoOnTap || promoOpen)) {
+            PromoStrip(promo = promoText)
+        }
     }
 }
 
@@ -1822,15 +1831,28 @@ fun PromoGift(modifier: Modifier = Modifier) {
     }
 }
 
-/** Promotion line right under a product tile; renders nothing when there is no promotion. */
+/**
+ * Promotion line right under a product tile; renders nothing when there is no promotion. It looks like it slides out
+ * from behind the tile: rounded like the tile but narrower on both sides, and tucked under the tile's lower edge.
+ */
 @Composable
 fun PromoStrip(promo: String?) {
     if (promo == null) return
+    val tuck = 16.dp
     Text(
         "🏷 $promo",
-        Modifier.fillMaxWidth().padding(horizontal = 6.dp)
-            .background(NqTheme.colors.promoBackground, RoundedCornerShape(bottomStart = 10.dp, bottomEnd = 10.dp))
-            .padding(horizontal = 10.dp, vertical = 2.dp),
+        Modifier
+            .fillMaxWidth()
+            .zIndex(-1f)
+            // pulled up under the tile (takes no extra height), so no seam shows between them
+            .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints)
+                val pull = tuck.roundToPx()
+                layout(placeable.width, placeable.height - pull) { placeable.place(0, -pull) }
+            }
+            .padding(horizontal = 22.dp)
+            .background(NqTheme.colors.promoBackground, RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp))
+            .padding(start = 12.dp, end = 12.dp, top = tuck + 2.dp, bottom = 6.dp),
         fontWeight = FontWeight.Bold,
         color = NqTheme.colors.promoInk,
     )

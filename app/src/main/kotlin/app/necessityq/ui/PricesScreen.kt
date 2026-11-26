@@ -3,6 +3,7 @@ package app.necessityq.ui
 import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -42,6 +43,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -67,15 +70,21 @@ fun PricesScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
     val selected by vm.selectedPriceBranches.collectAsStateWithLifecycle()
     val status by vm.priceStatus.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(if (selected.isEmpty()) PricesTab.BRANCHES else PricesTab.PRODUCTS) }
+    // searching for a product: the title and the tabs make room, so the search field sits at the top and the results get the screen
+    var searching by remember { mutableStateOf(false) }
 
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        TopAppBar(
-            navigationIcon = { BackNavButton() },
-            title = { Text("סניפים ומחירים", fontWeight = FontWeight.ExtraBold) },
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
-        )
-        Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PricesTab.entries.forEach { t -> FilterChip(selected = tab == t, onClick = { tab = t }, label = { Text(t.label) }) }
+        AnimatedVisibility(visible = !searching) {
+            Column {
+                TopAppBar(
+                    navigationIcon = { BackNavButton() },
+                    title = { Text("סניפים ומחירים", fontWeight = FontWeight.ExtraBold) },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+                )
+                Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PricesTab.entries.forEach { t -> FilterChip(selected = tab == t, onClick = { tab = t }, label = { Text(t.label) }) }
+                }
+            }
         }
         if (branches.isEmpty()) {
             Text(
@@ -88,7 +97,11 @@ fun PricesScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
         }
         when (tab) {
             PricesTab.BRANCHES -> BranchesTab(vm, branches, selected, status)
-            PricesTab.PRODUCTS -> ProductsTab(vm, branches.filter { it.id in selected }, status, onPickBranches = { tab = PricesTab.BRANCHES })
+            PricesTab.PRODUCTS -> ProductsTab(
+                vm, branches.filter { it.id in selected }, status,
+                onPickBranches = { tab = PricesTab.BRANCHES },
+                onSearching = { searching = it },
+            )
         }
     }
 }
@@ -200,7 +213,14 @@ private fun BranchRow(nb: NearbyBranch, checked: Boolean, status: BranchPriceSta
  * barcode at the household's other branches. The search runs once typing pauses, off the main thread.
  */
 @Composable
-private fun ProductsTab(vm: AppViewModel, mine: List<PriceBranch>, status: Map<String, BranchPriceStatus>, onPickBranches: () -> Unit) {
+private fun ProductsTab(
+    vm: AppViewModel,
+    mine: List<PriceBranch>,
+    status: Map<String, BranchPriceStatus>,
+    onPickBranches: () -> Unit,
+    /** true while the search field is focused or holds a text: the screen's title and tabs then fold away. */
+    onSearching: (Boolean) -> Unit = {},
+) {
     if (mine.isEmpty()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("עוד לא נבחרו סניפים.")
@@ -218,6 +238,24 @@ private fun ProductsTab(vm: AppViewModel, mine: List<PriceBranch>, status: Map<S
     val comparing = chosen.size > 1
     var query by rememberSaveable { mutableStateOf("") }
     var debounced by remember { mutableStateOf(query.trim()) }
+    var focused by remember { mutableStateOf(false) }
+    val searchActive = focused || query.isNotBlank()
+    LaunchedEffect(searchActive) { onSearching(searchActive) }
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { onSearching(false) } }
+    // the first scroll through the results closes the keyboard (and takes the focus from the field)
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val closeKeyboardOnScroll = remember(focusManager, keyboard) {
+        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            override fun onPreScroll(available: androidx.compose.ui.geometry.Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
+                if (available.y != 0f) {
+                    keyboard?.hide()
+                    focusManager.clearFocus()
+                }
+                return androidx.compose.ui.geometry.Offset.Zero
+            }
+        }
+    }
     LaunchedEffect(query) {
         if (query.isNotBlank()) kotlinx.coroutines.delay(AppViewModel.SEARCH_DELAY_MS)
         debounced = query.trim()
@@ -243,6 +281,8 @@ private fun ProductsTab(vm: AppViewModel, mine: List<PriceBranch>, status: Map<S
     val anyLoading = ids.any { it in loading }
 
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        AnimatedVisibility(visible = !searchActive) {
+          Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fadingHorizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (mine.size > 1) FilterChip(selected = allChosen, onClick = { chosenRaw = mineIds.joinToString(",") }, label = { Text("הכל") })
             mine.forEach { b ->
@@ -272,9 +312,12 @@ private fun ProductsTab(vm: AppViewModel, mine: List<PriceBranch>, status: Map<S
                 Icon(Icons.Default.Refresh, contentDescription = if (comparing) "רענון המחירים של הסניפים שנבחרו" else "רענון המחירים של הסניף")
             }
         }
+          }
+        }
         if (anyLoading || searching) LinearProgressIndicator(Modifier.fillMaxWidth())
         OutlinedTextField(
-            query, { query = it }, label = { Text("חיפוש מוצר או ברקוד") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            query, { query = it }, label = { Text("חיפוש מוצר או ברקוד") }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused },
             trailingIcon = {
                 Row {
                     if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Default.Close, contentDescription = "מחיקת הטקסט") }
@@ -294,7 +337,7 @@ private fun ProductsTab(vm: AppViewModel, mine: List<PriceBranch>, status: Map<S
         if (!searching && debounced.isNotBlank() && loadedCount > 0 && results.isEmpty()) Text("לא נמצאו מוצרים.", style = MaterialTheme.typography.bodySmall)
     }
     val productList = androidx.compose.foundation.lazy.rememberLazyListState()
-    LazyColumn(Modifier.fillMaxSize().fadingEdges(productList, horizontal = false), state = productList, contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    LazyColumn(Modifier.fillMaxSize().nestedScroll(closeKeyboardOnScroll).fadingEdges(productList, horizontal = false), state = productList, contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         items(results, key = { r -> "${r.product.internalCode}:${r.at.keys.first()}:${r.product.code}" }) { r ->
             if (comparing) CompareCard(r, chosen, onAdd = { vm.addProductToList(r.product) })
             else ProductCard(r.product, all[ids.first()]?.rangeDays ?: 90, singleComparisons[r.product.code], mine, onAdd = { vm.addProductToList(r.product) })

@@ -56,6 +56,7 @@ class FirebaseHouseholdRepository(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var lastProfileKey: String? = null
+    @Volatile private var lastSession: Session? = null
 
     private val uidFlow: Flow<String?> = callbackFlow {
         val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
@@ -81,7 +82,7 @@ class FirebaseHouseholdRepository(
                 } else {
                     db.collection("households").document(hid).observe()
                         .map<_, Session> { Session.SignedIn(uid, FirestoreMapping.householdFrom(it), account) }
-                        .onEach { s -> (s as? Session.SignedIn)?.let { publishProfile(it) } }
+                        .onEach { s -> lastSession = s; (s as? Session.SignedIn)?.let { publishProfile(it) } }
                         // removed from the household or no longer allowed to read it
                         .catch { emit(Session.SignedIn(uid, null, account)) }
                 }
@@ -99,7 +100,8 @@ class FirebaseHouseholdRepository(
                 membersRef(household.id).observe().map { snap ->
                     val profiles = snap.documents.associate { it.id to (it.getString("displayName") to it.getString("email")) }
                     val photos = snap.documents.associate { it.id to it.getString("photo") }
-                    Members.resolve(household, profiles, photos)
+                    val seen = snap.documents.associate { it.id to it.getTimestamp("lastSeen")?.toDate()?.time }
+                    Members.resolve(household, profiles, photos, seen)
                 }.catch { emit(Members.resolve(household, emptyMap())) }
             }
         }
@@ -165,6 +167,17 @@ class FirebaseHouseholdRepository(
                     SetOptions.merge(),
                 ).await()
             }.onFailure { lastProfileKey = null }
+        }
+    }
+
+    override suspend fun setPresence(active: Boolean) {
+        val uid = auth.currentUser?.uid ?: return
+        val hid = (lastSession as? Session.SignedIn)?.household?.id ?: return
+        runCatching {
+            membersRef(hid).document(uid).set(
+                mapOf("lastSeen" to if (active) FieldValue.serverTimestamp() else FieldValue.delete()),
+                SetOptions.merge(),
+            ).await()
         }
     }
 

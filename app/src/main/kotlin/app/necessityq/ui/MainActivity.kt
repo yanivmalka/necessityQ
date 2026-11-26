@@ -130,6 +130,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         app.necessityq.platform.MentionAlerter.appVisible = false
+        vm.onBackground()
         // a new app icon waits until the user leaves the app (home, recents, back): switching it closes the app
         if (!isChangingConfigurations && !openingOther) app.necessityq.platform.AppIcons.applyPending(this)
         super.onStop()
@@ -456,7 +457,27 @@ private fun Root(vm: AppViewModel) {
                                 Dest.APPEARANCE -> SettingsScreen(vm, modifier, SettingsTab.LOOK)
                                 Dest.UPDATES -> UpdatesScreen(vm, modifier)
                                 Dest.ABOUT -> AboutScreen(modifier)
-                                Dest.HELP -> HelpScreen(modifier)
+                                Dest.HELP -> HelpScreen(modifier, onOpen = { target ->
+                                    // a help page's button opens the place it explains; back returns to the help
+                                    fun settings(tab: SettingsTab) { settingsTab = tab; go(Dest.SETTINGS, from = Dest.HELP) }
+                                    when (target) {
+                                        app.necessityq.domain.HelpTarget.SETTINGS_FEATURES -> settings(SettingsTab.FEATURES)
+                                        app.necessityq.domain.HelpTarget.SETTINGS_LIST -> settings(SettingsTab.LIST)
+                                        app.necessityq.domain.HelpTarget.SETTINGS_LOOK -> settings(SettingsTab.LOOK)
+                                        app.necessityq.domain.HelpTarget.SETTINGS_NOTIFY -> settings(SettingsTab.NOTIFY)
+                                        // a tab that is turned off opens the switch that brings it back
+                                        app.necessityq.domain.HelpTarget.PRICES ->
+                                            if (Dest.PRICES in tabs) go(Dest.PRICES) else settings(SettingsTab.FEATURES)
+                                        app.necessityq.domain.HelpTarget.MENU ->
+                                            if (Dest.MENU in tabs) go(Dest.MENU) else settings(SettingsTab.FEATURES)
+                                        app.necessityq.domain.HelpTarget.LIST -> go(Dest.LIST)
+                                        app.necessityq.domain.HelpTarget.HOUSEHOLD -> go(Dest.HOUSEHOLD, from = Dest.HELP)
+                                        app.necessityq.domain.HelpTarget.ACCOUNT -> go(Dest.ACCOUNT, from = Dest.HELP)
+                                        app.necessityq.domain.HelpTarget.MESSAGES -> go(Dest.MESSAGES, from = Dest.HELP)
+                                        app.necessityq.domain.HelpTarget.HISTORY -> go(Dest.HISTORY, from = Dest.HELP)
+                                        app.necessityq.domain.HelpTarget.UPDATES -> go(Dest.UPDATES, from = Dest.HELP)
+                                    }
+                                })
                                 Dest.SUGGESTIONS -> DeclinedSuggestionsScreen(vm, modifier, onOpenPrices = { pricesRequested = true })
                                 Dest.FAMILY_MEMBER -> MemberScreen(vm, familyMember.ifEmpty { null }, onBack = { back() }, modifier = modifier)
                                 // the tabs are never a page of their own (they live in the pager)

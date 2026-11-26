@@ -67,7 +67,7 @@ private const val DROP_HEIGHT = 60f
 
 /**
  * The opening screen: the basket with groceries jumping in (on the colour of the app's [palette], like the icon), and
- * the three things being loaded (account, list, prices), each ticked as it arrives. [onDone] is called once everything
+ * the three things being loaded (account, list, prices and promotions), each ticked as it arrives. [onDone] is called once everything
  * is in, on "continue", or after [GIVE_UP_MS] (a slow or missing connection never locks the user out).
  */
 @Composable
@@ -100,7 +100,7 @@ fun StartupScreen(step: StartupStep, palette: AppPalette, onDone: () -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 StepRow("מתחברים לחשבון", StartupStep.ACCOUNT, step)
                 StepRow("טוענים את הרשימה של הבית", StartupStep.LIST, step)
-                StepRow("טוענים מחירים מהסניף", StartupStep.PRICES, step)
+                StepRow("טוענים מחירים ומבצעים מהסניף", StartupStep.PRICES, step)
             }
             Spacer(Modifier.height(24.dp))
             // fades in after a few seconds; until then it keeps its place, so nothing jumps

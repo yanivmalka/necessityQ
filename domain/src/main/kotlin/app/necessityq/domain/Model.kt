@@ -154,7 +154,17 @@ data class Member(
     val role: MemberRole,
     /** Profile picture: a small JPEG, Base64-encoded (the member's own or their Google picture). */
     val photo: String? = null,
-)
+    /** When the member's app last reported being open (a heartbeat every minute while it is in front); null = not now. */
+    val lastSeenMillis: Long? = null,
+) {
+    /** In the app right now: its heartbeat is recent. */
+    fun isActive(nowMillis: Long): Boolean = lastSeenMillis != null && nowMillis - lastSeenMillis in -ACTIVE_WINDOW_MS..ACTIVE_WINDOW_MS
+
+    companion object {
+        /** Two missed heartbeats and the member counts as gone. */
+        const val ACTIVE_WINDOW_MS = 150_000L
+    }
+}
 
 /** The signed-in identity. Anonymous accounts work fully but are lost with the app data. */
 data class Account(
@@ -175,6 +185,7 @@ object Members {
         household: Household,
         profiles: Map<String, Pair<String?, String?>>,
         photos: Map<String, String?> = emptyMap(),
+        lastSeen: Map<String, Long?> = emptyMap(),
     ): List<Member> {
         val owner = household.effectiveOwnerId
         return household.members.mapIndexed { index, id ->
@@ -185,6 +196,7 @@ object Members {
                 email = email,
                 role = if (id == owner) MemberRole.OWNER else MemberRole.MEMBER,
                 photo = photos[id]?.takeIf { it.isNotBlank() },
+                lastSeenMillis = lastSeen[id],
             )
         }.sortedWith(compareBy({ it.role != MemberRole.OWNER }, { it.displayName }))
     }

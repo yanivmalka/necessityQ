@@ -1,6 +1,27 @@
 package app.necessityq.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import app.necessityq.domain.HelpCatalog
+import app.necessityq.domain.HelpEntry
+import app.necessityq.domain.HelpProblem
+import app.necessityq.domain.HelpTarget
+import app.necessityq.ui.icons.Icons
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -23,95 +44,156 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.necessityq.domain.FeatureAdvisor
 
-/** One topic of the help page: a title and its lines. */
-private class HelpTopic(val title: String, val lines: List<String>)
-
-private val HELP = listOf(
-    HelpTopic(
-        "שני שלבים: הכנת רשימה ובקנייה",
-        listOf(
-            "המתג בראש הרשימה עובר בין \"הכנת רשימה\" (בבית: מוסיפים ומתכננים) ל\"בקנייה\" (בחנות: מסמנים מה נכנס לעגלה).",
-            "\"יוצאים לקנות\" בתחתית הרשימה עובר לקנייה. רק \"סיום קנייה\" מסיים אותה: מה שנקנה עובר לסל המחזור, ואפשר לבטל.",
-        ),
-    ),
-    HelpTopic(
-        "הוספת מוצרים",
-        listOf(
-            "כותבים בשורה שבראש הרשימה, כמו שמדברים: \"2 קוטג' 5%\", \"חצי קילו גבינה צהובה\", \"חלב 3% 2 ליטר\".",
-            "מוצר שכבר ברשימה לא מוכפל: הכמות מתווספת לו.",
-            "סמל הברקוד שבשורה סורק מוצר ומוסיף אותו.",
-        ),
-    ),
-    HelpTopic(
-        "החלקה, סימון ומחיקה",
-        listOf(
-            "בהכנת רשימה עוד לא קונים: החלקה ימינה על פריט מסירה אותו (לסל המחזור). אין שם סימון \"נקנה\".",
-            "בקנייה: החלקה שמאלה — נקנה. החלקה ימינה — \"חסר\" (לא היה בחנות; נשאר ברשימה).",
-            "מחזיקים את ההחלקה עד שהטבעת מתמלאת, כדי שנגיעה בטעות לא תסמן.",
-            "מה כל החלקה עושה אפשר לבחור, לכל צד ולכל שלב: \"הגדרות\" ← \"הרשימה\" ← \"החלקה על פריט\".",
-            "לא נוח להחליק? בקנייה, נגיעה בעיגול שליד הפריט מסמנת אותו כנקנה, ונגיעה בסמל ה-✓ מחזירה.",
-            "כל פעולה מציגה הודעה עם \"ביטול\" לחצי דקה. מה שנמחק מחכה ב\"סל מחזור\" (בתפריט ⋮).",
-        ),
-    ),
-    HelpTopic(
-        "איך האפליקציה לומדת",
-        listOf(
-            "כל סימון \"נקנה\" נרשם. אחרי כמה קניות האפליקציה יודעת כל כמה זמן הבית קונה כל מוצר, ובאיזו כמות.",
-            "כשעבר רוב הזמן הרגיל, המוצר מופיע ב\"כנראה נגמר בקרוב\" עם הסיבה (\"בדרך כלל כל 5 ימים · נקנה לפני 4 ימים\").",
-            "\"✕\" על הצעה משתיק אותה לחצי מהזמן הרגיל. בלי למידת מכונה: כל הצעה אפשר להסביר.",
-            "הלמידה ממשיכה גם כשההצעות כבויות, כך שכשמדליקים אותן הן מוכנות.",
-        ),
-    ),
-    HelpTopic(
-        "מחירים",
-        listOf(
-            "בלשונית \"מחירים\" בוחרים את הסניפים שקונים בהם. אחר כך המחיר מופיע ליד כל פריט, והסכום המשוער בתחתית הרשימה.",
-            "מוצר שיש עליו מבצע מסומן במתנה בפינה, ומתחתיו פס עם המבצע, המחיר איתו ואיפה.",
-            "עם שני סניפים במעקב: \"איפה הכי משתלם לקנות?\" בתפריט ⋮ משווה את הרשימה כולה.",
-        ),
-    ),
-    HelpTopic(
-        "צ'אט פוד",
-        listOf(
-            "שיחה על מוצר מסוים עם בני הבית — \"אין קוטג' 5%, לקחת 3%?\" — עם תמונה, הקלטה ותיוג ב-@.",
-            "התראה מגיעה רק למי שתויג או צוטט, כדי שלא כולם יקבלו התראה על כל הודעה.",
-        ),
-    ),
-    HelpTopic(
-        "הצעות מהאפליקציה",
-        listOf(
-            "מדי פעם (לכל היותר פעם בשבוע) מופיע מעל הרשימה כרטיס שמציע יכולת שכנראה תעזור לכם, עם הסבר מהנתונים שלכם.",
-            "\"לא תודה\" — לא נציע שוב. אפשר לחזור להצעות שדחיתם ב\"הבית\" ← \"הצעות שדחיתם\".",
-        ),
-    ),
-    HelpTopic(
-        "הגדרות",
-        listOf(
-            "\"הבית\" ← \"הגדרות\": יכולות (מה האפליקציה עושה; ליכולות של הרשימה מתג נפרד להכנה ולקנייה), הרשימה, מראה והתראות.",
-            "\"מה מוצג על כל פריט\" (בתפריט ⋮) בוחר מה מופיע על הפריטים ברשימה, לכל שלב בנפרד.",
-        ),
-    ),
-)
-
-/** "עזרה: איך משתמשים": the gestures, the two stages, how the app learns — always there, not only in the first hints. */
+/**
+ * "עזרה: איך משתמשים": the seven common troubles, each opening into its steps, and a search over everything the app
+ * does ([HelpCatalog]) — what it is, what it gives and costs, how to turn it on, with a button that opens the place.
+ * Written in words, with no arrows and no running numbers inside Hebrew lines (they jumble when drawn right to left).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HelpScreen(modifier: Modifier = Modifier) = PageScaffold("עזרה: איך משתמשים", modifier) {
-    HELP.forEach { topic ->
+fun HelpScreen(modifier: Modifier = Modifier, onOpen: (HelpTarget) -> Unit = {}) {
+    var query by rememberSaveable { mutableStateOf("") }
+    var openProblem by rememberSaveable { mutableStateOf<String?>(null) }
+    val asking = query.isNotBlank()
+    val entries = remember(query) { HelpCatalog.search(query) }
+    val problems = remember(query) { HelpCatalog.searchProblems(query) }
+    Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        TopAppBar(
+            navigationIcon = { BackNavButton() },
+            title = { Text("עזרה: איך משתמשים", fontWeight = FontWeight.ExtraBold) },
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+        )
+        OutlinedTextField(
+            query, { query = it },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            singleLine = true,
+            label = { Text("חיפוש הסבר") },
+            placeholder = { Text("למשל: מבצעים, התראות, איך מדליקים צ'אט פוד") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            trailingIcon = if (asking) {
+                { IconButton(onClick = { query = "" }) { Icon(Icons.Default.Close, contentDescription = "מחיקת הטקסט") } }
+            } else null,
+        )
         Column(
-            Modifier.fillMaxWidth().clip(NqShapes.Tile).background(MaterialTheme.colorScheme.surface)
-                .border(1.dp, NqTheme.colors.hairline, NqShapes.Tile).padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            Modifier.fadingVerticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(topic.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            topic.lines.forEach { line ->
-                Row(verticalAlignment = Alignment.Top) {
-                    Text("•", color = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(8.dp))
-                    Text(line, style = MaterialTheme.typography.bodyMedium)
+            if (!asking) {
+                Text(
+                    "שבע בעיות נפוצות",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+            } else if (problems.isNotEmpty()) {
+                Text("בעיות נפוצות שקשורות", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            problems.forEach { problem ->
+                ProblemCard(problem, expanded = openProblem == problem.id || asking, onToggle = {
+                    openProblem = if (openProblem == problem.id) null else problem.id
+                }, onOpen = onOpen)
+            }
+            if (asking) {
+                if (entries.isNotEmpty()) {
+                    Text("הסברים", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                entries.forEach { EntryCard(it, onOpen) }
+                if (entries.isEmpty() && problems.isEmpty()) {
+                    Text(
+                        "לא מצאנו הסבר על \"${query.trim()}\". נסו מילה אחרת, שם של יכולת (מבצעים, מחירים, צ'אט פוד) או של הגדרה (החלקה, התראות).",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                Text(
+                    "לא מצאתם? כתבו בשורת החיפוש מה אתם מחפשים, או איך עושים משהו, ונסביר מה זה, מה התועלת והחיסרון, ואיך מדליקים. " +
+                        "בכל הסבר יש כפתור שפותח את המקום המתאים בהגדרות.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
             }
         }
     }
+}
+
+@Composable
+private fun HelpCard(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Column(
+        modifier.fillMaxWidth().clip(NqShapes.Tile).background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, NqTheme.colors.hairline, NqShapes.Tile),
+    ) { content() }
+}
+
+/** A common trouble: the title (tap to open), why it happens, the numbered steps, and a button to the place. */
+@Composable
+private fun ProblemCard(problem: HelpProblem, expanded: Boolean, onToggle: () -> Unit, onOpen: (HelpTarget) -> Unit) {
+    HelpCard {
+        Row(
+            Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(problem.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Icon(
+                if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = if (expanded) "סגירה" else "פתיחה",
+                tint = MaterialTheme.colorScheme.outline,
+            )
+        }
+        AnimatedVisibility(expanded) {
+            Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(problem.why, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                problem.steps.forEachIndexed { index, step ->
+                    Row(verticalAlignment = Alignment.Top) {
+                        // the number sits in its own circle: not a part of the Hebrew line, so nothing jumps around it
+                        Box(
+                            Modifier.size(24.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                (index + 1).toString(),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Text(step, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    }
+                }
+                problem.target?.let { OpenButton(it, onOpen) }
+            }
+        }
+    }
+}
+
+/** What a thing is, what it gives, what it costs, how to do it — and a button to where it is. */
+@Composable
+private fun EntryCard(entry: HelpEntry, onOpen: (HelpTarget) -> Unit) {
+    HelpCard(Modifier.padding(0.dp)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(entry.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            HelpLine("מה זה", entry.what)
+            entry.benefit?.let { HelpLine("מה זה נותן", it) }
+            entry.drawback?.let { HelpLine("מה החיסרון", it) }
+            HelpLine("איך עושים", entry.howTo)
+            entry.target?.let { OpenButton(it, onOpen) }
+        }
+    }
+}
+
+@Composable
+private fun HelpLine(label: String, text: String) {
+    Column {
+        Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        Text(text, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+@Composable
+private fun OpenButton(target: HelpTarget, onOpen: (HelpTarget) -> Unit) {
+    OutlinedButton(onClick = { onOpen(target) }) { Text(target.label) }
 }
 
 /**

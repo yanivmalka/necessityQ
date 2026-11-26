@@ -34,6 +34,8 @@ interface HouseholdRepository {
     suspend fun signInWithGoogle(idToken: String): Unit = throw UnsupportedOperationException("דורש חיבור Firebase")
     /** Signs out of the Google account; the device continues as a fresh anonymous guest. */
     suspend fun signOut(): Unit = throw UnsupportedOperationException("דורש חיבור Firebase")
+    /** Tells the others this member is in the app now ([active]) or left it; a heartbeat while it is in front. */
+    suspend fun setPresence(active: Boolean) {}
     suspend fun updateDisplayName(name: String): Unit = throw UnsupportedOperationException("דורש חיבור Firebase")
     /** Sets the profile picture (a small Base64 JPEG); null goes back to the Google account's picture. */
     suspend fun updatePhoto(photo: String?): Unit = throw UnsupportedOperationException("דורש חיבור Firebase")
