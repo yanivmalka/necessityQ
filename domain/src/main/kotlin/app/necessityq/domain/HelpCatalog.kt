@@ -359,14 +359,15 @@ object HelpCatalog {
         var total = 0
         for (token in tokens) {
             val options = forms(token)
-            val best = options.maxOf { f ->
+            // a one-letter word has no usable form (forms() drops anything shorter than 2), so it finds nothing
+            val best = options.maxOfOrNull { f ->
                 when {
                     t.contains(f) -> 6
                     k.contains(f) -> 4
                     b.contains(f) -> 1
                     else -> 0
                 }
-            }
+            } ?: 0
             if (best == 0) return 0 // every word of the question must be found somewhere in the entry
             total += best
         }
