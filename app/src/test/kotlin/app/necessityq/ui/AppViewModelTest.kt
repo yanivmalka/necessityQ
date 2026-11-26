@@ -46,7 +46,11 @@ class AppViewModelTest {
         runBlocking { container.household.createHousehold("הבית של הבדיקה") }
         vm = AppViewModel(container)
         // the streams are shared only while somebody collects them, as the screens do
-        collector = CoroutineScope(Dispatchers.Unconfined).launch { vm.snapshot.collect {} }
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        collector = scope.launch {
+            launch { vm.snapshot.collect {} }
+            launch { vm.purchases.collect {} }
+        }
         await("the household and the list to load") { vm.snapshot.value }
     }
 
