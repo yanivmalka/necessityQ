@@ -40,6 +40,13 @@ class HelpCatalogTest {
     }
 
     @Test
+    fun `a single typed letter does not crash the search`() {
+        assertTrue(HelpCatalog.search("מ").isEmpty())
+        assertTrue(HelpCatalog.searchProblems("ה").isEmpty())
+        assertTrue(HelpCatalog.search("מבצעים ה").isEmpty())
+    }
+
+    @Test
     fun `problems are searched too, and all are listed when nothing is asked`() {
         assertEquals(7, HelpCatalog.searchProblems("").size)
         assertEquals("no-notify", HelpCatalog.searchProblems("התראות").first().id)
