@@ -388,6 +388,23 @@ class ShoppingService(
         return targets
     }
 
+    /** What [resetHistory] forgot, for the message. */
+    data class HistoryReset(val purchases: Int, val suppressions: Int, val recycled: Int)
+
+    /**
+     * The household starts with no memory: every purchase in the history, every dismissal and "יש לי בבית", and
+     * the recycle bin (what was removed from suggestions teaches the app too). The current list stays as it is,
+     * and so do the family, the recipes and the settings. This cannot be undone.
+     */
+    suspend fun resetHistory(householdId: String): HistoryReset {
+        val purchases = repository.purchases(householdId).first()
+        val suppressions = repository.suppressions(householdId).first()
+        val recycled = repository.lines(householdId).first().filter { it.status == LineStatus.REMOVED }
+        repository.clearHistory(householdId, purchases.map { it.id }, suppressions.map { it.itemId })
+        if (recycled.isNotEmpty()) repository.purgeLines(householdId, recycled.map { it.id })
+        return HistoryReset(purchases.size, suppressions.size, recycled.size)
+    }
+
     suspend fun deletePurchase(householdId: String, purchase: Purchase) =
         repository.deletePurchase(householdId, purchase.id)
 

@@ -84,6 +84,8 @@ interface ShoppingRepository {
     /** Records the household's size on purchases made before it was recorded ([Purchase.householdPeople]). */
     suspend fun setPurchasesPeople(householdId: String, purchaseIds: List<String>, people: Double)
     suspend fun suppress(householdId: String, suppression: SuggestionSuppression)
+    /** Forgets what the household learned: the given purchases and the suppressions (dismissals, "יש לי בבית") of the given items. */
+    suspend fun clearHistory(householdId: String, purchaseIds: List<String>, suppressedItemIds: List<String>)
 
     /** Manual ordering / regrouping by drag. */
     suspend fun moveLine(householdId: String, lineId: String, category: Category, position: Long, atMillis: Long)

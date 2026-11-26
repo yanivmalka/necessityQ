@@ -61,4 +61,20 @@ class TodoSampleTest {
         val stale = snap.stats.values.filter { it.nextDue?.isBefore(today.minusDays(30)) == true }
         assertTrue("overdue by more than a month: ${stale.map { it.identity.displayName }}", stale.isEmpty())
     }
+
+    @Test fun `resetting the history leaves the house with no memory but keeps the list`() = runBlocking {
+        val repo = InMemoryShoppingRepository()
+        val service = service(repo)
+        service.importTodoSample("h", "u", emptyList())
+        val before = service.snapshot("h").first()
+        assertTrue(repo.purchases("h").first().isNotEmpty())
+        val open = before.lines.count { it.status == LineStatus.NEEDED }
+        val result = service.resetHistory("h")
+        assertTrue(result.purchases > 0)
+        assertTrue(repo.purchases("h").first().isEmpty())
+        assertTrue(repo.suppressions("h").first().isEmpty())
+        assertTrue(service.snapshot("h").first().stats.isEmpty())
+        assertEquals(open, service.snapshot("h").first().lines.count { it.status == LineStatus.NEEDED })
+    }
 }
+

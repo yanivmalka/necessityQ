@@ -20,18 +20,18 @@ class SmartQuantitiesTest {
 
     @Test fun `milk and eggs follow the size of the household`() {
         assertEquals(Quantity(2.0, QuantityUnit.LITER), SmartQuantities.forItem("חלב", 7.0, 2.0)) // 1.8 L → 2
-        assertEquals(Quantity(4.0, QuantityUnit.LITER), SmartQuantities.forItem("חלב", 7.0, 4.0)) // 3.6 L → 4
+        assertEquals(Quantity(3.0, QuantityUnit.LITER), SmartQuantities.forItem("חלב", 7.0, 4.0)) // 4 people share: 2.9 L → 3
         assertEquals(Quantity.pieces(10), SmartQuantities.forItem("ביצים", 7.0, 2.0)) // 9.6 → 10
     }
 
     @Test fun `a longer cadence needs a bigger purchase and the amount is rounded up to a step`() {
-        assertEquals(Quantity.pieces(20), SmartQuantities.forItem("ביצים", 14.0, 2.0)) // 19.2 → 20
+        assertEquals(Quantity.pieces(18), SmartQuantities.forItem("ביצים", 14.0, 2.0)) // 2 weeks, 17.3 → 18
         assertEquals(Quantity(0.5, QuantityUnit.KILOGRAM), SmartQuantities.forItem("תפוחים", 7.0, 1.0)) // 0.27 → one step
     }
 
     @Test fun `items without a published figure get a rough estimate, and unknown items get nothing`() {
-        assertEquals(Quantity.pieces(5), SmartQuantities.forItem("לחם", 7.0, 3.0)) // 4.5 → 5
-        assertEquals(Quantity(2.5, QuantityUnit.KILOGRAM), SmartQuantities.forItem("עגבניות", 7.0, 3.0)) // 2.1 → 2.5
+        assertEquals(Quantity.pieces(4), SmartQuantities.forItem("לחם", 7.0, 3.0)) // 3.8 → 4
+        assertEquals(Quantity(2.0, QuantityUnit.KILOGRAM), SmartQuantities.forItem("עגבניות", 7.0, 3.0)) // 1.8 → 2
         assertTrue(SmartQuantities.isEstimate("לחם"))
         assertFalse(SmartQuantities.isEstimate("חלב"))
         assertNull(SmartQuantities.forItem("פלפל חריף מיוחד", 7.0, 3.0))
@@ -47,7 +47,7 @@ class SmartQuantitiesTest {
         val own = Suggestion("x", identity, SuggestionKind.FREQUENT, Quantity.pieces(2), 1.0, "")
         assertEquals(Quantity.pieces(2), SmartQuantities.fill(own, null, 4.0).quantity)
         val none = own.copy(quantity = null)
-        assertEquals(Quantity(4.0, QuantityUnit.LITER), SmartQuantities.fill(none, null, 4.0).quantity)
+        assertEquals(Quantity(3.0, QuantityUnit.LITER), SmartQuantities.fill(none, null, 4.0).quantity)
     }
 
     // ---- learning from the household's own purchases ----
@@ -83,4 +83,13 @@ class SmartQuantitiesTest {
         assertEquals(0.5, SmartQuantities.calibration(tiny, 2.0), 0.0)
         assertEquals(1.0, SmartQuantities.calibration(huge, 0.0), 0.0) // no profiles: nothing to compare with
     }
+
+    @Test fun `a big household buys less per person than a single one`() {
+        val one = SmartQuantities.forItem("קוטג'", 7.0, 1.0)!!.amount
+        val eight = SmartQuantities.forItem("קוטג'", 7.0, 8.0)!!.amount
+        assertTrue(eight > one) // still more in all
+        assertTrue(eight / 8.0 < one) // but fewer each
+        assertEquals(1.0, HouseholdSize.shared(1.0), 0.0)
+    }
 }
+

@@ -308,6 +308,15 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         launchSafe { container.service.deletePurchase(hid, purchase) }
     }
 
+    /** Forgets the household's whole history (purchases, dismissals, recycle bin); the caller has confirmed. */
+    fun resetHistory() {
+        val (hid, _, _) = ctx() ?: return
+        launchSafe {
+            val r = container.service.resetHistory(hid)
+            _messages.tryEmit("ההיסטוריה אופסה: נמחקו ${r.purchases} רשומות קנייה")
+        }
+    }
+
     fun importSample() {
         val (hid, uid, lines) = ctx() ?: return
         launchSafe {
