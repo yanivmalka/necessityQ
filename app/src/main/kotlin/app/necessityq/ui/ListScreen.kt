@@ -239,6 +239,7 @@ fun ListScreen(
     var showFilter by remember { mutableStateOf(false) }
     var showGenerate by remember { mutableStateOf(false) }
     var showReset by remember { mutableStateOf(false) }
+    var showFinish by remember { mutableStateOf(false) }
     var showBin by remember { mutableStateOf(false) }
     val scan = rememberBarcodeScan(vm) { vm.onScanned(it) }
     var showStoreDialog by remember { mutableStateOf(false) }
@@ -587,7 +588,7 @@ fun ListScreen(
                 Box(Modifier.weight(1f)) { sortFilterChips() }
                 collapseButton()
                 // the end of the trip: an icon beside chat and ⋮, not a line of text in the way of the list
-                IconButton(onClick = vm::finishShopping) {
+                IconButton(onClick = { showFinish = true }) {
                     Icon(Icons.Default.CheckCircle, contentDescription = "סיום קנייה", tint = MaterialTheme.colorScheme.primary)
                 }
                 if (chatOn) messagesButton(MaterialTheme.colorScheme.onSurface)
@@ -968,6 +969,26 @@ fun ListScreen(
     }
     if (showGenerate) GenerateSheet(vm, onDismiss = { showGenerate = false })
     if (showTrip) TripPlanSheet(vm, onDismiss = { showTrip = false })
+    if (showFinish) {
+        val summary = app.necessityq.domain.TripSummary.of(snapshot?.lines.orEmpty())
+        // a decision dialog (ACTIONS.md): "ביטול" and the verb of the action. What was bought goes to the recycle bin
+        AlertDialog(
+            onDismissRequest = { showFinish = false },
+            title = { Text("לסיים את הקנייה?") },
+            text = {
+                Column {
+                    Text(summary.text())
+                    Text(
+                        "הפריטים שנקנו עוברים לסל המחזור ואפשר להחזיר אותם. מה שלא נקנה ומה שחסר נשאר ברשימה.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { showFinish = false; vm.finishShopping() }) { Text("סיום קנייה") } },
+            dismissButton = { TextButton(onClick = { showFinish = false }) { Text("ביטול") } },
+        )
+    }
     if (showReset) ResetDialog(snapshot?.lines.orEmpty(), onReset = { vm.resetList(it); showReset = false }, onDismiss = { showReset = false })
 
     openItem?.let { line ->
