@@ -344,6 +344,18 @@ enum class AppPalette(
 fun NecessityTheme(bright: Boolean, palette: AppPalette = AppPalette.MARKET, content: @Composable () -> Unit) {
     val dark = !bright && isSystemInDarkTheme()
     val colors = palette.scheme(dark)
+    // the clock, battery and signal follow the app's own look, not the phone's: dark icons on a light app
+    // even when the phone is in dark mode (edge-to-edge picked them by the phone's setting alone)
+    val view = androidx.compose.ui.platform.LocalView.current
+    if (!view.isInEditMode) {
+        androidx.compose.runtime.SideEffect {
+            val window = (view.context as? android.app.Activity)?.window ?: return@SideEffect
+            androidx.core.view.WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !dark
+                isAppearanceLightNavigationBars = !dark
+            }
+        }
+    }
     val base = Typography()
     val sized = base.copy(
         titleLarge = base.titleLarge.copy(fontWeight = FontWeight.Bold, fontSize = if (bright) 26.sp else 24.sp),

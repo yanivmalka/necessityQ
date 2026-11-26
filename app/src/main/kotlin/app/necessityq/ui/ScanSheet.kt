@@ -200,12 +200,21 @@ private fun ScanContent(vm: AppViewModel, r: ScanResult) {
         line != null && line.status == LineStatus.NEEDED -> {
             Text("ברשימה: ${line.displayName}", style = MaterialTheme.typography.titleMedium)
             if (mode == app.necessityq.domain.ListMode.SHOP) {
-                Button(onClick = { vm.scanCheckOff(r) }, modifier = Modifier.fillMaxWidth()) { Text("סימון כנקנה") }
+                Button(onClick = { vm.scanCheckOff(r) }, modifier = Modifier.fillMaxWidth()) { Text("הכנסה לעגלה") }
             }
         }
-        line != null -> Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
-            Text("  ${line.displayName} כבר סומן כנקנה", style = MaterialTheme.typography.titleMedium)
+        line != null -> {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
+                Text(
+                    if (mode == app.necessityq.domain.ListMode.SHOP) "  ${line.displayName} בעגלה" else "  ${line.displayName} כבר סומן כנקנה",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
+            // a scan in the shop put it in the cart by itself: one tap takes it out again
+            if (mode == app.necessityq.domain.ListMode.SHOP) {
+                TextButton(onClick = { vm.scanUncheck(r) }) { Text("הוצאה מהעגלה") }
+            }
         }
         else -> {
             var text by remember(r.code) { mutableStateOf(r.identity?.displayName.orEmpty()) }
@@ -218,7 +227,18 @@ private fun ScanContent(vm: AppViewModel, r: ScanResult) {
                     Text("לזכור שזה המוצר שאנחנו קונים (מחיר מדויק במקום טווח)", style = MaterialTheme.typography.bodySmall)
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (mode == app.necessityq.domain.ListMode.SHOP) {
+                // an item that was not on the list: added from the shop, and the cart is the user's choice
+                Button(onClick = { vm.scanAdd(r, text, rememberProduct, inCart = true) }, enabled = text.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
+                    Text("הוספה והכנסה לעגלה")
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { vm.scanAdd(r, text, rememberProduct) }, enabled = text.isNotBlank(), modifier = Modifier.weight(1f)) {
+                        Text("הוספה בלי עגלה")
+                    }
+                    OutlinedButton(onClick = { vm.remindLater(r) }, modifier = Modifier.weight(1f)) { Text("תזכיר לי אחר כך") }
+                }
+            } else Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { vm.scanAdd(r, text, rememberProduct) }, enabled = text.isNotBlank(), modifier = Modifier.weight(1f)) {
                     Text("הוספה לרשימה")
                 }

@@ -13,7 +13,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 
@@ -27,6 +31,7 @@ import androidx.compose.ui.unit.dp
  */
 fun Modifier.fadingEdges(state: ScrollableState, horizontal: Boolean, length: Dp = 24.dp): Modifier =
     this
+        .then(if (horizontal) Modifier.keepSidewaysScroll() else Modifier)
         .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
         .drawWithContent {
             drawContent()
@@ -78,3 +83,18 @@ fun Modifier.fadingHorizontalScroll(state: ScrollState): Modifier =
 /** A vertical column with its own scroll state, its top and bottom faded while there is more to scroll. */
 fun Modifier.fadingVerticalScroll(state: ScrollState): Modifier =
     fadingEdges(state, horizontal = false).verticalScroll(state)
+
+
+private object SwallowSideways : NestedScrollConnection {
+    override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset =
+        Offset(available.x, 0f)
+
+    override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity = Velocity(available.x, 0f)
+}
+
+/**
+ * A strip that scrolls sideways keeps the sideways drag to itself: what it cannot scroll any further (at its end)
+ * is swallowed, instead of passing on to the pager that switches between the tabs (and settings tabs) and sliding
+ * the whole page. Put it outside the scroll modifier ([fadingEdges] does, for every horizontal strip).
+ */
+fun Modifier.keepSidewaysScroll(): Modifier = nestedScroll(SwallowSideways)

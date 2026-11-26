@@ -334,25 +334,26 @@ private fun Root(vm: AppViewModel) {
                 }
             }
 
+            // the household is the card at the top of the hub; below, grouped by what the pages are for
             val hubEntries = listOf(
-                listOf(
-                    HubEntry(Dest.HOUSEHOLD.title, Icons.Default.Group) { go(Dest.HOUSEHOLD, from = Dest.HOME) },
+                // about the list and its history
+                listOfNotNull(
                     HubEntry(Dest.MESSAGES.title, Icons.AutoMirrored.Filled.Chat, badge = unread.takeIf { it > 0 }?.toString()) {
                         go(Dest.MESSAGES, from = Dest.HOME)
                     }.takeIf { app.necessityq.domain.Feature.CHAT in features },
                     HubEntry(Dest.HISTORY.title, Icons.Default.History) { go(Dest.HISTORY, from = Dest.HOME) },
-                ).filterNotNull(),
-                listOfNotNull(
-                    HubEntry(Dest.HELP.title, Icons.Default.Info) { go(Dest.HELP, from = Dest.HOME) },
                     HubEntry(Dest.SUGGESTIONS.title, Icons.Default.AutoAwesome, badge = declinedAdvice.size.toString()) {
                         go(Dest.SUGGESTIONS, from = Dest.HOME)
                     }.takeIf { declinedAdvice.isNotEmpty() },
                 ),
+                // about me
                 listOf(
                     HubEntry(Dest.ACCOUNT.title, Icons.Default.AccountCircle) { go(Dest.ACCOUNT, from = Dest.HOME) },
                     HubEntry(Dest.SETTINGS.title, Icons.Default.Tune) { settingsTab = SettingsTab.FEATURES; go(Dest.SETTINGS, from = Dest.HOME) },
                 ),
+                // about the app
                 listOf(
+                    HubEntry(Dest.HELP.title, Icons.Default.Info) { go(Dest.HELP, from = Dest.HOME) },
                     HubEntry(
                         Dest.UPDATES.title, Icons.Default.SystemUpdate,
                         badge = when (update) {
@@ -363,7 +364,7 @@ private fun Root(vm: AppViewModel) {
                     ) { go(Dest.UPDATES, from = Dest.HOME) },
                     HubEntry(Dest.ABOUT.title, Icons.Default.Info) { go(Dest.ABOUT, from = Dest.HOME) },
                 ),
-            )
+            ).filter { it.isNotEmpty() }
 
             val display by vm.display.collectAsStateWithLifecycle()
             CompositionLocalProvider(
@@ -440,6 +441,7 @@ private fun Root(vm: AppViewModel) {
                                         Dest.PRICES -> PricesScreen(vm, modifier)
                                         else -> HomeHubScreen(
                                             vm, household.name, modifier, entries = hubEntries,
+                                            onOpenHousehold = { go(Dest.HOUSEHOLD, from = Dest.HOME) },
                                         )
                                     }
                                 }

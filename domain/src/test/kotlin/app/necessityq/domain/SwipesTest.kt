@@ -6,8 +6,14 @@ import org.junit.Test
 
 class SwipesTest {
     @Test
-    fun `while making the list a swipe only removes or does nothing`() {
-        assertEquals(listOf(SwipeChoice.NONE, SwipeChoice.REMOVE), SwipeChoice.of(ListMode.PLAN))
+    fun `making the list removes or talks, the shop marks and talks - never the other way round`() {
+        assertEquals(listOf(SwipeChoice.NONE, SwipeChoice.REMOVE, SwipeChoice.CHAT), SwipeChoice.of(ListMode.PLAN))
+        assertEquals(listOf(SwipeChoice.NONE, SwipeChoice.BOUGHT, SwipeChoice.MISSING, SwipeChoice.CHAT), SwipeChoice.of(ListMode.SHOP))
+        // an old setting that removes in the shop does nothing now
+        assertEquals(
+            SwipeActions(SwipeChoice.BOUGHT, SwipeChoice.NONE),
+            SwipeActions(SwipeChoice.BOUGHT, SwipeChoice.REMOVE).allowedIn(ListMode.SHOP),
+        )
         assertEquals(
             SwipeActions(SwipeChoice.NONE, SwipeChoice.REMOVE),
             SwipeActions(SwipeChoice.BOUGHT, SwipeChoice.REMOVE).allowedIn(ListMode.PLAN),

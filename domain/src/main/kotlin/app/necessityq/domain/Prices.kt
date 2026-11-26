@@ -393,7 +393,8 @@ object ItemPrices {
         val variantKey = variant?.let { HebrewText.matchKey(it) }.orEmpty()
         val percents = percent.findAll(variantKey).map { it.value }.toList()
         val otherVariantStems = HebrewStem.words(percent.replace(variantKey, " "))
-        fun has(words: List<String>, stem: String) = HebrewStem.matchesAny(words, stem)
+        // an item on the list is a specific kind of product: "שוקיים" is not "שוקו" (a search, below, may be looser)
+        fun has(words: List<String>, stem: String) = HebrewStem.matchesAny(words, stem, exact = true)
         val matches = index.entries.indices.filter { i ->
             val (_, key) = index.entries[i]
             val words = index.stems[i]

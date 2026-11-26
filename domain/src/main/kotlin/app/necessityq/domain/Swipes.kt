@@ -11,11 +11,12 @@ enum class SwipeChoice(val label: String) {
 
     companion object {
         /**
-         * The choices of [mode]: while making the list a swipe removes an item or does nothing (nothing is bought or
-         * missing before the shop); in the shop every action.
+         * The choices of [mode]. Making the list is where the household decides what is on it, and talks about it:
+         * remove, or צ'אט פוד (nothing is bought or missing before the shop). In the shop an item is not deleted but
+         * marked: bought, missing, or צ'אט פוד.
          */
         fun of(mode: ListMode): List<SwipeChoice> =
-            if (mode == ListMode.SHOP) entries else listOf(NONE, REMOVE)
+            if (mode == ListMode.SHOP) listOf(NONE, BOUGHT, MISSING, CHAT) else listOf(NONE, REMOVE, CHAT)
 
         fun decode(name: String?, fallback: SwipeChoice): SwipeChoice = entries.firstOrNull { it.name == name } ?: fallback
     }

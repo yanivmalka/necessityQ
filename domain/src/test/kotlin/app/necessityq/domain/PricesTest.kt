@@ -106,6 +106,17 @@ class ItemPricesTest {
     )
 
     @Test
+    fun aShortItemNameIsNotThePrefixOfAnotherProduct() {
+        fun product(code: String, name: String) = BranchProduct(code, name, "", null, "", false, false, 9.9, null, "", 9.9, 9.9)
+        val shelf = ProductIndex("b", 0, listOf(product("1", "שוקו תנובה 1 ליטר"), product("2", "שוקולד מריר"), product("3", "שוקיים עוף טרי")))
+        // the list item is a specific product: drumsticks are not chocolate milk
+        assertEquals(listOf("3"), ItemPrices.candidates(shelf, "שוקיים", null).map { it.code })
+        assertEquals(listOf("1"), ItemPrices.candidates(shelf, "שוקו", null).map { it.code })
+        // a search, though, may find all of them
+        assertEquals(setOf("1", "2"), PriceData.searchIndexed(shelf, "שוקו", 10).map { it.code }.toSet())
+    }
+
+    @Test
     fun genericNameMatchesAllCottageButNotDishesMentioningIt() {
         val c = ItemPrices.candidates(index, "קוטג'", null)
         assertEquals(listOf("1", "2", "3", "5", "4"), c.map { it.code })

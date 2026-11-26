@@ -30,6 +30,16 @@ class ListToolsTest {
         )
     }
 
+    @Test
+    fun `in the shop what was bought stays in its place`() {
+        val lines = listOf(
+            line("1", "חלב", Category.DAIRY, status = LineStatus.BOUGHT),
+            line("2", "לחם", Category.BAKERY),
+        )
+        assertEquals(listOf("2"), ListOrdering.arrange(lines, ListSort.ALPHA)[0].lines.map { it.id })
+        assertEquals(listOf("1", "2"), ListOrdering.arrange(lines, ListSort.ALPHA, includeBought = true)[0].lines.map { it.id }.sorted())
+    }
+
     @Test fun `cart load puts heavy first, fresh after dry, chilled and frozen last`() {
         val lines = listOf(
             line("1", "גלידה", Category.FROZEN),

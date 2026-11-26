@@ -417,7 +417,14 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
      * when that food is already one of the household's recipes, the existing recipe's id.
      */
     fun addDishFromNutrition(food: app.necessityq.domain.NutritionFood, imported: app.necessityq.domain.ImportedRecipe? = null): String? {
-        meals.value.dishes.firstOrNull { it.nutritionCode == food.code }?.let { return it.id }
+        meals.value.dishes.firstOrNull { it.nutritionCode == food.code }?.let { existing ->
+            // already saved: a method just found on the web is not lost, it is added to the saved recipe
+            if (imported != null && existing.instructions.isBlank() && imported.hasInstructions) {
+                editDish(existing.id) { it.copy(instructions = imported.instructions, sourceUrl = imported.sourceUrl ?: it.sourceUrl) }
+                _messages.tryEmit("אופן ההכנה נוסף למתכון ${existing.name}")
+            }
+            return existing.id
+        }
         val index = _nutrition.value ?: return null
         val base = index.dishFrom(food, java.util.UUID.randomUUID().toString())
         // a method found on the web comes with that recipe's own ingredients and yield
@@ -425,6 +432,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             ingredients = imported.ingredients.ifEmpty { base.ingredients },
             instructions = imported.instructions,
             servings = imported.servings ?: base.servings,
+            servingsKnown = imported.servings != null,
+            sourceUrl = imported.sourceUrl,
         )
         updateMeals { it.withDish(dish) }
         _messages.tryEmit("נשמר במתכונים: ${dish.name}")
@@ -444,6 +453,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             servings = servings,
             cookServings = servings,
             instructions = recipe.instructions,
+            servingsKnown = recipe.servings != null,
+            sourceUrl = recipe.sourceUrl,
         )
         updateMeals { it.withDish(dish) }
         _messages.tryEmit("נשמר במתכונים: ${dish.name}")
@@ -1582,7 +1593,12 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         scanBusy.value = true
         viewModelScope.launch {
             runCatching { lookupScan(raw) }
-                .onSuccess { scanResult.value = it }
+                .onSuccess { found ->
+                    scanResult.value = found
+                    // in the shop a scan is "into the cart": the product that is on the list is marked at once
+                    // (the sheet that opens says so, and takes it back)
+                    if (found != null && mode.value == ListMode.SHOP && found.line?.status == LineStatus.NEEDED) scanCheckOff(found)
+                }
                 .onFailure { _messages.tryEmit("החיפוש נכשל: ${it.message ?: ""}") }
             scanBusy.value = false
         }
@@ -1634,14 +1650,33 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         scanResult.value = result.copy(line = line.copy(status = LineStatus.BOUGHT))
     }
 
-    /** Adds the scanned product to the list as the generic item [text]; optionally remembers the exact product. */
-    fun scanAdd(result: app.necessityq.domain.ScanResult, text: String, rememberProduct: Boolean) {
+    /** The scanned product goes back out of the cart (it stays on the list). */
+    fun scanUncheck(result: app.necessityq.domain.ScanResult) {
+        val line = result.line?.takeIf { it.status == LineStatus.BOUGHT } ?: return
+        reopen(line)
+        scanResult.value = result.copy(line = line.copy(status = LineStatus.NEEDED))
+    }
+
+    /**
+     * Adds the scanned product to the list as the generic item [text]; optionally remembers the exact product.
+     * In the shop, [inCart] also puts it in the cart (marks it bought), as a scan does for a product already on the list.
+     */
+    fun scanAdd(result: app.necessityq.domain.ScanResult, text: String, rememberProduct: Boolean, inCart: Boolean = false) {
         val (hid, uid, lines) = ctx() ?: return
         val code = result.product?.code
         closeScan()
         launchSafe {
             val parsed = container.service.addFromText(hid, uid, text, lines) ?: return@launchSafe
             if (rememberProduct && code != null) container.prices.setPreferredProduct(hid, parsed.item.id, code)
+            if (inCart) {
+                val added = container.service.snapshot(hid).first().lines
+                    .firstOrNull { it.itemId == parsed.item.id && it.status == LineStatus.NEEDED }
+                if (added != null) {
+                    container.service.checkOff(hid, uid, added, currentStoreId.value)
+                    _messages.tryEmit("${parsed.item.displayName} נוסף לרשימה ולעגלה")
+                    return@launchSafe
+                }
+            }
             _added.tryEmit(parsed.item.id)
             _messages.tryEmit("${parsed.item.displayName} נוסף לרשימה")
         }
@@ -1809,6 +1844,12 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun unreadCount(itemId: String, all: List<ItemMessage>): Int {
         val readAt = prefs.readAt(itemId)
         return all.count { it.itemId == itemId && it.authorId != me && it.atMillis > readAt }
+    }
+
+    /** The messages on [itemId] from others that the user has not read yet, oldest first. */
+    fun unreadMessages(itemId: String, all: List<ItemMessage>): List<ItemMessage> {
+        val readAt = prefs.readAt(itemId)
+        return all.filter { it.itemId == itemId && it.authorId != me && it.atMillis > readAt }.sortedBy { it.atMillis }
     }
 
     val unreadTotal: StateFlow<Int> = combine(itemMessages, readTick) { all, _ ->

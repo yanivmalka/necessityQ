@@ -62,8 +62,11 @@ data class TileLayout(val shown: Set<TileElement>) {
     companion object {
         val ALL = TileLayout(TileElement.entries.toSet())
 
-        /** A simple tile: the check circle, the name, the amount and the price. Everything else is in "תצוגה". */
-        val SIMPLE = TileLayout(setOf(TileElement.CHECK, TileElement.QUANTITY, TileElement.PRICE))
+        /**
+         * A simple tile: the check circle, the name, the amount and the price — and the sign of a conversation, so a
+         * message on a product is seen at once (it shows only while צ'אט פוד is on). Everything else is in "תצוגה".
+         */
+        val SIMPLE = TileLayout(setOf(TileElement.CHECK, TileElement.QUANTITY, TileElement.PRICE, TileElement.CHAT))
 
         /**
          * Both stages start from the simple tile (without the check circle while making the list, where nothing is

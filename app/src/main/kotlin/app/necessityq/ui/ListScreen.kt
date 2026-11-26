@@ -165,8 +165,8 @@ private sealed interface ListRow {
 
 private fun buildSections(
     lines: List<ListLine>, sort: ListSort, ranks: Map<String, Double>, descending: Boolean, chilledLast: Boolean,
-    filter: ListFilter, chatItemIds: Set<String>,
-) = ListOrdering.arrange(filter.apply(lines, chatItemIds), sort, ranks, descending, chilledLast)
+    filter: ListFilter, chatItemIds: Set<String>, includeBought: Boolean,
+) = ListOrdering.arrange(filter.apply(lines, chatItemIds), sort, ranks, descending, chilledLast, includeBought)
 
 private fun buildRows(sections: List<ListSection>, collapsed: Set<String>): List<ListRow> =
     sections.flatMap { section ->
@@ -289,8 +289,9 @@ fun ListScreen(
     val stopCounts = remember(snapshot?.lines, tripAssignment) {
         snapshot?.lines.orEmpty().filter { it.status == LineStatus.NEEDED }.mapNotNull { tripAssignment[it.itemId] }.groupingBy { it }.eachCount()
     }
-    val sections = remember(shownLines, sort, pickRanks, descending, display.chilledLast, listFilter, chatItemIds) {
-        buildSections(shownLines, sort, pickRanks, descending, display.chilledLast, listFilter, chatItemIds)
+    // in the shop the list stays whole: what was bought stays where it was, marked, like a written list with ticks
+    val sections = remember(shownLines, sort, pickRanks, descending, display.chilledLast, listFilter, chatItemIds, shopping) {
+        buildSections(shownLines, sort, pickRanks, descending, display.chilledLast, listFilter, chatItemIds, includeBought = shopping)
     }
     val searchMatches = if (searchText.isBlank()) 0 else sections.sumOf { sec -> sec.lines.count { it.status == LineStatus.NEEDED } }
     // while filtering (by tag, group or search) every group starts open, so matches are never hidden in a
@@ -299,7 +300,10 @@ fun ListScreen(
     var filterCollapsed by remember(listFilter) { mutableStateOf(emptySet<String>()) }
     val shownCollapsed = if (filtering) filterCollapsed else collapsed
     val built = remember(sections, shownCollapsed) { buildRows(sections, shownCollapsed) }
-    val titledKeys = sections.filter { it.title != null }.map { it.key }.toSet()
+    // the groups of the grouped orders only: by name or by the order of adding there are no groups to fold (the
+    // "קירור והקפאה" block at the end of such a list folds from its own header, so a button for it would seem to do nothing)
+    val groupedOrder = sort == ListSort.GROUPS || sort == ListSort.CART_LOAD
+    val titledKeys = if (groupedOrder) sections.filter { it.title != null }.map { it.key }.toSet() else emptySet()
     val allCollapsed = titledKeys.isNotEmpty() && titledKeys.all { it in shownCollapsed }
     LaunchedEffect(built, dragging) {
         if (!dragging) {
@@ -430,6 +434,25 @@ fun ListScreen(
         Box {
             IconButton(onClick = { showMore = true }) { Icon(Icons.Default.MoreVert, contentDescription = "פעולות על הרשימה", tint = tint) }
             DropdownMenu(expanded = showMore, onDismissRequest = { showMore = false }) {
+                // in the shop: what only the trip needs — an item that is not on the list yet, another store, the end
+                if (shopping) {
+                    DropdownMenuItem(
+                        text = { Text("הוספת פריט") },
+                        leadingIcon = { Icon(Icons.Default.Add, null) },
+                        onClick = { showMore = false; addOpen = !addOpen },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (storeName == null) "בחירת חנות" else "החלפת חנות · $storeName") },
+                        leadingIcon = { Icon(Icons.Default.Storefront, null) },
+                        onClick = { showMore = false; showStoreDialog = true },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("סיום קנייה") },
+                        leadingIcon = { Icon(Icons.Default.CheckCircle, null) },
+                        onClick = { showMore = false; vm.finishShopping() },
+                    )
+                    HorizontalDivider()
+                }
                 // in groups: filling the list · what it shows · clearing it · settings and help
                 DropdownMenuItem(
                     text = { Text("יצירת רשימה מקניות עבר") },
@@ -444,14 +467,6 @@ fun ListScreen(
                     )
                 }
                 HorizontalDivider()
-                // in the shop: what was already bought on this trip, at the bottom (the same setting as in הגדרות ← הרשימה)
-                if (shopping) {
-                    DropdownMenuItem(
-                        text = { Text(if (display.showBought) "הסתרת מה שכבר נקנה" else "הצגת מה שכבר נקנה (בתחתית)") },
-                        leadingIcon = { Icon(if (display.showBought) Icons.Default.VisibilityOff else Icons.Default.Visibility, null) },
-                        onClick = { showMore = false; vm.setDisplay(display.copy(showBought = !display.showBought)) },
-                    )
-                }
                 // what a tile shows, at this stage of use (the same sheet as in the settings)
                 DropdownMenuItem(
                     text = { Text("מה מוצג על כל פריט") },
@@ -486,41 +501,31 @@ fun ListScreen(
     }
 
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        val headerSnap = snapshot
         if (shopping) {
-            ShopHeader(
-                storeName = storeName,
-                done = headerSnap?.bought?.size ?: 0,
-                open = headerSnap?.lines?.count { it.status == LineStatus.NEEDED } ?: 0,
-                remaining = if (showTotal && headerSnap != null) {
-                    app.necessityq.domain.ListCost.of(headerSnap.lines, prices, itemPrices)
-                } else null,
-                onBack = { vm.setMode(ListMode.PLAN) },
-                onStore = { showStoreDialog = true },
-            ) {
-                IconButton(onClick = { addOpen = !addOpen }) {
-                    Icon(Icons.Default.Add, contentDescription = "הוספת פריט", tint = NqTheme.colors.onShopHeader)
+            // a clean, slim top row (room to spare for what may come here later): back, chat, ⋮. Where the trip stands
+            // is at the bottom, and "החלפת חנות" / "הוספת פריט" / "סיום קנייה" are in the ⋮ menu
+            Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { vm.setMode(ListMode.PLAN) }) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "חזרה להכנת רשימה")
                 }
-                if (chatOn) messagesButton(NqTheme.colors.onShopHeader)
-                menuButton(NqTheme.colors.onShopHeader)
+                Spacer(Modifier.weight(1f))
+                if (chatOn) messagesButton(MaterialTheme.colorScheme.onSurface)
+                menuButton(MaterialTheme.colorScheme.onSurface)
             }
         } else {
-            // one row: the household's name, the "הכנת רשימה | בקנייה" switch, chat and the ⋮ menu —
-            // so the list itself starts higher (the members' pictures are on the home tab)
+            // one row: the household's name, chat and the ⋮ menu — so the list itself starts higher (the members'
+            // pictures are on the home tab). The way into the shop is one: "יוצאים לקנות" at the bottom
             Row(
                 Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
                     householdName,
-                    Modifier.widthIn(max = 84.dp),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleLarge,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.width(8.dp))
-                ModeSwitch(shopping = false, onSelect = vm::setMode, modifier = Modifier.weight(1f), compact = true)
                 if (chatOn) messagesButton(MaterialTheme.colorScheme.onSurface)
                 menuButton(MaterialTheme.colorScheme.onSurface)
             }
@@ -853,9 +858,14 @@ fun ListScreen(
                                         )
                                     }
                                 } else null,
-                                onBought = { vm.checkOff(line) },
+                                bought = line.status == LineStatus.BOUGHT,
+                                onBought = { if (line.status == LineStatus.BOUGHT) vm.reopen(line) else vm.checkOff(line) },
                                 left = swipeAction(swipes.left, line, chatOn, vm),
                                 right = swipeAction(swipes.right, line, chatOn, vm),
+                                unread = if (chatOn) vm.unreadMessages(line.itemId, thread) else emptyList(),
+                                onReply = { text, replyTo -> vm.sendMessage(line.itemId, line.displayName, text, replyTo); vm.markRead(line.itemId) },
+                                onMarkRead = { vm.markRead(line.itemId) },
+                                onOpenChat = { vm.requestOpenChat(line.itemId, line.displayName) },
                                 onPlus = { vm.adjustQuantity(line, +1) },
                                 onMinus = { vm.adjustQuantity(line, -1) },
                                 onSetQuantity = { q, approved -> vm.changeQuantity(line, q, approved) },
@@ -867,23 +877,17 @@ fun ListScreen(
                     }
                 }
             }
-
-            // what was bought shows only in the shop (while making the list nothing is marked bought)
-            if (shopping && display.showBought && snap.bought.isNotEmpty()) {
-                item(key = "bought_header") {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("נקנו (${snap.bought.size})", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { vm.clearBought() }) { Text("נקה לסל המחזור") }
-                    }
-                }
-                items(snap.bought, key = { "b_" + it.id }) { line ->
-                    BoughtRow(line, onReopen = { vm.reopen(line) })
-                }
-            }
         }
 
         if (shopping) {
-            ShopBottomBar(onScan = scan, onFinish = vm::finishShopping)
+            val trip = snap?.lines.orEmpty().filter { it.status != LineStatus.REMOVED }
+            ShopBottomBar(
+                done = trip.count { it.status == LineStatus.BOUGHT },
+                total = trip.size,
+                storeName = storeName,
+                remaining = if (showTotal && snap != null) app.necessityq.domain.ListCost.of(snap.lines, prices, itemPrices) else null,
+                onScan = scan,
+            )
         } else if (snap != null) {
             // one clear way into the store, with the estimated total of the open lines
             val open = snap.lines.count { it.status == LineStatus.NEEDED }
@@ -1221,8 +1225,11 @@ private class SwipeAction(val label: String, val icon: ImageVector, val color: C
 private fun swipeAction(choice: app.necessityq.domain.SwipeChoice, line: ListLine, chatOn: Boolean, vm: AppViewModel): SwipeAction? =
     when (choice) {
         app.necessityq.domain.SwipeChoice.NONE -> null
-        app.necessityq.domain.SwipeChoice.BOUGHT -> SwipeAction("נקנה", Icons.Default.Check, NqPalette.SwipeBought) { vm.checkOff(line) }
-        app.necessityq.domain.SwipeChoice.MISSING ->
+        // what is already in the cart is taken out again the same way it was put in
+        app.necessityq.domain.SwipeChoice.BOUGHT ->
+            if (line.status == LineStatus.BOUGHT) SwipeAction("חזרה מהעגלה", Icons.Default.Restore, NqPalette.SwipeBought) { vm.reopen(line) }
+            else SwipeAction("נקנה", Icons.Default.Check, NqPalette.SwipeBought) { vm.checkOff(line) }
+        app.necessityq.domain.SwipeChoice.MISSING -> if (line.status == LineStatus.BOUGHT) null else
             SwipeAction(if (line.missing) "ביטול חסר" else "חסר", Icons.Default.ReportProblem, NqPalette.SwipeMissing) { vm.setMissing(line, !line.missing) }
         app.necessityq.domain.SwipeChoice.REMOVE -> SwipeAction("הסרה", Icons.Default.Delete, NqPalette.SwipeDelete) { vm.delete(line) }
         app.necessityq.domain.SwipeChoice.CHAT -> if (!chatOn) null else {
@@ -1366,8 +1373,16 @@ private fun ProductTile(
     promoText: String? = null,
     lifted: Boolean,
     dragHandle: (@Composable () -> Unit)?,
+    /** In the cart (shop only): the tile stays in its place, ticked and struck through. */
+    bought: Boolean = false,
     /** the check circle (in the shop only) */
     onBought: () -> Unit,
+    /** Messages on this product the user has not read yet (newest last): shown under the tile on a tap, with "הגב". */
+    unread: List<app.necessityq.domain.ItemMessage> = emptyList(),
+    /** Sends a reply (text, id of the message it answers) without opening the conversation. */
+    onReply: (String, String?) -> Unit = { _, _ -> },
+    onMarkRead: () -> Unit = {},
+    onOpenChat: () -> Unit = {},
     left: SwipeAction?,
     right: SwipeAction?,
     onPlus: () -> Unit,
@@ -1385,11 +1400,15 @@ private fun ProductTile(
     // produce counted in pieces: estimated weight (the price next to it is per kilo / 100 g)
     val weight = if (TileElement.WEIGHT in tile) app.necessityq.domain.PieceWeights.estimate(line.name, line.quantity) else null
 
-    // with "two taps to open", a single tap opens the promotion strip (and a second one opens the page)
+    // Under the tile: the promotion's details and the messages not read yet, opened by a single tap. With "two taps to
+    // open" every tile works that way when it has something to show; with "one tap to open" only a tile with a message
+    // does (its page opens on a double tap) and every other tile opens on the single tap.
+    val hasUnread = unread.isNotEmpty()
     val promoOnTap = tapMode == TapMode.DOUBLE && promoText != null
-    var promoOpen by remember(line.itemId) { mutableStateOf(false) }
+    val tapShowsStrip = promoOnTap || hasUnread
+    var stripOpen by remember(line.itemId) { mutableStateOf(false) }
 
-    Column(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) {
+    Column(Modifier.padding(horizontal = 12.dp, vertical = 5.dp).then(if (bought) Modifier.alpha(0.6f) else Modifier)) {
         SwipeableTile(left = left, right = right) {
           Box {
             Card(
@@ -1409,8 +1428,8 @@ private fun ProductTile(
             ) {
                 Row {
                     // the category is shown by the group header's dot; auto-generated lines carry an "אוטומטי" tag
-                    val open = if (tapMode == TapMode.DOUBLE) {
-                        Modifier.combinedClickable(onClick = { if (promoOnTap) promoOpen = !promoOpen }, onDoubleClick = onOpen)
+                    val open = if (tapMode == TapMode.DOUBLE || hasUnread) {
+                        Modifier.combinedClickable(onClick = { if (tapShowsStrip) stripOpen = !stripOpen }, onDoubleClick = onOpen)
                     } else {
                         Modifier.clickable(onClickLabel = "פתיחת דף הפריט", onClick = onOpen)
                     }
@@ -1420,8 +1439,21 @@ private fun ProductTile(
                             // marking bought is for the shop only
                             if (shopping && TileElement.CHECK in tile) {
                                 val checkSize = 48.dp
-                                Box(Modifier.size(checkSize).clip(CircleShape).clickable(onClick = onBought), contentAlignment = Alignment.Center) {
-                                    Box(Modifier.size(checkSize - 18.dp).border(2.dp, MaterialTheme.colorScheme.outline, CircleShape))
+                                Box(
+                                    Modifier.size(checkSize).clip(CircleShape)
+                                        .clickable(onClickLabel = if (bought) "הוצאה מהעגלה" else "הכנסה לעגלה", onClick = onBought),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    if (bought) {
+                                        Box(
+                                            Modifier.size(checkSize - 18.dp).background(MaterialTheme.colorScheme.primary, CircleShape),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Icon(Icons.Default.Check, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onPrimary)
+                                        }
+                                    } else {
+                                        Box(Modifier.size(checkSize - 18.dp).border(2.dp, MaterialTheme.colorScheme.outline, CircleShape))
+                                    }
                                 }
                                 Spacer(Modifier.width(6.dp))
                             } else {
@@ -1431,7 +1463,8 @@ private fun ProductTile(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
                                         line.displayName,
-                                        style = ProductNameStyle,
+                                        style = if (bought) ProductNameStyle.copy(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else ProductNameStyle,
+                                        color = if (bought) MaterialTheme.colorScheme.onSurfaceVariant else Color.Unspecified,
                                         maxLines = 2,
                                         overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.weight(1f, fill = false),
@@ -1504,8 +1537,87 @@ private fun ProductTile(
           }
         }
         // the promotion's details, right under the tile (while preparing and in the shop); with "two taps" only after a tap
-        AnimatedVisibility(visible = promoText != null && (!promoOnTap || promoOpen)) {
+        AnimatedVisibility(visible = promoText != null && (!promoOnTap || stripOpen)) {
             PromoStrip(promo = promoText)
+        }
+        // the messages not read yet: answered here, without opening the conversation
+        AnimatedVisibility(visible = hasUnread && stripOpen) {
+            UnreadMessagesStrip(unread, onReply = onReply, onMarkRead = { onMarkRead(); stripOpen = false }, onOpenChat = onOpenChat)
+        }
+    }
+}
+
+/**
+ * The messages on a product the user has not read yet (the last few), as the tile's own strip: who wrote what, and
+ * "הגב" — which opens a field to answer on the spot (the answer quotes the newest message). "נקרא" marks them read;
+ * "לשיחה" opens the whole conversation.
+ */
+@Composable
+private fun UnreadMessagesStrip(
+    messages: List<app.necessityq.domain.ItemMessage>,
+    onReply: (String, String?) -> Unit,
+    onMarkRead: () -> Unit,
+    onOpenChat: () -> Unit,
+) {
+    var replying by remember { mutableStateOf(false) }
+    var text by remember { mutableStateOf("") }
+    val shown = messages.takeLast(3)
+    Column(
+        Modifier.fillMaxWidth().padding(top = 4.dp).clip(NqShapes.Panel)
+            .background(MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.55f))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        if (messages.size > shown.size) {
+            Text("ועוד ${messages.size - shown.size} קודמות", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        shown.forEach { m ->
+            val body = when (m.kind) {
+                app.necessityq.domain.MessageKind.IMAGE -> "📷 " + m.text.ifBlank { "תמונה" }
+                app.necessityq.domain.MessageKind.AUDIO -> "🎤 הקלטה"
+                else -> m.text
+            }
+            Text(
+                androidx.compose.ui.text.buildAnnotatedString {
+                    pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold))
+                    append(m.authorName)
+                    pop()
+                    append(": ")
+                    append(body)
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (replying) {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("תשובה…") },
+                singleLine = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = {
+                    if (text.isNotBlank()) { onReply(text, shown.last().id); text = ""; replying = false }
+                }),
+                trailingIcon = {
+                    IconButton(
+                        enabled = text.isNotBlank(),
+                        onClick = { onReply(text, shown.last().id); text = ""; replying = false },
+                    ) { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "שליחה") }
+                },
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = { replying = !replying }) {
+                Icon(Icons.AutoMirrored.Filled.Reply, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("הגב")
+            }
+            TextButton(onClick = onOpenChat) { Text("לשיחה") }
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = onMarkRead) { Text("נקרא") }
         }
     }
 }
@@ -1939,28 +2051,6 @@ fun QuantityStepper(
     }
 }
 
-@Composable
-private fun BoughtRow(line: ListLine, onReopen: () -> Unit) {
-    // only the ✓ brings an item back to the list: a touch elsewhere on the row (while scrolling) does nothing
-    Row(
-        Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        IconButton(onClick = onReopen) {
-            Icon(Icons.Default.CheckCircle, contentDescription = "החזרה לרשימה: ${line.displayName}", tint = MaterialTheme.colorScheme.primary)
-        }
-        Spacer(Modifier.width(2.dp))
-        Text(
-            line.displayName,
-            style = MaterialTheme.typography.bodyLarge,
-            textDecoration = TextDecoration.LineThrough,
-            color = MaterialTheme.colorScheme.outline,
-            modifier = Modifier.weight(1f),
-        )
-        line.quantity?.let { Text(it.format(), color = MaterialTheme.colorScheme.outline) }
-    }
-}
-
 /** Coloured pill: routine green, occasional blue, special purple, favourite gold, missing orange, recipe teal. */
 @Composable
 fun TagBadge(tag: ItemTag) {
@@ -1995,7 +2085,7 @@ private fun <T> TwoRowStrip(
 ) {
     androidx.compose.foundation.lazy.staggeredgrid.LazyHorizontalStaggeredGrid(
         rows = androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells.Fixed(2),
-        modifier = Modifier.fillMaxWidth().height(height),
+        modifier = Modifier.fillMaxWidth().height(height).keepSidewaysScroll(),
         contentPadding = PaddingValues(horizontal = 12.dp),
         horizontalItemSpacing = 6.dp,
         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -2046,84 +2136,6 @@ fun ModeSwitch(shopping: Boolean, onSelect: (ListMode) -> Unit, modifier: Modifi
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-            }
-        }
-    }
-}
-
-/** Green header while shopping: the store (tap to change), how much is already in the cart and what is left to pay. */
-@Composable
-private fun ShopHeader(
-    storeName: String?,
-    done: Int,
-    open: Int,
-    remaining: app.necessityq.domain.ListCostEstimate?,
-    onBack: () -> Unit,
-    onStore: () -> Unit,
-    actions: @Composable () -> Unit,
-) {
-    val c = NqTheme.colors
-    val total = done + open
-    Column(
-        Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp))
-            .background(c.shopHeader)
-            .padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 16.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "חזרה להכנת רשימה", tint = c.onShopHeader)
-            }
-            Column(
-                Modifier.weight(1f).clip(NqShapes.Panel).clickable(onClickLabel = "החלפת חנות", onClick = onStore)
-                    .padding(horizontal = 6.dp, vertical = 4.dp),
-            ) {
-                Text(
-                    storeName ?: "בקנייה",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = c.onShopHeader,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    if (storeName == null) "בחירת חנות ✎" else "החלפת חנות ✎",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = c.onShopHeaderMuted,
-                )
-            }
-            actions()
-        }
-        Row(
-            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            Text("$done", color = c.onShopHeader, fontWeight = FontWeight.Bold, fontSize = 30.sp)
-            Text(
-                " / $total בעגלה",
-                color = c.onShopHeaderMuted,
-                fontSize = 17.sp,
-                modifier = Modifier.padding(bottom = 4.dp),
-            )
-            Spacer(Modifier.weight(1f))
-            if (remaining != null && remaining.pricedLines > 0 && open > 0) {
-                Text(
-                    "נשארו " + costText(remaining),
-                    color = c.onShopHeaderMuted,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(bottom = 5.dp),
-                )
-            }
-        }
-        // progress of the trip; drawn with two boxes so it reads the same on every Material version
-        Box(
-            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp).height(8.dp)
-                .clip(NqShapes.Pill).background(Color.White.copy(alpha = 0.2f))
-                .semantics { contentDescription = "$done מתוך $total בעגלה" },
-        ) {
-            val fraction = if (total == 0) 0f else done.toFloat() / total
-            if (fraction > 0f) {
-                Box(Modifier.fillMaxWidth(fraction).fillMaxHeight().clip(NqShapes.Pill).background(c.shopProgress))
             }
         }
     }
@@ -2429,19 +2441,24 @@ private fun GoShoppingBar(
     ).joinToString(" · ")
     Box(
         Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = 16.dp, vertical = 6.dp),
     ) {
         Row(
-            Modifier.fillMaxWidth().height(56.dp).clip(NqShapes.Field).background(MaterialTheme.colorScheme.primary)
+            Modifier.fillMaxWidth().height(48.dp).clip(NqShapes.Field).background(MaterialTheme.colorScheme.primary)
                 .clickable(role = Role.Button, onClick = onGo).padding(horizontal = 18.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text(if (resume) "חזרה לקנייה" else "יוצאים לקנות", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (resume) "חזרה לקנייה" else "יוצאים לקנות",
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
                 Text(
                     details,
                     color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f),
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.labelSmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -2451,25 +2468,60 @@ private fun GoShoppingBar(
     }
 }
 
-/** Bottom of the list while shopping: scan a product, or finish and go back to preparing. */
+/**
+ * Bottom of the list while shopping: how many of the items are in the cart (with a progress line and what is left to
+ * pay), and the scan button — scanning a product puts it in the cart. Switching store and finishing the trip are in ⋮.
+ */
 @Composable
-private fun ShopBottomBar(onScan: () -> Unit, onFinish: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(horizontal = 16.dp, vertical = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        OutlinedButton(
-            onClick = onScan,
-            modifier = Modifier.weight(1f).height(56.dp),
-            shape = NqShapes.Field,
-            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary),
-        ) {
-            Icon(Icons.Default.QrCodeScanner, contentDescription = null, Modifier.size(20.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("סריקת מוצר")
+private fun ShopBottomBar(
+    done: Int,
+    total: Int,
+    storeName: String?,
+    remaining: app.necessityq.domain.ListCostEstimate?,
+    onScan: () -> Unit,
+) {
+    val c = NqTheme.colors
+    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.weight(1f).semantics(mergeDescendants = true) { contentDescription = "$done מתוך $total בעגלה" }) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text("$done", fontWeight = FontWeight.Bold, fontSize = 26.sp)
+                    Text(
+                        " מתוך $total בעגלה",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.padding(bottom = 3.dp),
+                    )
+                }
+                val details = listOfNotNull(
+                    storeName,
+                    remaining?.takeIf { it.pricedLines > 0 && done < total }?.let { "נשארו " + costText(it) },
+                ).joinToString(" · ")
+                if (details.isNotEmpty()) {
+                    Text(
+                        details,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            FilledTonalButton(onClick = onScan, modifier = Modifier.height(48.dp), shape = NqShapes.Field) {
+                Icon(Icons.Default.QrCodeScanner, contentDescription = null, Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("סריקה לעגלה")
+            }
         }
-        Button(onClick = onFinish, modifier = Modifier.weight(1f).height(56.dp), shape = NqShapes.Field) {
-            Text("סיום קנייה")
+        // progress of the trip; drawn with two boxes so it reads the same on every Material version
+        Box(
+            Modifier.fillMaxWidth().padding(top = 8.dp).height(6.dp)
+                .clip(NqShapes.Pill).background(MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            val fraction = if (total == 0) 0f else done.toFloat() / total
+            if (fraction > 0f) {
+                Box(Modifier.fillMaxWidth(fraction).fillMaxHeight().clip(NqShapes.Pill).background(c.shopProgress))
+            }
         }
     }
 }

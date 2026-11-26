@@ -567,6 +567,19 @@ private fun PickDishDialog(vm: AppViewModel, data: MealData, epochDay: Long, slo
         title = { Text("${slot.label} · יום ${MealPlanner.dayNames[MealPlanner.weekdayIndex(date)]} ${date.format(shortDate)}") },
         text = {
             Column(Modifier.fadingVerticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // the search leads: it looks like a search field and opens the recipe search
+                Surface(
+                    onClick = onSearch,
+                    shape = RoundedCornerShape(28.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Search, null)
+                        Spacer(Modifier.width(10.dp))
+                        Text("חיפוש מתכון — שלי או ממאגר צמרת", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 if (data.members.isNotEmpty()) {
                     Text("מי אוכל (בלי בחירה = כולם)", style = MaterialTheme.typography.bodySmall)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -625,7 +638,6 @@ private fun PickDishDialog(vm: AppViewModel, data: MealData, epochDay: Long, slo
                     }
                 }
                 if (!showAll && ranked.size > 6) TextButton(onClick = { showAll = true }) { Text("עוד…") }
-                TextButton(onClick = onSearch) { Icon(Icons.Default.Search, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("חיפוש מתכון נוסף") }
             }
         },
         confirmButton = {

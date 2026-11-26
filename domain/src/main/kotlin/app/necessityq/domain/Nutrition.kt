@@ -121,6 +121,8 @@ class NutritionIndex(val foods: List<NutritionFood>, val updatedAtMillis: Long =
             .distinctBy { HebrewText.matchKey(it) }
             .ifEmpty { listOf(food.baseName) },
         nutritionCode = food.code,
+        // Tzameret describes a food per 100 g: it says nothing about how many servings a dish makes
+        servingsKnown = false,
     )
 
     companion object {
@@ -149,12 +151,16 @@ object HebrewStem {
     /** Final letters as regular ones (after the suffix is gone), so "מלפפון" and "מלפפונים" share a stem. */
     private fun finals(w: String) = w.replace('ך', 'כ').replace('ם', 'מ').replace('ן', 'נ').replace('ף', 'פ').replace('ץ', 'צ')
 
+    /** A stem this short (up to four letters) is a whole word: as a prefix it would also begin other words ("שוק" ← "שוקו", "שוקולד"). */
+    private const val SHORT_STEM = 4
+
     /**
-     * True when [stem] (of a query word) starts one of [words]; a plural construct ending in י also matches
+     * True when [stem] (of a query word) starts one of [words]; with [exact] (an item of the list, a specific kind of
+     * product — not a search) a short stem must be the whole word, so "שוקיים" is not "שוקו"; a plural construct ending in י also matches
      * its singular ("תפוחי אדמה" ↔ "תפוח אדמה").
      */
-    fun matchesAny(words: List<String>, stem: String): Boolean =
-        words.any { it.startsWith(stem) } ||
+    fun matchesAny(words: List<String>, stem: String, exact: Boolean = false): Boolean =
+        words.any { if (exact && stem.length <= SHORT_STEM) it == stem || it == stem + "י" else it.startsWith(stem) } ||
             (stem.length > 3 && stem.endsWith("י") && stem.dropLast(1).let { base -> words.any { it == base || it.startsWith(base) && it.length <= base.length + 1 } })
 
     /** Words of a name, each stemmed; commas and parentheses split words. */

@@ -364,8 +364,10 @@ object ListOrdering {
         pickRanks: Map<String, Double> = emptyMap(),
         descending: Boolean = false,
         chilledLast: Boolean = false,
+        /** In the shop what was already bought stays in its place on the list, marked, like ticks on a written list. */
+        includeBought: Boolean = false,
     ): List<ListSection> {
-        val needed = lines.filter { it.status == LineStatus.NEEDED }
+        val needed = lines.filter { it.status == LineStatus.NEEDED || (includeBought && it.status == LineStatus.BOUGHT) }
         if (needed.isEmpty()) return emptyList()
         // a direction chosen for another sort does not turn around one that has no direction
         val descending = descending && sort.hasDirection

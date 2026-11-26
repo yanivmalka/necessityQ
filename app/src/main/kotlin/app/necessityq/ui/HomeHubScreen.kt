@@ -49,6 +49,7 @@ fun HomeHubScreen(
     householdName: String,
     modifier: Modifier = Modifier,
     entries: List<List<HubEntry>>,
+    onOpenHousehold: () -> Unit = {},
 ) {
     val names by vm.memberNames.collectAsStateWithLifecycle()
     val members by vm.members.collectAsStateWithLifecycle()
@@ -61,28 +62,35 @@ fun HomeHubScreen(
             Text("הבית", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(householdName, style = MaterialTheme.typography.titleLarge)
         }
-        if (names.isNotEmpty()) {
-            Row(
-                Modifier.fillMaxWidth().clip(NqShapes.Tile).background(MaterialTheme.colorScheme.surface)
-                    .border(1.dp, NqTheme.colors.hairline, NqShapes.Tile).padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                if (members.isNotEmpty()) {
-                    val now = rememberNowMillis()
-                    MemberAvatars(
-                        members.map { it.displayName }, size = 36.dp, max = 5, photos = members.map { it.photo },
-                        active = members.map { it.userId == vm.me || it.isActive(now) },
-                    )
-                } else {
-                    MemberAvatars(names.values.toList(), size = 36.dp, max = 5)
-                }
-                Text(
-                    if (names.size == 1) "רק את/ה ברשימה כרגע" else "${names.size} בני בית משתפים את הרשימה",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.weight(1f),
+        // the household: who shares the list. It is the way into sharing and managing the household (code, members, leaving)
+        Row(
+            Modifier.fillMaxWidth().clip(NqShapes.Tile).background(MaterialTheme.colorScheme.surface)
+                .border(1.dp, NqTheme.colors.hairline, NqShapes.Tile)
+                .clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onOpenHousehold).padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (members.isNotEmpty()) {
+                val now = rememberNowMillis()
+                MemberAvatars(
+                    members.map { it.displayName }, size = 36.dp, max = 5, photos = members.map { it.photo },
+                    active = members.map { it.userId == vm.me || it.isActive(now) },
                 )
+            } else if (names.isNotEmpty()) {
+                MemberAvatars(names.values.toList(), size = 36.dp, max = 5)
             }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    when {
+                        names.isEmpty() -> "בני הבית ושיתוף"
+                        names.size == 1 -> "רק את/ה ברשימה כרגע"
+                        else -> "${names.size} בני בית משתפים את הרשימה"
+                    },
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text("קוד הצטרפות, חברים והתראות", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.outline)
         }
         entries.forEach { group ->
             Column(
