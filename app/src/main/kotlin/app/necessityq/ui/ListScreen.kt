@@ -437,7 +437,7 @@ fun ListScreen(
                 // in the shop: what only the trip needs — an item that is not on the list yet, another store, the end
                 if (shopping) {
                     DropdownMenuItem(
-                        text = { Text("הוספת פריט") },
+                        text = { Text("הוספה לרשימה") },
                         leadingIcon = { Icon(Icons.Default.Add, null) },
                         onClick = { showMore = false; addOpen = !addOpen },
                     )
@@ -445,11 +445,6 @@ fun ListScreen(
                         text = { Text(if (storeName == null) "בחירת סופר" else "החלפת סופר · $storeName") },
                         leadingIcon = { Icon(Icons.Default.Storefront, null) },
                         onClick = { showMore = false; showStoreDialog = true },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("סיום קנייה") },
-                        leadingIcon = { Icon(Icons.Default.CheckCircle, null) },
-                        onClick = { showMore = false; vm.finishShopping() },
                     )
                     HorizontalDivider()
                 }
@@ -503,7 +498,7 @@ fun ListScreen(
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (shopping) {
             // a clean, slim top row (room to spare for what may come here later): back, chat, ⋮. Where the trip stands
-            // is at the bottom, and "החלפת סופר" / "הוספת פריט" / "סיום קנייה" are in the ⋮ menu
+            // is at the bottom (with "סיום קנייה"), and "החלפת סופר" / "הוספה לרשימה" are in the ⋮ menu
             Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { vm.setMode(ListMode.PLAN) }) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "חזרה להכנת רשימה")
@@ -887,6 +882,7 @@ fun ListScreen(
                 storeName = storeName,
                 remaining = if (showTotal && snap != null) app.necessityq.domain.ListCost.of(snap.lines, prices, itemPrices) else null,
                 onScan = scan,
+                onFinish = vm::finishShopping,
             )
         } else if (snap != null) {
             // one clear way into the store, with the estimated total of the open lines
@@ -1106,7 +1102,7 @@ private fun RecycleBinSheet(removed: List<ListLine>, vm: AppViewModel, onDismiss
                 if (removed.isNotEmpty()) TextButton(onClick = { confirmEmpty = true }) { Text("ריקון") }
             }
             Text(
-                "פריטים שנמחקו, ופריטים שסומנו כנקנו ונוקו מהרשימה.",
+                "פריטים שהוסרו, ופריטים שסומנו כנקנו ונוקו מהרשימה.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -2470,7 +2466,7 @@ private fun GoShoppingBar(
 
 /**
  * Bottom of the list while shopping: how many of the items are in the cart (with a progress line and what is left to
- * pay), and the scan button — scanning a product puts it in the cart. Switching store and finishing the trip are in ⋮.
+ * pay), the scan button — scanning a product puts it in the cart — and "סיום קנייה". Switching store is in ⋮.
  */
 @Composable
 private fun ShopBottomBar(
@@ -2479,6 +2475,7 @@ private fun ShopBottomBar(
     storeName: String?,
     remaining: app.necessityq.domain.ListCostEstimate?,
     onScan: () -> Unit,
+    onFinish: () -> Unit,
 ) {
     val c = NqTheme.colors
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -2522,6 +2519,12 @@ private fun ShopBottomBar(
             if (fraction > 0f) {
                 Box(Modifier.fillMaxWidth(fraction).fillMaxHeight().clip(NqShapes.Pill).background(c.shopProgress))
             }
+        }
+        // the only way a trip ends: always in sight, not hidden in ⋮ (the back arrow only returns to preparing)
+        TextButton(onClick = onFinish, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+            Icon(Icons.Default.CheckCircle, contentDescription = null, Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("סיום קנייה", fontWeight = FontWeight.SemiBold)
         }
     }
 }

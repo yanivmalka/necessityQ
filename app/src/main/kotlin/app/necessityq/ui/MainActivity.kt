@@ -337,10 +337,8 @@ private fun Root(vm: AppViewModel) {
             // the household is the card at the top of the hub; below, grouped by what the pages are for
             val hubEntries = listOf(
                 // about the list and its history
+                // (צ'אט פוד is not here: it opens from the list's header, the swipe, the product page and the notification)
                 listOfNotNull(
-                    HubEntry(Dest.MESSAGES.title, Icons.AutoMirrored.Filled.Chat, badge = unread.takeIf { it > 0 }?.toString()) {
-                        go(Dest.MESSAGES, from = Dest.HOME)
-                    }.takeIf { app.necessityq.domain.Feature.CHAT in features },
                     HubEntry(Dest.HISTORY.title, Icons.Default.History) { go(Dest.HISTORY, from = Dest.HOME) },
                     HubEntry(Dest.SUGGESTIONS.title, Icons.Default.AutoAwesome, badge = declinedAdvice.size.toString()) {
                         go(Dest.SUGGESTIONS, from = Dest.HOME)
@@ -395,9 +393,9 @@ private fun Root(vm: AppViewModel) {
                                     // while swiping, the tab lights up as soon as the swipe would land on it
                                     current = if (dest in tabs) tabs.getOrNull(pager.targetPage) ?: dest else dest.tab,
                                     tabs = tabs,
-                                    homeBadge = when {
-                                        unread > 0 -> "$unread"
-                                        update is UpdateState.Available || update is UpdateState.Ready -> "חדש"
+                                    // only an update: the unread messages are counted on the list's chat button
+                                    homeBadge = when (update) {
+                                        is UpdateState.Available, is UpdateState.Ready -> "חדש"
                                         else -> null
                                     },
                                     onSelect = { go(it) },
