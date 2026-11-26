@@ -78,6 +78,11 @@ android {
         buildConfig = true
     }
 
+    testOptions {
+        // Robolectric needs the merged resources and manifest to start the app's classes on the JVM
+        unitTests.isIncludeAndroidResources = true
+    }
+
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
@@ -120,4 +125,9 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
 
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.compose.ui.test.junit4)
+    debugImplementation(libs.compose.ui.test.manifest) // the empty activity the Compose tests host their content in
 }
