@@ -134,6 +134,13 @@ class SuggestionEngine(
         return today.plusDays(days)
     }
 
+    /**
+     * "יש לי בבית": the household has it, so it is not suggested for a whole cadence (at least three days).
+     * Unlike a dismissal this is no rejection: the suggestion was right about the item, only the stock is not out.
+     */
+    fun haveAtHomeUntil(stats: ItemStats?, today: LocalDate): LocalDate =
+        today.plusDays(max(3L, (stats?.cadenceDays ?: 7.0).roundToLong()))
+
     companion object {
         /** Rejections (dismissed, or deleted before it was bought) after which an item is no longer suggested. */
         const val GIVE_UP_AFTER = 3

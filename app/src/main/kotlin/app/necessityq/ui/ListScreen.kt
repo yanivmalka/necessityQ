@@ -25,6 +25,7 @@ import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -730,6 +731,7 @@ fun ListScreen(
                                     info = recommendationInfo(s, snap.stats[s.itemId], favorites, display, today),
                                     onAdd = { vm.accept(s) },
                                     onDismiss = { vm.dismiss(s) },
+                                    onHaveAtHome = { vm.haveAtHome(s) },
                                 )
                             }
                         }
@@ -2409,7 +2411,7 @@ private fun SuggestionHeader(
  * and ✕ as its own full-size target so dismissing never adds by mistake.
  */
 @Composable
-private fun RunningLowCard(s: Suggestion, info: String, onAdd: () -> Unit, onDismiss: () -> Unit) {
+private fun RunningLowCard(s: Suggestion, info: String, onAdd: () -> Unit, onDismiss: () -> Unit, onHaveAtHome: () -> Unit) {
     val name = s.identity.displayName
     Column(
         Modifier.width(196.dp).clip(NqShapes.Tile).background(MaterialTheme.colorScheme.surface)
@@ -2450,6 +2452,14 @@ private fun RunningLowCard(s: Suggestion, info: String, onAdd: () -> Unit, onDis
                 Spacer(Modifier.width(6.dp))
                 Text("לרשימה", color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.SemiBold)
             }
+            Text(
+                "יש לי בבית",
+                Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable(role = Role.Button, onClickLabel = "יש בבית: $name", onClick = onHaveAtHome)
+                    .wrapContentHeight(Alignment.CenterVertically),
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

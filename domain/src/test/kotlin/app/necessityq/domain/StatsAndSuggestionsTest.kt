@@ -209,6 +209,19 @@ class StatsAndSuggestionsTest {
         assertEquals(mapOf("x" to 2), SuggestionAccuracy.rejectionsByItem(lines, now - 60L * 86_400_000L))
     }
 
+    @Test fun `having it at home hides the suggestion for a cadence without counting as a rejection`() {
+        val today = start.plusDays(29)
+        val s = engine.compute(every("חלב 3%", 5, 6), today).values.single()
+        assertEquals(today.plusDays(5), SuggestionEngine().haveAtHomeUntil(s, today))
+        assertEquals(today.plusDays(7), SuggestionEngine().haveAtHomeUntil(null, today))
+        // stored with no rejections: the item keeps its full weight once it is shown again
+        val hidden = SuggestionSuppression(s.itemId, today.toEpochDay() + 5, dismissals = 0)
+        assertTrue(SuggestionEngine().suggest(listOf(s), emptySet(), listOf(hidden), today).runningLow.isEmpty())
+        val later = today.plusDays(5)
+        assertEquals(1.0, SuggestionEngine.rejectionWeight(hidden.dismissals), 0.0)
+        assertTrue(SuggestionEngine().forNextTrip(listOf(s), emptySet(), listOf(hidden), later).isNotEmpty())
+    }
+
     private fun line(id: String, source: LineSource, status: LineStatus, removedFrom: LineStatus? = null, recipe: String? = null) = ListLine(
         id = id, itemId = id, name = id, variant = null, category = Category.PRODUCE, quantity = null, note = null,
         status = status, source = source, addedBy = "u1", addedAtMillis = 0, updatedAtMillis = 0,

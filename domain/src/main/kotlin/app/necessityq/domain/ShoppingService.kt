@@ -157,6 +157,12 @@ class ShoppingService(
         return items.size
     }
 
+    /** "יש לי בבית": hides the suggestion for a whole cadence without counting as a rejection. */
+    suspend fun haveAtHome(householdId: String, suggestion: Suggestion, stats: ItemStats?, priorRejections: Int = 0) {
+        val until = suggestionEngine.haveAtHomeUntil(stats, today())
+        repository.suppress(householdId, SuggestionSuppression(suggestion.itemId, until.toEpochDay(), priorRejections))
+    }
+
     suspend fun dismissSuggestion(
         householdId: String, suggestion: Suggestion, stats: ItemStats?, priorRejections: Int = 0,
     ) {

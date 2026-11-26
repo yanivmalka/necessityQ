@@ -162,6 +162,16 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    fun haveAtHome(suggestion: Suggestion) {
+        val (hid, _, _) = ctx() ?: return
+        launchSafe {
+            container.service.haveAtHome(
+                hid, suggestion, snapshot.value?.stats?.get(suggestion.itemId), snapshot.value?.rejections?.get(suggestion.itemId) ?: 0,
+            )
+        }
+        _messages.tryEmit("${suggestion.identity.displayName}: יש בבית, לא מוצע בינתיים")
+    }
+
     fun dismiss(suggestion: Suggestion) {
         val (hid, _, _) = ctx() ?: return
         launchSafe { container.service.dismissSuggestion(
