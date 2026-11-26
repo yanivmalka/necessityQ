@@ -121,6 +121,10 @@ open class InMemoryShoppingRepository(
     override suspend fun addPurchase(householdId: String, purchase: Purchase) =
         mutate { it.copy(purchases = it.purchases + (purchase.id to purchase)) }
 
+    override suspend fun setPurchasesPeople(householdId: String, purchaseIds: List<String>, people: Double) = mutate { s ->
+        s.copy(purchases = s.purchases.mapValues { (id, p) -> if (id in purchaseIds) p.copy(householdPeople = people) else p })
+    }
+
     override suspend fun deletePurchase(householdId: String, purchaseId: String) =
         mutate { it.copy(purchases = it.purchases - purchaseId) }
 

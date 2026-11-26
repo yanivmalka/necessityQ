@@ -736,7 +736,11 @@ fun ListScreen(
 
             if (showLow && snap.tripList.size >= 3) {
                 item(key = "trip") {
-                    TripListCard(snap.tripList.size, onBuild = { vm.addTripList(snap.tripList) })
+                    TripListCard(
+                        snap.tripList.size,
+                        starter = snap.tripList.all { it.reason == app.necessityq.domain.TripSizer.STARTER_REASON },
+                        onBuild = { showGenerate = true },
+                    )
                 }
             }
 
@@ -1860,7 +1864,10 @@ private fun GenerateSheet(vm: AppViewModel, onDismiss: () -> Unit) {
                         Spacer(Modifier.width(8.dp))
                         Column(Modifier.weight(1f)) {
                             Text(item.identity.displayName, fontWeight = FontWeight.Bold)
-                            Text(item.reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                listOfNotNull(item.reason, item.quantityNote.takeIf { item.identity.id !in quantities }).joinToString(" · "),
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                         // the amount is editable here; changing it also selects the item
                         QuantityStepper(
@@ -2412,20 +2419,21 @@ private fun RemindersCard(
     }
 }
 
-/** One tap builds the week's list from the household's own rhythm: what will run out before the next trip. */
+/** The week's list from the household's own rhythm (or, with no history, its size): a tap opens it for review before adding. */
 @Composable
-private fun TripListCard(count: Int, onBuild: () -> Unit) {
+private fun TripListCard(count: Int, starter: Boolean, onBuild: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clip(NqShapes.Panel)
             .background(MaterialTheme.colorScheme.primaryContainer)
-            .clickable(role = Role.Button, onClickLabel = "הוספת כל המוצרים שיאזלו עד הקנייה הבאה", onClick = onBuild)
+            .clickable(role = Role.Button, onClickLabel = "בדיקה והוספה של המוצרים שיאזלו עד הקנייה הבאה", onClick = onBuild)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(8.dp))
         Text(
-            "בניית רשימה לשבוע ($count מוצרים לפי הקצב שלכם) · ",
+            if (starter) "רשימה ראשונה לשבוע ($count מוצרים לפי גודל הבית) · "
+            else "בניית רשימה לשבוע ($count מוצרים לפי הקצב שלכם) · ",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onPrimaryContainer,
             modifier = Modifier.weight(1f, fill = false),
@@ -2519,8 +2527,12 @@ private fun RunningLowCard(s: Suggestion, info: String, onAdd: () -> Unit, onDis
         Row {
             Column(Modifier.weight(1f).padding(top = 10.dp)) {
                 Text(name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                s.quantity?.let {
-                    Text(it.format(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // the amount, and where it came from when it is not just the usual purchase ("לפי 4 נפשות")
+                listOfNotNull(s.quantity?.format(), s.quantityNote).joinToString(" · ").ifEmpty { null }?.let {
+                    Text(
+                        it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
             IconButton(onClick = onDismiss, modifier = Modifier.size(44.dp)) {

@@ -44,6 +44,8 @@ internal data class PurchaseDto(
     val id: String, val itemId: String, val name: String, val variant: String? = null,
     val category: String, val quantity: QuantityDto? = null, val boughtAt: Long,
     val boughtBy: String, val lineId: String? = null,
+    /** How many people the household was (see [Purchase.householdPeople]). */
+    val people: Double? = null,
 )
 
 @Serializable
@@ -54,6 +56,11 @@ internal data class StateDto(
     val suppressions: Map<String, Long> = emptyMap(),
     /** How often each suggestion was dismissed (older files have none: one). */
     val dismissals: Map<String, Int> = emptyMap(),
+    /** Suggestions hidden because the household has them at home ("יש לי בבית"). */
+    val atHome: Set<String> = emptySet(),
+    /** Per item: how many recent "יש לי בבית", and the day of the last one. */
+    val atHomeMarks: Map<String, Int> = emptyMap(),
+    val markedDay: Map<String, Long> = emptyMap(),
 )
 
 /**
@@ -97,6 +104,9 @@ class LocalStore(private val file: File) {
             purchases = shopping.current.value.purchases.values.map { it.toDto() },
             suppressions = shopping.current.value.suppressions.mapValues { it.value.untilEpochDay },
             dismissals = shopping.current.value.suppressions.mapValues { it.value.dismissals },
+            atHome = shopping.current.value.suppressions.filterValues { it.atHome }.keys,
+            atHomeMarks = shopping.current.value.suppressions.mapValues { it.value.atHomeMarks }.filterValues { it > 0 },
+            markedDay = shopping.current.value.suppressions.mapNotNull { (id, s) -> s.markedEpochDay?.let { id to it } }.toMap(),
         )
         writer.execute {
             val tmp = File(file.parentFile, file.name + ".tmp")
@@ -126,7 +136,7 @@ private fun ListLine.toDto() = LineDto(
 )
 
 private fun Purchase.toDto() = PurchaseDto(
-    id, itemId, name, variant, category.name, quantity?.toDto(), boughtAtMillis, boughtBy, lineId,
+    id, itemId, name, variant, category.name, quantity?.toDto(), boughtAtMillis, boughtBy, lineId, householdPeople,
 )
 
 private fun StateDto.toDomain(): LocalState = LocalState(
@@ -148,7 +158,13 @@ private fun StateDto.toDomain(): LocalState = LocalState(
         d.id to Purchase(
             id = d.id, itemId = d.itemId, name = d.name, variant = d.variant, category = category(d.category),
             quantity = d.quantity?.toDomain(), boughtAtMillis = d.boughtAt, boughtBy = d.boughtBy, lineId = d.lineId,
+            householdPeople = d.people,
         )
     },
-    suppressions = suppressions.mapValues { (itemId, until) -> SuggestionSuppression(itemId, until, dismissals[itemId] ?: 1) },
+    suppressions = suppressions.mapValues { (itemId, until) ->
+        SuggestionSuppression(
+            itemId, until, dismissals[itemId] ?: 1, atHome = itemId in atHome,
+            atHomeMarks = atHomeMarks[itemId] ?: 0, markedEpochDay = markedDay[itemId],
+        )
+    },
 )

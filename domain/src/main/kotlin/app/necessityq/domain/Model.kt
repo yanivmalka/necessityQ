@@ -115,6 +115,11 @@ data class Purchase(
     val lineId: String?,
     /** Where it was bought (see [Store]); null when unknown. */
     val storeId: String? = null,
+    /**
+     * How many people the household was when this was bought ([HouseholdSize.people]); null when unknown (no
+     * family profiles, or bought before this was recorded). Lets the amount follow a household that grows or shrinks.
+     */
+    val householdPeople: Double? = null,
 ) {
     val identity: ItemIdentity get() = ItemIdentity(name, variant, category)
 
@@ -131,6 +136,15 @@ data class SuggestionSuppression(
     val itemId: String,
     val untilEpochDay: Long,
     val dismissals: Int = 1,
+    /** "יש לי בבית": hidden because the household has it, not because the suggestion was wrong. */
+    val atHome: Boolean = false,
+    /**
+     * How many times lately the household said it has the item at home when it was suggested, and the day of the
+     * last time ([markedEpochDay]). They make its cadence longer ([ConsumptionStatsEngine.atHomeStretch]); kept when
+     * the suggestion is later dismissed, forgotten two months after the last one.
+     */
+    val atHomeMarks: Int = 0,
+    val markedEpochDay: Long? = null,
 )
 
 data class Household(

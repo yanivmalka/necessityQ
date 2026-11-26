@@ -113,6 +113,21 @@ object PackSizes {
         else Quantity.fromBase(total.toDouble(), rule.dimension)
     }
 
+    /**
+     * The packs closest to an estimated [amount] of [name] (an estimate is not a recipe's exact need, so it is not
+     * rounded up: 1.2 ק"ג סוכר is one 1 ק"ג bag), at least the smallest pack. Null when the item has no pack sizes
+     * in that dimension.
+     */
+    fun nearest(name: String, amount: Quantity, variant: String? = null): Quantity? {
+        val rule = ruleFor(name, variant)?.second ?: return null
+        if (rule.dimension != amount.dimension) return null
+        val unit = rule.sizes.reduce(::gcd)
+        val target = (Math.round(amount.baseAmount / unit) * unit).coerceAtLeast(rule.sizes.min())
+        val total = cover(target.toDouble(), rule.sizes)
+        return if (rule.dimension == Dimension.COUNT) Quantity(total.toDouble(), if (amount.unit == QuantityUnit.PACKAGE) QuantityUnit.PACKAGE else QuantityUnit.PIECE)
+        else Quantity.fromBase(total.toDouble(), rule.dimension)
+    }
+
     /** The smallest sum of the pack [sizes] (each usable any number of times) that is at least [need]. */
     internal fun cover(need: Double, sizes: List<Long>): Long {
         val largest = sizes.max()

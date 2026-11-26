@@ -57,6 +57,9 @@ object SmartQuantities {
         "בננות" to PerPerson(0.6, QuantityUnit.KILOGRAM, 0.5, estimated = true),
     )
 
+    /** The items the table has an amount for, in its order (a first list for a new household, see [TripSizer.starter]). */
+    val items: List<String> get() = perPerson.keys.toList()
+
     /** True when the amount for [name] is a rough estimate and not from a published figure. */
     fun isEstimate(name: String): Boolean = perPerson[Catalog.lookup(name)?.name]?.estimated == true
 

@@ -34,6 +34,8 @@ data class ItemStats(
     val classification: Classification,
     /** Recency-weighted purchase frequency, used to rank quick-add chips. */
     val frequencyScore: Double,
+    /** How many people the household was when it bought [typicalQuantity] (median); null when not recorded. */
+    val typicalPeople: Double? = null,
 ) {
     /** True when the last purchase is an estimate because later trips were not documented. */
     val lastPurchaseEstimated: Boolean get() = estimatedLastPurchase != lastPurchase
@@ -71,9 +73,15 @@ class ConsumptionStatsEngine(
     private val maxTrips: Int = 12,
 ) {
 
-    fun compute(purchases: List<Purchase>, today: LocalDate): Map<String, ItemStats> {
+    /**
+     * [stretch]: per item, how much longer than measured its cadence really is, because the household keeps finding
+     * it at home when it is suggested ([atHomeStretch]); 1 when not given.
+     */
+    fun compute(purchases: List<Purchase>, today: LocalDate, stretch: Map<String, Double> = emptyMap()): Map<String, ItemStats> {
         val coverage = TodoCoverage.of(purchases, today, zone)
-        return purchases.groupBy { it.itemId }.mapValues { (itemId, list) -> computeItem(itemId, list, today, coverage) }
+        return purchases.groupBy { it.itemId }.mapValues { (itemId, list) ->
+            computeItem(itemId, list, today, coverage, stretch[itemId] ?: 1.0)
+        }
     }
 
     private data class Trip(val day: LocalDate, val baseAmount: Double?, val quantity: Quantity?)
@@ -83,6 +91,7 @@ class ConsumptionStatsEngine(
         purchases: List<Purchase>,
         today: LocalDate,
         coverage: TodoCoverage? = null,
+        stretch: Double = 1.0,
     ): ItemStats {
         require(purchases.isNotEmpty())
         val latestIdentity = purchases.maxBy { it.boughtAtMillis }.identity
@@ -97,7 +106,8 @@ class ConsumptionStatsEngine(
         // latest purchase and ignore trips in another one, so "750 g" is never read as 750 pieces.
         val dim = trips.lastOrNull { it.baseAmount != null }?.quantity?.dimension
         val knownAmounts = trips.filter { it.quantity?.dimension == dim }.mapNotNull { it.baseAmount }
-        val typicalBase = if (dim == null || knownAmounts.isEmpty()) null else median(knownAmounts)
+        // an amount the household really bought (never the average of two trips: 1 and 2 bottles are not 1.5)
+        val typicalBase = if (dim == null || knownAmounts.isEmpty()) null else observedMedian(knownAmounts)
         // a median far beyond any home purchase of this item is a slip in the data (750 יח' of cottage cheese)
         val typicalQuantity = QuantityNorms.homeSized(
             latestIdentity.name, latestIdentity.category, typicalBase?.let { Quantity.fromBase(it, dim!!) },
@@ -122,22 +132,24 @@ class ConsumptionStatsEngine(
             if (later > 0) (todoTrips.size - 1).toDouble() / later else null
         } else null
 
-        val cadence: Double?
+        val measured: Double?
         val spread: Double?
         var intervals = normalisedIntervals.size
         if (todoRate != null && todoRate > 0.0) {
-            cadence = (coverage!!.tripIntervalDays / todoRate).coerceAtLeast(1.0)
+            measured = (coverage!!.tripIntervalDays / todoRate).coerceAtLeast(1.0)
             spread = null
             intervals = (trips.size - 1).coerceAtMost(3) // a coarser estimate than measured intervals
         } else if (normalisedIntervals.isEmpty()) {
-            cadence = null
+            measured = null
             spread = null
         } else {
             val n = normalisedIntervals.size
             val weights = List(n) { i -> recencyDecay.pow((n - 1 - i).toDouble()) }
-            cadence = weightedMedian(normalisedIntervals, weights).coerceAtLeast(1.0)
-            spread = median(normalisedIntervals.map { abs(it - cadence) })
+            measured = weightedMedian(normalisedIntervals, weights).coerceAtLeast(1.0)
+            spread = median(normalisedIntervals.map { abs(it - measured) })
         }
+        // "יש לי בבית" again and again: the item lasts longer than its purchases say (see [AT_HOME_STRETCH])
+        val cadence = measured?.let { it * stretch }
 
         val last = trips.last()
         var estimatedLast = last.day
@@ -162,7 +174,7 @@ class ConsumptionStatsEngine(
             intervals <= 5 -> 0.8
             else -> 0.9
         }
-        val variation = if (cadence != null && spread != null) spread / cadence else 1.0
+        val variation = if (measured != null && spread != null) spread / measured else 1.0
         val estimatePenalty = if (estimatedLast != last.day) 0.6 else 1.0
         val confidence = baseConfidence * (1.0 - (variation * 0.5).coerceAtMost(0.5)) * estimatePenalty
 
@@ -192,6 +204,9 @@ class ConsumptionStatsEngine(
             confidence = confidence,
             classification = classification,
             frequencyScore = frequencyScore,
+            typicalPeople = purchases.sortedBy { it.boughtAtMillis }.takeLast(maxTrips * 2)
+                .mapNotNull { it.householdPeople?.takeIf { n -> n > 0.0 } }
+                .takeIf { it.isNotEmpty() }?.let(::median),
         )
     }
 
@@ -218,6 +233,19 @@ class ConsumptionStatsEngine(
             val sorted = values.sorted()
             val mid = sorted.size / 2
             return if (sorted.size % 2 == 0) (sorted[mid - 1] + sorted[mid]) / 2.0 else sorted[mid]
+        }
+
+        /** Each "יש לי בבית" lately makes the cadence this much longer (of the measured one), up to [AT_HOME_MAX_STRETCH]. */
+        const val AT_HOME_STRETCH = 0.25
+        const val AT_HOME_MAX_STRETCH = 2.0
+
+        /** How much longer the cadence is after [marks] recent "יש לי בבית" (1 with none). */
+        fun atHomeStretch(marks: Int): Double = (1.0 + AT_HOME_STRETCH * marks.coerceAtLeast(0)).coerceAtMost(AT_HOME_MAX_STRETCH)
+
+        /** The median as one of the values themselves: the lower middle one when their number is even. */
+        fun observedMedian(values: List<Double>): Double {
+            require(values.isNotEmpty())
+            return values.sorted()[(values.size - 1) / 2]
         }
 
         fun weightedMedian(values: List<Double>, weights: List<Double>): Double {

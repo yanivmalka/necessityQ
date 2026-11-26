@@ -107,6 +107,7 @@ internal object FirestoreMapping {
         "boughtBy" to p.boughtBy,
         "lineId" to p.lineId,
         "storeId" to p.storeId,
+        "people" to p.householdPeople,
     )
 
     fun purchaseFrom(doc: DocumentSnapshot): Purchase? {
@@ -122,6 +123,7 @@ internal object FirestoreMapping {
             boughtBy = doc.getString("boughtBy") ?: "",
             lineId = doc.getString("lineId"),
             storeId = doc.getString("storeId"),
+            householdPeople = doc.getDouble("people"),
         )
     }
 
@@ -178,7 +180,10 @@ internal object FirestoreMapping {
 
     fun suppressionFrom(doc: DocumentSnapshot): SuggestionSuppression? {
         val until = doc.getLong("untilEpochDay") ?: return null
-        return SuggestionSuppression(doc.id, until, doc.getLong("dismissals")?.toInt() ?: 1)
+        return SuggestionSuppression(
+            doc.id, until, doc.getLong("dismissals")?.toInt() ?: 1, atHome = doc.getBoolean("atHome") == true,
+            atHomeMarks = doc.getLong("atHomeMarks")?.toInt() ?: 0, markedEpochDay = doc.getLong("markedDay"),
+        )
     }
 
     @Suppress("UNCHECKED_CAST")

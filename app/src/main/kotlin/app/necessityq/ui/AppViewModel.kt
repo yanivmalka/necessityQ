@@ -148,28 +148,10 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         launchSafe { container.service.add(hid, uid, item, quantity, LineSource.MANUAL, lines); _added.tryEmit(item.id) }
     }
 
-    /** A suggestion with no amount of its own gets one from the size of the household (family profiles). */
-    private fun sized(s: Suggestion): Suggestion {
-        val people = app.necessityq.domain.HouseholdSize.people(meals.value.members, java.time.LocalDate.now())
-        val stats = snapshot.value?.stats.orEmpty()
-        return app.necessityq.domain.SmartQuantities.fill(
-            s, stats[s.itemId], people, app.necessityq.domain.SmartQuantities.calibration(stats.values, people),
-        )
-    }
-
+    /** Suggestions already carry an amount for the household (see [app.necessityq.domain.TripSizer]). */
     fun accept(suggestion: Suggestion) {
         val (hid, uid, lines) = ctx() ?: return
-        val sized = sized(suggestion)
-        launchSafe { container.service.acceptSuggestion(hid, uid, sized, lines); _added.tryEmit(suggestion.itemId) }
-    }
-
-    /** "בניית רשימה לשבוע": puts everything that runs out before the next trip on the list, in one tap. */
-    fun addTripList(items: List<Suggestion>) {
-        val (hid, uid, lines) = ctx() ?: return
-        launchSafe {
-            val n = container.service.addTripList(hid, uid, items.map(::sized), lines)
-            _messages.tryEmit(if (n == 1) "נוסף מוצר אחד לרשימה" else "נוספו $n מוצרים לרשימה")
-        }
+        launchSafe { container.service.acceptSuggestion(hid, uid, suggestion, lines); _added.tryEmit(suggestion.itemId) }
     }
 
     fun haveAtHome(suggestion: Suggestion) {
@@ -272,7 +254,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         val snap = snapshot.value ?: return emptyList()
         return app.necessityq.domain.ListGenerator.propose(
             mode, snap.stats.values, purchases.value, snap.lines, java.time.LocalDate.now(),
-            suppressed = snap.suppressed,
+            suppressed = snap.suppressed, atHome = snap.atHome, rejections = snap.rejections, people = snap.people,
         )
     }
 
@@ -289,7 +271,9 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         val (hid, uid, lines) = ctx() ?: return
         if (items.isEmpty()) return
         launchSafe {
-            if (rejected.isNotEmpty()) container.service.rejectGenerated(hid, rejected, snapshot.value?.stats.orEmpty())
+            if (rejected.isNotEmpty()) {
+                container.service.rejectGenerated(hid, rejected, snapshot.value?.stats.orEmpty(), snapshot.value?.rejections.orEmpty())
+            }
             val onList = lines.filter { it.status == LineStatus.NEEDED }.map { it.itemId }.toSet()
             val names = items.filter { it.identity.id !in onList }.map { it.identity.displayName }.distinct()
             val added = container.service.addGenerated(hid, uid, items, lines)
@@ -434,6 +418,24 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     val meals: StateFlow<MealData> = loadedMeals
         .map { it ?: MealData() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MealData())
+
+    init {
+        // the size of the household (its family profiles) sets the amounts of suggestions, wherever they are shown,
+        // and is recorded with every purchase, so the amounts follow a household that grows or shrinks
+        viewModelScope.launch {
+            householdId.flatMapLatest { hid ->
+                if (hid == null) emptyFlow<Pair<String, Double>>()
+                else loadedMeals.map { data ->
+                    hid to (data?.let { app.necessityq.domain.HouseholdSize.people(it.members, java.time.LocalDate.now()) } ?: 0.0)
+                }
+            }.distinctUntilChanged().collect { (hid, people) ->
+                container.service.setHouseholdPeople(hid, people)
+                // purchases from before the size was recorded count as made at this size (once)
+                runCatching { container.service.backfillHouseholdPeople(hid, people) }
+                    .onFailure { app.necessityq.platform.CrashReport.record(it) }
+            }
+        }
+    }
 
     fun updateMeals(change: (MealData) -> MealData) {
         val (hid, _, _) = ctx() ?: return

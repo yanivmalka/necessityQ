@@ -57,11 +57,17 @@ data class GeneratedItem(
     val quantity: Quantity?,
     val reason: String,
     val preselected: Boolean = true,
+    /** Where [quantity] came from when it is not just the usual purchase (see [TripSizer]). */
+    val quantityNote: String? = null,
 )
 
 /**
  * Builds a list from the household's history. Nothing is added by itself — the result is a proposal;
  * accepted lines are marked [LineSource.AUTO] so they stay distinguishable from what people added.
+ *
+ * [GenerateMode.DUE] is the same list as the "בניית רשימה לשבוע" card ([SuggestionEngine.forNextTrip]), preselected;
+ * items whose rhythm is still a guess are shown below it, not preselected. A household with no history yet gets a
+ * first list from its size ([TripSizer.starter]). Amounts come from [TripSizer], as everywhere else.
  */
 object ListGenerator {
     fun propose(
@@ -74,19 +80,33 @@ object ListGenerator {
         zone: ZoneId = ZoneId.systemDefault(),
         /** Items the household recently turned down: still shown (they asked for the whole list), but not preselected. */
         suppressed: Set<String> = emptySet(),
+        /** Of [suppressed], the ones hidden because the household has them at home ("יש לי בבית"). */
+        atHome: Set<String> = emptySet(),
+        /** Per item, how often its suggestion was turned down lately (see [SuggestionEngine.rejectionWeight]). */
+        rejections: Map<String, Int> = emptyMap(),
+        /** The size of the household ([HouseholdSize.people]); 0 when unknown. */
+        people: Double = 0.0,
     ): List<GeneratedItem> {
         val onList = current.filter { it.status == LineStatus.NEEDED }.map { it.itemId }.toSet()
+        val sizer = TripSizer(stats, people)
+        val horizon = horizonDays.toInt()
         val proposed = when (mode) {
-            GenerateMode.DUE -> stats.mapNotNull { s ->
-                val due = s.nextDue ?: return@mapNotNull null
-                val cadence = s.cadenceDays ?: return@mapNotNull null
-                if (s.confidence <= 0.0 || due.isAfter(today.plusDays(horizonDays))) return@mapNotNull null
-                val ratio = s.dueRatio(today) ?: 0.0
-                GeneratedItem(
-                    s.identity, s.typicalQuantity,
-                    SuggestionEngine.runningLowReason(cadence, s.daysSinceLast(today), s.lastPurchaseEstimated),
-                    preselected = ratio >= 0.6 || s.classification == Classification.ROUTINE,
-                )
+            GenerateMode.DUE -> {
+                val week = SuggestionEngine().forNextTrip(stats, onList, emptyList(), today, horizon, rejections = rejections)
+                val weekIds = week.map { it.itemId }.toSet()
+                val unsure = stats.mapNotNull { s ->
+                    if (s.itemId in weekIds) return@mapNotNull null
+                    val due = s.nextDue ?: return@mapNotNull null
+                    val cadence = s.cadenceDays ?: return@mapNotNull null
+                    if (s.confidence <= 0.0 || due.isAfter(today.plusDays(horizonDays))) return@mapNotNull null
+                    GeneratedItem(
+                        s.identity, s.typicalQuantity,
+                        SuggestionEngine.runningLowReason(cadence, s.daysSinceLast(today), s.lastPurchaseEstimated) + " · קצב לא קבוע",
+                        preselected = false,
+                    )
+                }
+                val starter = if (stats.isEmpty()) sizer.starter(onList).map { GeneratedItem(it.identity, it.quantity, it.reason) } else emptyList()
+                week.map { GeneratedItem(it.identity, it.quantity, it.reason) } + unsure + starter
             }
             GenerateMode.ROUTINE -> stats.filter { it.classification == Classification.ROUTINE }.map { s ->
                 GeneratedItem(s.identity, s.typicalQuantity, "קבוע · נקנה ${s.purchaseDays} פעמים")
@@ -98,13 +118,26 @@ object ListGenerator {
                 else purchases.filter { day(it) == last }
                     .sortedBy { it.boughtAtMillis }
                     .distinctBy { it.itemId }
-                    .map { p -> GeneratedItem(p.identity, p.quantity, "נקנה בקנייה הקודמת") }
+                    .map { p -> GeneratedItem(p.identity, p.quantity?.let(TripSizer::wholeCount), "נקנה בקנייה הקודמת") }
             }
         }
         return proposed
             .filter { it.identity.id !in onList }
             .distinctBy { it.identity.id }
-            .map { if (it.identity.id in suppressed) it.copy(preselected = false, reason = it.reason + " · דחיתם לאחרונה") else it }
+            .map { item ->
+                when (mode) {
+                    GenerateMode.DUE -> sizer.size(item, horizon)
+                    GenerateMode.ROUTINE -> sizer.size(item)
+                    GenerateMode.LAST_TRIP -> item // what was really bought last time
+                }
+            }
+            .map {
+                when (it.identity.id) {
+                    in atHome -> it.copy(preselected = false, reason = it.reason + " · יש בבית")
+                    in suppressed -> it.copy(preselected = false, reason = it.reason + " · דחיתם לאחרונה")
+                    else -> it
+                }
+            }
             .sortedWith(compareBy({ it.identity.category.order }, { it.identity.displayName }))
     }
 }
