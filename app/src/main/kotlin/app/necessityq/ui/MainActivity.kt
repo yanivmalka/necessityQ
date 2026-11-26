@@ -496,7 +496,7 @@ private fun Root(vm: AppViewModel) {
                             else "כדי להצטרף לבית אחר צריך קודם לצאת מ\"${household.name}\" (בלשונית הבית, בבני הבית ושיתוף, יש \"יציאה מהבית\"), ואז לפתוח שוב את הקישור.",
                         )
                     },
-                    confirmButton = { androidx.compose.material3.TextButton(onClick = vm::consumeJoin) { Text("הבנתי") } },
+                    confirmButton = { androidx.compose.material3.TextButton(onClick = vm::consumeJoin) { Text("סגירה") } },
                 )
             }
 

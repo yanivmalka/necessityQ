@@ -855,7 +855,7 @@ fun RecipeAddTile(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    OutlinedButton(onClick = onDismiss, modifier = Modifier.height(56.dp), shape = NqShapes.Field) { Text("חזרה") }
+                    OutlinedButton(onClick = onDismiss, modifier = Modifier.height(56.dp), shape = NqShapes.Field) { Text("ביטול") }
                     Button(
                         onClick = { onConfirm(chosen.toSet(), variants.toMap(), packs.toMap()) },
                         enabled = chosen.isNotEmpty(),
@@ -973,7 +973,7 @@ fun RecipeEditScreen(vm: AppViewModel, dishId: String?, onBack: () -> Unit, onSa
                 shape = NqShapes.Field,
                 modifier = Modifier.fillMaxWidth(),
             )
-            Button(onClick = ::save, enabled = name.isNotBlank() && !nameTaken, modifier = Modifier.fillMaxWidth()) { Text("שמירה") }
+            // "שמירה" is only in the top bar (one place, as in the family member's profile)
             Spacer(Modifier.height(24.dp))
         }
     }
