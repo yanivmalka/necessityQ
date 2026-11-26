@@ -221,7 +221,7 @@ fun HistoryScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
     val zone = ZoneId.systemDefault()
 
     Column(modifier.fillMaxSize()) {
-        TopAppBar(navigationIcon = { BackNavButton() }, title = { Text("היסטוריה והרגלי קנייה") })
+        TopAppBar(navigationIcon = { BackNavButton() }, title = { Text("היסטוריה") })
         val historyList = androidx.compose.foundation.lazy.rememberLazyListState()
         LazyColumn(Modifier.fillMaxSize().fadingEdges(historyList, horizontal = false), state = historyList) {
             if (stats.isEmpty()) {

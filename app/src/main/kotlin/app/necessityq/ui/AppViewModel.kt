@@ -745,7 +745,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun acceptAdvice(s: app.necessityq.domain.FeatureSuggestion, openPrices: () -> Unit) {
         prefs.advisor = prefs.advisor.accepted(System.currentTimeMillis())
         applyAdvice(s.id, openPrices)
-        _messages.tryEmit("אפשר לשנות את זה בכל זמן ב\"הבית\" ← \"הגדרות\" ← \"יכולות\"")
+        _messages.tryEmit("אפשר לשנות את זה בכל זמן בלשונית הבית, בהגדרות, ביכולות")
     }
 
     /** Does what the suggestion [id] offers (also from the list of declined suggestions). */

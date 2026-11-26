@@ -111,6 +111,7 @@ fun AccountScreen(vm: AppViewModel, account: Account, modifier: Modifier = Modif
     if (vm.supportsAccounts) AccountCard(vm, account)
     else Text("גרסה זו פועלת במצב מכשיר יחיד, ללא חשבון.")
     PermissionsCard()
+    SampleDataCard(vm)
     // "הדגמת התחלה": only for the accounts in FirstRunDemo
     if (vm.canReplayFirstRun(account)) {
         var confirm by remember { mutableStateOf(false) }
@@ -135,6 +136,41 @@ fun AccountScreen(vm: AppViewModel, account: Account, modifier: Modifier = Modif
                 dismissButton = { TextButton(onClick = { confirm = false }) { Text("ביטול") } },
             )
         }
+    }
+}
+
+/** "נתוני דוגמה": the one place that fills the household with sample purchases and sample recipes. */
+@Composable
+private fun SampleDataCard(vm: AppViewModel) {
+    var confirmSample by remember { mutableStateOf(false) }
+    val meals by vm.meals.collectAsStateWithLifecycle()
+    SettingsCard(
+        "נתוני דוגמה",
+        "למלא את הבית בנתונים לדוגמה כדי לראות איך האפליקציה נראית כשהיא כבר מכירה את הבית. טעינה חוזרת לא יוצרת כפילויות.",
+    ) {
+        OutlinedButton(onClick = { confirmSample = true }, modifier = Modifier.padding(horizontal = 4.dp)) { Text("טעינת קניות לדוגמה") }
+        if (meals.dishes.isEmpty()) {
+            OutlinedButton(
+                onClick = { vm.updateMeals { it.copy(dishes = app.necessityq.domain.MealPlanner.sampleDishes) } },
+                modifier = Modifier.padding(horizontal = 4.dp),
+            ) { Text("טעינת מתכונים לדוגמה") }
+        }
+    }
+    // sample data changes the household's history for good, so it is explained before anything is loaded
+    if (confirmSample) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmSample = false },
+            title = { Text("לטעון נתוני דוגמה?") },
+            text = {
+                Text(
+                    "ייטענו לבית היסטוריית קניות לדוגמה (מה שסומן שם כ\"נקנה\") ופריטים לרשימה הנוכחית (השאר). " +
+                        "ההיסטוריה הזאת משפיעה מעכשיו על ההצעות (\"כנראה נגמר בקרוב\", \"קונים בדרך כלל\") ועל הסטטיסטיקה, " +
+                        "כאילו הבית קנה את המוצרים האלה. טעינה חוזרת לא יוצרת כפילויות.",
+                )
+            },
+            confirmButton = { TextButton(onClick = { confirmSample = false; vm.importSample() }) { Text("טעינה") } },
+            dismissButton = { TextButton(onClick = { confirmSample = false }) { Text("ביטול") } },
+        )
     }
 }
 
@@ -175,7 +211,7 @@ fun SettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier, initialTab: 
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         TopAppBar(
             navigationIcon = { BackNavButton() },
-            title = { Text("הגדרות", fontWeight = FontWeight.ExtraBold) },
+            title = { Text("הגדרות · ${SettingsTab.entries[pager.targetPage].label}", fontWeight = FontWeight.ExtraBold) },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
         )
         Box(Modifier.padding(horizontal = 16.dp)) {

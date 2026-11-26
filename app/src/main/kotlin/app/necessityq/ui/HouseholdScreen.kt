@@ -98,7 +98,6 @@ fun HouseholdScreen(
     val members by vm.members.collectAsStateWithLifecycle()
     val isOwner = household.isOwner(userId)
     var confirmLeave by remember { mutableStateOf(false) }
-    var confirmSample by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
     var memberToRemove by remember { mutableStateOf<Member?>(null) }
     var confirmNewCode by remember { mutableStateOf(false) }
@@ -185,38 +184,11 @@ fun HouseholdScreen(
                 }
             }
 
-            HorizontalDivider()
-            SectionTitle("נתוני דוגמה")
-            Text(
-                "טוען לבית את היסטוריית הקניות מ-Microsoft To Do: מה שסומן כ\"נקנה\" הופך להיסטוריה, והשאר לרשימה הנוכחית. אפשר ללחוץ שוב בלי ליצור כפילויות.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Button(onClick = { confirmSample = true }) { Text("טעינת נתוני דוגמה") }
-
             if (vm.isShared) {
                 Spacer(Modifier.height(12.dp))
                 OutlinedButton(onClick = { confirmLeave = true }) { Text("יציאה מהבית") }
             }
         }
-    }
-
-    // sample data changes the household's history for good, so it is explained before anything is loaded
-    if (confirmSample) {
-        AlertDialog(
-            onDismissRequest = { confirmSample = false },
-            title = { Text("לטעון נתוני דוגמה?") },
-            text = {
-                Text(
-                    "ייטענו לבית היסטוריית קניות לדוגמה (מה שסומן שם כ\"נקנה\") ופריטים לרשימה הנוכחית (השאר). " +
-                        "ההיסטוריה הזאת משפיעה מעכשיו על ההצעות (\"כנראה נגמר בקרוב\", \"קונים בדרך כלל\") ועל הסטטיסטיקה, " +
-                        "כאילו הבית קנה את המוצרים האלה. טעינה חוזרת לא יוצרת כפילויות.",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { confirmSample = false; vm.importSample() }) { Text("טעינה") }
-            },
-            dismissButton = { TextButton(onClick = { confirmSample = false }) { Text("ביטול") } },
-        )
     }
 
     if (confirmLeave) {
