@@ -148,14 +148,45 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         launchSafe { container.service.add(hid, uid, item, quantity, LineSource.MANUAL, lines); _added.tryEmit(item.id) }
     }
 
+    /** A suggestion with no amount of its own gets one from the size of the household (family profiles). */
+    private fun sized(s: Suggestion): Suggestion {
+        val people = app.necessityq.domain.HouseholdSize.people(meals.value.members, java.time.LocalDate.now())
+        val stats = snapshot.value?.stats.orEmpty()
+        return app.necessityq.domain.SmartQuantities.fill(
+            s, stats[s.itemId], people, app.necessityq.domain.SmartQuantities.calibration(stats.values, people),
+        )
+    }
+
     fun accept(suggestion: Suggestion) {
         val (hid, uid, lines) = ctx() ?: return
-        launchSafe { container.service.acceptSuggestion(hid, uid, suggestion, lines); _added.tryEmit(suggestion.itemId) }
+        val sized = sized(suggestion)
+        launchSafe { container.service.acceptSuggestion(hid, uid, sized, lines); _added.tryEmit(suggestion.itemId) }
+    }
+
+    /** "בניית רשימה לשבוע": puts everything that runs out before the next trip on the list, in one tap. */
+    fun addTripList(items: List<Suggestion>) {
+        val (hid, uid, lines) = ctx() ?: return
+        launchSafe {
+            val n = container.service.addTripList(hid, uid, items.map(::sized), lines)
+            _messages.tryEmit(if (n == 1) "נוסף מוצר אחד לרשימה" else "נוספו $n מוצרים לרשימה")
+        }
+    }
+
+    fun haveAtHome(suggestion: Suggestion) {
+        val (hid, _, _) = ctx() ?: return
+        launchSafe {
+            container.service.haveAtHome(
+                hid, suggestion, snapshot.value?.stats?.get(suggestion.itemId), snapshot.value?.rejections?.get(suggestion.itemId) ?: 0,
+            )
+        }
+        _messages.tryEmit("${suggestion.identity.displayName}: יש בבית, לא מוצע בינתיים")
     }
 
     fun dismiss(suggestion: Suggestion) {
         val (hid, _, _) = ctx() ?: return
-        launchSafe { container.service.dismissSuggestion(hid, suggestion, snapshot.value?.stats?.get(suggestion.itemId)) }
+        launchSafe { container.service.dismissSuggestion(
+            hid, suggestion, snapshot.value?.stats?.get(suggestion.itemId), snapshot.value?.rejections?.get(suggestion.itemId) ?: 0,
+        ) }
     }
 
     fun checkOff(line: ListLine) {

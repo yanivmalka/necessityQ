@@ -129,6 +129,120 @@ class StatsAndSuggestionsTest {
         assertEquals("לחם", result.frequent.first().identity.name)
     }
 
+    // ---- the list for the next trip (0.5) ----
+
+    @Test fun `trip list holds what runs out before the next trip, from the real rhythm`() {
+        // milk every 5 days (last bought day 25, due day 30), flour every 40 days (last day 40, due day 80)
+        val purchases = every("חלב 3%", 5, 6) + every("קמח", 40, 3)
+        val today = start.plusDays(27)
+        val stats = engine.compute(purchases, today).values
+        val trip = SuggestionEngine().forNextTrip(stats, emptySet(), emptyList(), today)
+        assertEquals(listOf("חלב 3%"), trip.map { it.identity.displayName })
+        assertEquals(SuggestionKind.RUNNING_LOW, trip.single().kind)
+    }
+
+    @Test fun `a longer horizon brings in slower items`() {
+        val purchases = every("חלב 3%", 5, 6) + every("קמח", 10, 4)
+        val today = start.plusDays(30)
+        val stats = engine.compute(purchases, today).values
+        val week = SuggestionEngine().forNextTrip(stats, emptySet(), emptyList(), today, horizonDays = 3)
+        val fortnight = SuggestionEngine().forNextTrip(stats, emptySet(), emptyList(), today, horizonDays = 14)
+        assertTrue(fortnight.size >= week.size)
+        assertEquals(setOf("חלב 3%", "קמח"), fortnight.map { it.identity.displayName }.toSet())
+    }
+
+    @Test fun `trip list skips items on the list, dismissed items, one-offs and guesses`() {
+        val purchases = every("חלב 3%", 5, 6) + every("לחם", 3, 8) + purchase("דבש", start.plusDays(20)) +
+            every("חמאה", 9, 2) // one interval: a guess
+        val today = start.plusDays(29)
+        val stats = engine.compute(purchases, today).values
+        val milk = ItemIdentity.fromText("חלב 3%").id
+        val bread = ItemIdentity.fromText("לחם").id
+        val all = SuggestionEngine().forNextTrip(stats, emptySet(), emptyList(), today).map { it.itemId }
+        assertTrue(milk in all && bread in all)
+        assertTrue(ItemIdentity.fromText("דבש").id !in all)
+        assertTrue(ItemIdentity.fromText("חמאה").id !in all)
+        val onList = SuggestionEngine().forNextTrip(stats, setOf(milk), emptyList(), today).map { it.itemId }
+        assertTrue(milk !in onList && bread in onList)
+        val dismissed = SuggestionEngine().forNextTrip(stats, emptySet(), listOf(SuggestionSuppression(bread, today.toEpochDay() + 2)), today)
+        assertTrue(dismissed.none { it.itemId == bread } && dismissed.any { it.itemId == milk })
+    }
+
+    @Test fun `the most overdue item comes first and the quantity is the typical purchase`() {
+        val purchases = every("חלב 3%", 5, 6, Quantity.pieces(2)) + every("לחם", 3, 8)
+        val today = start.plusDays(40) // milk due day 30, bread due day 24+3=27... both overdue; bread by more cadences
+        val stats = engine.compute(purchases, today).values
+        val trip = SuggestionEngine().forNextTrip(stats, emptySet(), emptyList(), today)
+        assertEquals("לחם", trip.first().identity.displayName)
+        assertEquals(Quantity.pieces(2), trip.first { it.identity.displayName == "חלב 3%" }.quantity)
+    }
+
+    @Test fun `a rejected suggestion loses weight and is given up after three rejections`() {
+        val today = start.plusDays(29)
+        val stats = engine.compute(every("חלב 3%", 5, 6) + every("לחם", 3, 8), today).values
+        val milk = ItemIdentity.fromText("חלב 3%").id
+        val bread = ItemIdentity.fromText("לחם").id
+        val engine = SuggestionEngine()
+        val plain = engine.forNextTrip(stats, emptySet(), emptyList(), today)
+        val once = engine.forNextTrip(stats, emptySet(), emptyList(), today, rejections = mapOf(milk to 1))
+        assertEquals(plain.first { it.itemId == milk }.score / 2, once.first { it.itemId == milk }.score, 0.0001)
+        assertEquals(plain.first { it.itemId == bread }.score, once.first { it.itemId == bread }.score, 0.0001)
+        val gone = engine.forNextTrip(stats, emptySet(), emptyList(), today, rejections = mapOf(milk to 3))
+        assertTrue(gone.none { it.itemId == milk } && gone.any { it.itemId == bread })
+        assertTrue(engine.suggest(stats, emptySet(), emptyList(), today, mapOf(milk to 3)).runningLow.none { it.itemId == milk })
+    }
+
+    @Test fun `each dismissal doubles how long the suggestion stays hidden`() {
+        val today = start.plusDays(29)
+        val s = engine.compute(every("חלב 3%", 5, 6), today).values.single()
+        val e = SuggestionEngine()
+        assertEquals(today.plusDays(3), e.dismissUntil(s, today))
+        assertEquals(today.plusDays(6), e.dismissUntil(s, today, priorRejections = 1))
+        assertEquals(today.plusDays(12), e.dismissUntil(s, today, priorRejections = 2))
+    }
+
+    @Test fun `deleted suggestions count as rejections, recent ones only`() {
+        val now = 100L * 86_400_000L
+        fun gone(id: String, at: Long, from: LineStatus = LineStatus.NEEDED) =
+            line(id, LineSource.SUGGESTED, LineStatus.REMOVED, removedFrom = from).copy(itemId = "x", removedAtMillis = at)
+        val lines = listOf(gone("1", now - 1000), gone("2", now - 2000), gone("3", 0L), gone("4", now - 3000, LineStatus.BOUGHT))
+        assertEquals(mapOf("x" to 2), SuggestionAccuracy.rejectionsByItem(lines, now - 60L * 86_400_000L))
+    }
+
+    @Test fun `having it at home hides the suggestion for a cadence without counting as a rejection`() {
+        val today = start.plusDays(29)
+        val s = engine.compute(every("חלב 3%", 5, 6), today).values.single()
+        assertEquals(today.plusDays(5), SuggestionEngine().haveAtHomeUntil(s, today))
+        assertEquals(today.plusDays(7), SuggestionEngine().haveAtHomeUntil(null, today))
+        // stored with no rejections: the item keeps its full weight once it is shown again
+        val hidden = SuggestionSuppression(s.itemId, today.toEpochDay() + 5, dismissals = 0)
+        assertTrue(SuggestionEngine().suggest(listOf(s), emptySet(), listOf(hidden), today).runningLow.isEmpty())
+        val later = today.plusDays(5)
+        assertEquals(1.0, SuggestionEngine.rejectionWeight(hidden.dismissals), 0.0)
+        assertTrue(SuggestionEngine().forNextTrip(listOf(s), emptySet(), listOf(hidden), later).isNotEmpty())
+    }
+
+    private fun line(id: String, source: LineSource, status: LineStatus, removedFrom: LineStatus? = null, recipe: String? = null) = ListLine(
+        id = id, itemId = id, name = id, variant = null, category = Category.PRODUCE, quantity = null, note = null,
+        status = status, source = source, addedBy = "u1", addedAtMillis = 0, updatedAtMillis = 0,
+        recipe = recipe, removedFrom = removedFrom,
+    )
+
+    @Test fun `accuracy counts bought, thrown away and waiting suggestions`() {
+        val lines = listOf(
+            line("a", LineSource.SUGGESTED, LineStatus.BOUGHT),
+            line("b", LineSource.QUICK_ADD, LineStatus.REMOVED, removedFrom = LineStatus.BOUGHT), // cleared after buying
+            line("c", LineSource.SUGGESTED, LineStatus.REMOVED, removedFrom = LineStatus.NEEDED), // deleted
+            line("d", LineSource.SUGGESTED, LineStatus.NEEDED),
+            line("e", LineSource.MANUAL, LineStatus.BOUGHT), // typed by a person: not a suggestion
+            line("f", LineSource.SUGGESTED, LineStatus.BOUGHT, recipe = "שקשוקה"), // old menu line
+        )
+        val acc = SuggestionAccuracy.of(lines)
+        assertEquals(SuggestionAccuracy(bought = 2, rejected = 1, open = 1), acc)
+        assertNull(acc.rate()) // too few decided to say
+        assertEquals(2.0 / 3.0, acc.rate(minDecided = 3)!!, 0.001)
+    }
+
     @Test fun `adding an item already on the list merges the quantity`() {
         val line = ListLine(
             id = "l1", itemId = ItemIdentity.fromText("עגבניות").id, name = "עגבניות", variant = null,

@@ -38,9 +38,11 @@ class SuggestionEngine(
         neededItemIds: Set<String>,
         suppressions: List<SuggestionSuppression>,
         today: LocalDate,
+        rejections: Map<String, Int> = emptyMap(),
     ): Result {
         val todayEpoch = today.toEpochDay()
-        val suppressed = suppressions.filter { it.untilEpochDay > todayEpoch }.map { it.itemId }.toSet()
+        val suppressed = suppressions.filter { it.untilEpochDay > todayEpoch }.map { it.itemId }.toSet() +
+            rejections.filterValues { it >= GIVE_UP_AFTER }.keys
         val candidates = stats.filter { it.itemId !in neededItemIds }
 
         val runningLow = candidates
@@ -54,7 +56,7 @@ class SuggestionEngine(
                     identity = s.identity,
                     kind = SuggestionKind.RUNNING_LOW,
                     quantity = s.typicalQuantity,
-                    score = s.confidence * ratio.coerceAtMost(2.0),
+                    score = s.confidence * ratio.coerceAtMost(2.0) * rejectionWeight(rejections[s.itemId]),
                     reason = runningLowReason(cadence, s.daysSinceLast(today), s.lastPurchaseEstimated),
                 )
             }
@@ -80,13 +82,76 @@ class SuggestionEngine(
         return Result(runningLow, frequent)
     }
 
-    /** How long to hide a dismissed suggestion: half its cadence, at least two days. */
-    fun dismissUntil(stats: ItemStats?, today: LocalDate): LocalDate {
-        val days = max(2L, ((stats?.cadenceDays ?: 4.0) / 2.0).roundToLong())
+    /**
+     * The list for the next trip, built from the household's real rhythm and not from defaults: every item with a
+     * measured cadence that will run out before the trip after this one (today + [horizonDays]), most urgent first.
+     * One-off items and items whose rhythm is still a guess ([minConfidence]) are left out, as are items already on
+     * the list or hidden by a dismissal. The quantity is the typical size of a purchase.
+     */
+    fun forNextTrip(
+        stats: Collection<ItemStats>,
+        neededItemIds: Set<String>,
+        suppressions: List<SuggestionSuppression>,
+        today: LocalDate,
+        horizonDays: Int = 7,
+        minConfidence: Double = 0.4,
+        limit: Int = 40,
+        rejections: Map<String, Int> = emptyMap(),
+    ): List<Suggestion> {
+        val todayEpoch = today.toEpochDay()
+        val suppressed = suppressions.filter { it.untilEpochDay > todayEpoch }.map { it.itemId }.toSet() +
+            rejections.filterValues { it >= GIVE_UP_AFTER }.keys
+        val until = today.plusDays(horizonDays.toLong())
+        return stats
+            .filter { it.itemId !in neededItemIds && it.itemId !in suppressed }
+            .filter { it.classification != Classification.ONE_OFF && it.confidence >= minConfidence }
+            .mapNotNull { s ->
+                val cadence = s.cadenceDays ?: return@mapNotNull null
+                val due = s.nextDue ?: return@mapNotNull null
+                if (!due.isBefore(until)) return@mapNotNull null
+                val overdue = (today.toEpochDay() - due.toEpochDay()).toDouble() / cadence
+                Suggestion(
+                    itemId = s.itemId,
+                    identity = s.identity,
+                    kind = SuggestionKind.RUNNING_LOW,
+                    quantity = s.typicalQuantity,
+                    // overdue items first, then the ones due soonest; confidence breaks ties
+                    score = (overdue.coerceIn(-1.0, 2.0) + s.confidence) * rejectionWeight(rejections[s.itemId]),
+                    reason = runningLowReason(cadence, s.daysSinceLast(today), s.lastPurchaseEstimated),
+                )
+            }
+            .sortedByDescending { it.score }
+            .take(limit)
+    }
+
+    /**
+     * How long to hide a dismissed suggestion: half its cadence, at least two days, and twice as long for every
+     * earlier rejection of the same item ([priorRejections]), so a suggestion that keeps being thrown away fades out.
+     */
+    fun dismissUntil(stats: ItemStats?, today: LocalDate, priorRejections: Int = 0): LocalDate {
+        val base = max(2L, ((stats?.cadenceDays ?: 4.0) / 2.0).roundToLong())
+        val days = base * (1L shl priorRejections.coerceIn(0, 4))
         return today.plusDays(days)
     }
 
+    /**
+     * "יש לי בבית": the household has it, so it is not suggested for a whole cadence (at least three days).
+     * Unlike a dismissal this is no rejection: the suggestion was right about the item, only the stock is not out.
+     */
+    fun haveAtHomeUntil(stats: ItemStats?, today: LocalDate): LocalDate =
+        today.plusDays(max(3L, (stats?.cadenceDays ?: 7.0).roundToLong()))
+
     companion object {
+        /** Rejections (dismissed, or deleted before it was bought) after which an item is no longer suggested. */
+        const val GIVE_UP_AFTER = 3
+
+        /** One rejection halves an item's score, two quarter it; the third hides it ([GIVE_UP_AFTER]). */
+        fun rejectionWeight(rejections: Int?): Double = when (rejections ?: 0) {
+            0 -> 1.0
+            1 -> 0.5
+            else -> 0.25
+        }
+
         /** [estimated]: the last purchase is inferred, because later trips were not documented. */
         fun runningLowReason(cadenceDays: Double, daysSince: Long, estimated: Boolean = false): String {
             val every = cadenceDays.roundToInt().coerceAtLeast(1)
@@ -104,6 +169,47 @@ class SuggestionEngine(
                 else -> "נקנה לפני $daysSince ימים"
             }
             return if (estimated) "בדרך כלל $cadenceText · כנראה $sinceText (לא תועד)" else "בדרך כלל $cadenceText · $sinceText"
+        }
+    }
+}
+
+/**
+ * How well the suggestions work: of the lines that came from a suggestion ("כנראה נגמר", "קונים בדרך כלל", the
+ * week's list), how many were bought, how many the household threw away, and how many are still waiting.
+ * Read from the lines themselves, so it needs no storage of its own. A line the household cleared after buying it
+ * (removed from BOUGHT) counts as bought; one deleted before it was bought counts as rejected.
+ */
+data class SuggestionAccuracy(val bought: Int, val rejected: Int, val open: Int) {
+    val decided: Int get() = bought + rejected
+    val total: Int get() = decided + open
+
+    /** Share of decided suggestions that were bought (0..1), or null until at least [minDecided] were decided. */
+    fun rate(minDecided: Int = 5): Double? = if (decided < minDecided) null else bought.toDouble() / decided
+
+    companion object {
+        /**
+         * Suggested lines that were deleted before they were bought, counted per item, since [sinceMillis]
+         * (older ones are forgiven, so a changed habit can bring a suggestion back).
+         */
+        fun rejectionsByItem(lines: Collection<ListLine>, sinceMillis: Long): Map<String, Int> =
+            lines.filter {
+                (it.source == LineSource.SUGGESTED || it.source == LineSource.QUICK_ADD) && it.recipe == null &&
+                    it.status == LineStatus.REMOVED && it.removedFrom != LineStatus.BOUGHT &&
+                    (it.removedAtMillis ?: 0L) >= sinceMillis
+            }.groupingBy { it.itemId }.eachCount()
+
+        fun of(lines: Collection<ListLine>): SuggestionAccuracy {
+            var bought = 0; var rejected = 0; var open = 0
+            for (l in lines) {
+                if (l.source != LineSource.SUGGESTED && l.source != LineSource.QUICK_ADD) continue
+                if (l.recipe != null) continue // older versions tagged menu lines as suggestions
+                when (l.status) {
+                    LineStatus.BOUGHT -> bought++
+                    LineStatus.NEEDED -> open++
+                    LineStatus.REMOVED -> if (l.removedFrom == LineStatus.BOUGHT) bought++ else rejected++
+                }
+            }
+            return SuggestionAccuracy(bought, rejected, open)
         }
     }
 }

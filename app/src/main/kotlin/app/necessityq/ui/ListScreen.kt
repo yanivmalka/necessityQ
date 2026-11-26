@@ -25,6 +25,7 @@ import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -730,6 +731,12 @@ fun ListScreen(
                 }
             }
 
+            if (showLow && snap.tripList.size >= 3) {
+                item(key = "trip") {
+                    TripListCard(snap.tripList.size, onBuild = { vm.addTripList(snap.tripList) })
+                }
+            }
+
             if (showLow && snap.runningLow.isNotEmpty()) {
                 item(key = "low") {
                     if (!lowExpanded) {
@@ -757,6 +764,7 @@ fun ListScreen(
                                     info = recommendationInfo(s, snap.stats[s.itemId], favorites, display, today),
                                     onAdd = { vm.accept(s) },
                                     onDismiss = { vm.dismiss(s) },
+                                    onHaveAtHome = { vm.haveAtHome(s) },
                                 )
                             }
                         }
@@ -2339,6 +2347,33 @@ private fun RemindersCard(
     }
 }
 
+/** One tap builds the week's list from the household's own rhythm: what will run out before the next trip. */
+@Composable
+private fun TripListCard(count: Int, onBuild: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clip(NqShapes.Panel)
+            .background(MaterialTheme.colorScheme.primaryContainer)
+            .clickable(role = Role.Button, onClickLabel = "הוספת כל המוצרים שיאזלו עד הקנייה הבאה", onClick = onBuild)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(
+            "בניית רשימה לשבוע ($count מוצרים לפי הקצב שלכם) · ",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        Text(
+            "הוספה ›",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+        )
+    }
+}
+
 /** "כנראה נגמר בקרוב" folded into one line: how many, and a tap opens the cards to add them. */
 @Composable
 private fun RunningLowLine(count: Int, onOpen: () -> Unit) {
@@ -2408,7 +2443,7 @@ private fun SuggestionHeader(
  * and ✕ as its own full-size target so dismissing never adds by mistake.
  */
 @Composable
-private fun RunningLowCard(s: Suggestion, info: String, onAdd: () -> Unit, onDismiss: () -> Unit) {
+private fun RunningLowCard(s: Suggestion, info: String, onAdd: () -> Unit, onDismiss: () -> Unit, onHaveAtHome: () -> Unit) {
     val name = s.identity.displayName
     Column(
         Modifier.width(196.dp).clip(NqShapes.Tile).background(MaterialTheme.colorScheme.surface)
@@ -2449,6 +2484,14 @@ private fun RunningLowCard(s: Suggestion, info: String, onAdd: () -> Unit, onDis
                 Spacer(Modifier.width(6.dp))
                 Text("לרשימה", color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.SemiBold)
             }
+            Text(
+                "יש לי בבית",
+                Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable(role = Role.Button, onClickLabel = "יש בבית: $name", onClick = onHaveAtHome)
+                    .wrapContentHeight(Alignment.CenterVertically),
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
