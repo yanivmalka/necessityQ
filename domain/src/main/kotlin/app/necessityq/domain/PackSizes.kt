@@ -70,31 +70,41 @@ object PackSizes {
     /** The head-word keys, longest first, so "שיבולת שועל" is tried before "שיבולת". */
     private val headKeys: List<String> = rules.filterValues { it.head }.keys.sortedByDescending { it.length }
 
-    private fun ruleFor(name: String): Rule? {
+    /** The rule for the item and the key it is stored under; the item's kind first ("סוכר חום" is not "סוכר"). */
+    private fun ruleFor(name: String, variant: String? = null): Pair<String, Rule>? {
+        if (!variant.isNullOrBlank()) rules[HebrewText.matchKey("$name $variant")]?.let { return HebrewText.matchKey("$name $variant") to it }
         val canonical = HebrewText.matchKey(Catalog.lookup(name)?.name ?: name)
-        rules[canonical]?.let { return it }
+        rules[canonical]?.let { return canonical to it }
         val key = HebrewText.matchKey(name)
-        rules[key]?.let { return it }
-        return headKeys.firstOrNull { key == it || key.startsWith("$it ") }?.let { rules[it] }
+        rules[key]?.let { return key to it }
+        return headKeys.firstOrNull { key == it || key.startsWith("$it ") }?.let { it to rules.getValue(it) }
     }
 
     /** True when [name] is sold in fixed packs (and so [toBuy] may change its amount). */
-    fun isPackaged(name: String): Boolean = ruleFor(name) != null
+    fun isPackaged(name: String, variant: String? = null): Boolean = ruleFor(name, variant) != null
+
+    /** What a household's chosen pack size is stored under ([MealData.packs]); null when the item has no pack sizes. */
+    fun keyFor(name: String, variant: String? = null): String? = ruleFor(name, variant)?.first
+
+    /** The pack sizes the item is sold in, smallest first; empty when it has none. */
+    fun sizesFor(name: String, variant: String? = null): List<Quantity> = ruleFor(name, variant)?.second?.let { rule ->
+        rule.sizes.sorted().map { Quantity.fromBase(it.toDouble(), rule.dimension) }
+    }.orEmpty()
 
     /** The smallest pack size of the item in the base unit, or null when it has no pack sizes. */
-    fun smallestPack(name: String): Quantity? = ruleFor(name)?.let { rule ->
-        rule.sizes.minOrNull()?.let { Quantity.fromBase(it.toDouble(), rule.dimension) }
-    }
+    fun smallestPack(name: String, variant: String? = null): Quantity? = sizesFor(name, variant).firstOrNull()
 
     /**
      * What to buy for [need] of [name]: the smallest total of packs that covers it (fewest packs on a tie).
+     * [preferred]: the one pack size the household buys (a base amount, one of the item's sizes); null = any size.
      * The need itself when the item has no pack sizes, or is measured in another dimension than its packs.
      */
-    fun toBuy(name: String, need: Quantity?): Quantity? {
+    fun toBuy(name: String, need: Quantity?, variant: String? = null, preferred: Long? = null): Quantity? {
         need ?: return null
-        val rule = ruleFor(name) ?: return need
+        val rule = ruleFor(name, variant)?.second ?: return need
         if (rule.dimension != need.dimension) return need
-        val total = cover(need.baseAmount, rule.sizes)
+        val sizes = if (preferred != null && preferred in rule.sizes) listOf(preferred) else rule.sizes
+        val total = cover(need.baseAmount, sizes)
         return if (rule.dimension == Dimension.COUNT) Quantity(total.toDouble(), if (need.unit == QuantityUnit.PACKAGE) QuantityUnit.PACKAGE else QuantityUnit.PIECE)
         else Quantity.fromBase(total.toDouble(), rule.dimension)
     }

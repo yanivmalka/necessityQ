@@ -81,6 +81,8 @@ data class Dish(
     val listServings: Int? = null,
     /** Ingredients (item ids) left out when the recipe went on the list, so changing servings does not add them. */
     val listSkip: Set<String> = emptySet(),
+    /** What the household chose the last time the recipe was put on the list; null = never confirmed. */
+    val listMemory: ListMemory? = null,
 ) {
     val plannedServings: Int get() = cookServings ?: servings
 
@@ -88,6 +90,19 @@ data class Dish(
         const val DEFAULT_SERVINGS = 4
     }
 }
+
+/**
+ * What was confirmed when a recipe first went on the list, so the next time it goes on with the same products.
+ * Keys are the ingredient's base id ([ScaledIngredient.baseId]): the item as the recipe line names it.
+ */
+data class ListMemory(
+    /** The kind chosen for an ingredient: baseId → "מלא", "3%", "בסמטי"… */
+    val variants: Map<String, String> = emptyMap(),
+    /** Ingredients that were offered (so ones added to the recipe later can be told apart). */
+    val known: Set<String> = emptySet(),
+    /** Offered ingredients that were left off the list. */
+    val skipped: Set<String> = emptySet(),
+)
 
 enum class MealSlot(val label: String) { BREAKFAST("בוקר"), LUNCH("צהריים"), DINNER("ערב"), SHABBAT("שבת") }
 
@@ -151,12 +166,25 @@ data class MealData(
     val pantry: Set<String> = emptySet(),
     /** Item ids the household said it does need to buy, although recipes assume it is at home ([Staples]). */
     val buy: Set<String> = emptySet(),
+    /** The pack size the household buys, per item ([PackSizes.keyFor] → size in grams / ml / pieces); none = whatever fits. */
+    val packs: Map<String, Long> = emptyMap(),
 ) {
     /** Left off the list: marked "יש בבית", or a staple the household has not said it needs ([Staples]). */
-    fun isAtHome(ingredient: ScaledIngredient): Boolean = isAtHome(ingredient.item, ingredient.quantity)
+    fun isAtHome(ingredient: ScaledIngredient): Boolean = isAtHome(ingredient.base, ingredient.quantity)
 
     fun isAtHome(item: ItemIdentity, quantity: Quantity?): Boolean =
         item.id in pantry || (item.id !in buy && Staples.assumedAtHome(item, quantity))
+
+    /**
+     * Whether [ingredient] of [dish] stays off the list when the recipe is put on it: what was decided the last time
+     * for ingredients that were offered then, otherwise whether it is at home.
+     */
+    fun leavesOut(dish: Dish, ingredient: ScaledIngredient): Boolean {
+        val memory = dish.listMemory
+        return if (memory != null && ingredient.baseId in memory.known) ingredient.baseId in memory.skipped else isAtHome(ingredient)
+    }
+
+    fun withPack(key: String, size: Long?): MealData = copy(packs = if (size == null) packs - key else packs + (key to size))
 
     fun rating(memberId: String, dishId: String): Int? = ratings[memberId]?.get(dishId)
 
@@ -329,7 +357,7 @@ object MealPlanner {
                 byId[meal.dishId]?.let { dish -> dish to (meal.servings ?: dish.plannedServings) }
             }
         }.flatMap { (dish, servings) ->
-            Recipes.scaled(dish, servings).filterNot { data.isAtHome(it) }.map { it to dish.name }
+            Recipes.scaled(dish, servings).filterNot { data.leavesOut(dish, it) }.map { it to dish.name }
         }
     }
 
@@ -354,7 +382,15 @@ object MealPlanner {
 }
 
 /** An ingredient after scaling: what goes on the list. */
-data class ScaledIngredient(val item: ItemIdentity, val quantity: Quantity?)
+data class ScaledIngredient(
+    /** What goes on the list: the item with the kind the household chose ([ListMemory.variants]), if any. */
+    val item: ItemIdentity,
+    val quantity: Quantity?,
+    /** The item as the recipe line names it: what "at home", "left off" and the remembered choices are keyed by. */
+    val base: ItemIdentity = item,
+) {
+    val baseId: String get() = base.id
+}
 
 /** Recipe arithmetic: parse ingredient lines and scale them to a number of servings. */
 object Recipes {
@@ -366,12 +402,17 @@ object Recipes {
     /** The dish's ingredients for [servings] (the recipe's own amounts × servings / yield), without the item ids in [skip]. */
     fun scaled(dish: Dish, servings: Int, skip: Set<String> = emptySet()): List<ScaledIngredient> {
         val factor = servings.toDouble() / dish.servings.coerceAtLeast(1)
+        val variants = dish.listMemory?.variants.orEmpty()
         return dish.ingredients.mapNotNull { text ->
             val parsed = parse(text) ?: return@mapNotNull null
             if (parsed.item.id in skip) return@mapNotNull null
-            ScaledIngredient(parsed.item, parsed.quantity?.let { scale(it, factor) })
-        }.distinctBy { it.item.id }
+            ScaledIngredient(listItem(parsed.item, variants), parsed.quantity?.let { scale(it, factor) }, parsed.item)
+        }.distinctBy { it.baseId }
     }
+
+    /** [item] with the kind chosen for it in [variants] (keyed by the item's own id), if any. */
+    fun listItem(item: ItemIdentity, variants: Map<String, String>): ItemIdentity =
+        variants[item.id]?.takeIf { item.variant == null }?.let { item.copy(variant = it) } ?: item
 
     /**
      * The method split into steps: one per non-empty line, without numbering the user typed
@@ -607,6 +648,7 @@ object RecipeListPreview {
     enum class Kind { NEW, MERGE, AT_HOME }
 
     data class Row(
+        /** What would go on the list (with the chosen kind). */
         val item: ItemIdentity,
         /** The recipe's amount for the servings. */
         val quantity: Quantity?,
@@ -614,14 +656,18 @@ object RecipeListPreview {
         /** For [Kind.MERGE]: what the list has now, and will have after. */
         val current: Quantity? = null,
         val after: Quantity? = null,
-    )
+        /** The item as the recipe line names it (before a kind is chosen). */
+        val base: ItemIdentity = item,
+    ) {
+        val baseId: String get() = base.id
+    }
 
     fun of(lines: List<ListLine>, dish: Dish, servings: Int, pantry: Set<String>, buy: Set<String> = emptySet()): List<Row> =
         Recipes.scaled(dish, servings).map { ing ->
             val open = lines.firstOrNull { it.status == LineStatus.NEEDED && it.itemId == ing.item.id }
             when {
-                ing.item.id in pantry || (ing.item.id !in buy && Staples.assumedAtHome(ing.item, ing.quantity)) ->
-                    Row(ing.item, ing.quantity, Kind.AT_HOME)
+                ing.baseId in pantry || (ing.baseId !in buy && Staples.assumedAtHome(ing.base, ing.quantity)) ->
+                    Row(ing.item, ing.quantity, Kind.AT_HOME, base = ing.base)
                 open != null -> {
                     val now = open.quantity
                     val after = when {
@@ -629,9 +675,9 @@ object RecipeListPreview {
                         ing.quantity == null -> now
                         else -> (now + ing.quantity) ?: now
                     }
-                    Row(ing.item, ing.quantity, Kind.MERGE, now, after)
+                    Row(ing.item, ing.quantity, Kind.MERGE, now, after, ing.base)
                 }
-                else -> Row(ing.item, ing.quantity, Kind.NEW)
+                else -> Row(ing.item, ing.quantity, Kind.NEW, base = ing.base)
             }
         }
 }

@@ -6,6 +6,7 @@ import app.necessityq.domain.FamilyMember
 import app.necessityq.domain.Flavor
 import app.necessityq.domain.FlavorPref
 import app.necessityq.domain.Gender
+import app.necessityq.domain.ListMemory
 import app.necessityq.domain.MealData
 import app.necessityq.domain.MealPlan
 import app.necessityq.domain.MealSlot
@@ -41,6 +42,11 @@ object MealJson {
         val flavor: String? = null,
         val listServings: Int? = null,
         val listSkip: List<String> = emptyList(),
+        /** What was confirmed the first time the recipe went on the list ([ListMemory]); false = never. */
+        val hasMemory: Boolean = false,
+        val variants: Map<String, String> = emptyMap(),
+        val known: List<String> = emptyList(),
+        val skipped: List<String> = emptyList(),
     )
     @Serializable private data class P(val day: Int, val slot: String, val dishId: String, val audience: List<String> = emptyList(), val servings: Int? = null)
     @Serializable private data class O(val epochDay: Long, val slot: String, val dishId: String? = null, val audience: List<String> = emptyList(), val servings: Int? = null)
@@ -56,6 +62,7 @@ object MealJson {
         val cooked: List<String> = emptyList(),
         val pantry: List<String> = emptyList(),
         val buy: List<String> = emptyList(),
+        val packs: Map<String, Long> = emptyMap(),
     )
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -79,7 +86,8 @@ object MealJson {
                 M(it.id, it.name, it.avatar, it.birthYear, it.birthMonth, it.gender?.name, it.flavor?.name, it.dislikes, it.linkedUserId)
             },
             dishes = data.dishes.map {
-                D(it.id, it.name, it.ingredients, it.nutritionCode, it.servings, it.cookServings, it.instructions, it.flavor?.name, it.listServings, it.listSkip.toList())
+                D(it.id, it.name, it.ingredients, it.nutritionCode, it.servings, it.cookServings, it.instructions, it.flavor?.name, it.listServings, it.listSkip.toList(),
+                    it.listMemory != null, it.listMemory?.variants.orEmpty(), it.listMemory?.known?.toList().orEmpty(), it.listMemory?.skipped?.toList().orEmpty())
             },
             tastes = data.ratings.mapValues { (_, m) -> m.mapValues { starsToLegacy(it.value) } },
             ratings = data.ratings,
@@ -90,6 +98,7 @@ object MealJson {
             cooked = data.plan.cooked.toList(),
             pantry = data.pantry.toList(),
             buy = data.buy.toList(),
+            packs = data.packs,
         ),
     )
 
@@ -110,6 +119,7 @@ object MealJson {
                 Dish(
                     it.id, it.name, it.ingredients, it.nutritionCode, it.servings.coerceAtLeast(1), it.cookServings?.coerceAtLeast(1),
                     it.instructions, enumOrNull<Flavor>(it.flavor), it.listServings, it.listSkip.toSet(),
+                    if (it.hasMemory) ListMemory(it.variants, it.known.toSet(), it.skipped.toSet()) else null,
                 )
             },
             ratings = ratings,
@@ -126,6 +136,7 @@ object MealJson {
             ),
             pantry = r.pantry.toSet(),
             buy = r.buy.toSet(),
+            packs = r.packs,
         )
     }
 }

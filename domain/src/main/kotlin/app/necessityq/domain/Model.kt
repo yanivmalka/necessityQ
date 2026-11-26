@@ -78,9 +78,11 @@ data class ListLine(
 
     /**
      * What to put in the basket for this line: a recipe's exact need rounded up to what the shop sells
-     * ([PackSizes]); the line's own [quantity] when someone typed it or the item has no pack sizes.
+     * ([PackSizes]), in the pack size the household buys ([packs], see [MealData.packs]); the line's own [quantity]
+     * when someone typed it or the item has no pack sizes.
      */
-    val toBuy: Quantity? get() = if (isFromRecipe || isFromMenu) PackSizes.toBuy(name, quantity) else quantity
+    fun toBuy(packs: Map<String, Long> = emptyMap()): Quantity? =
+        if (isFromRecipe || isFromMenu) PackSizes.toBuy(name, quantity, variant, PackSizes.keyFor(name, variant)?.let(packs::get)) else quantity
 
     /** Generated from past purchases rather than added by a person. */
     val isAuto: Boolean get() = source == LineSource.AUTO
