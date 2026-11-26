@@ -487,11 +487,6 @@ fun ListScreen(
                 }
                 HorizontalDivider()
                 DropdownMenuItem(
-                    text = { Text("הגדרות") },
-                    leadingIcon = { Icon(Icons.Default.Settings, null) },
-                    onClick = { showMore = false; onOpenDisplaySettings() },
-                )
-                DropdownMenuItem(
                     text = { Text("עזרה") },
                     leadingIcon = { Icon(Icons.Default.Help, null) },
                     onClick = { showMore = false; onOpenHelp() },
