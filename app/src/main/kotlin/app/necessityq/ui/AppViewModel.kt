@@ -1187,6 +1187,13 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     /** The primary branch the promotions were matched to the list's items for (the opening screen waits for it). */
     private val promosMatchedFor = MutableStateFlow<String?>(null)
 
+    /**
+     * The primary branch whose price picture of the list's items ([branchItemInfos]) was computed with the list loaded.
+     * Promotions are matched through that picture, so "matched" may only be claimed after it exists: it is computed
+     * after a short pause, and the promotions can arrive before it (then the match is empty and the gifts appear late).
+     */
+    private val promoInfosFor = MutableStateFlow<String?>(null)
+
     private fun loadPromotions(branchId: String) {
         viewModelScope.launch {
             runCatching { container.prices.promotions(branchId) }.getOrNull()?.let { p ->
@@ -1230,7 +1237,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                     bp.branchId to distinct.mapNotNull { line ->
                         app.necessityq.domain.ItemPrices.info(index, line.name, line.variant, preferred[line.itemId])?.let { line.itemId to it }
                     }.toMap()
-                }
+                }.also { if (snapshot.value != null) promoInfosFor.value = primaryBranchId.value }
             }
             .flowOn(kotlinx.coroutines.Dispatchers.Default)
             .catch { emit(emptyMap()) }
@@ -1242,13 +1249,13 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     /** "יש למוצרים אלו מבצעים ב…": promotions on the list's items at the followed branches, biggest saving first. */
     val promoOffers: StateFlow<List<app.necessityq.domain.PromoOffer>> =
-        combine(branchItemInfos, branchPromotions, includeMemberPromos, promosTried) { infos, promos, members, tried -> PromoInputs(infos, promos, members, tried) }
+        combine(branchItemInfos, branchPromotions, includeMemberPromos, promosTried, promoInfosFor) { infos, promos, members, tried, _ -> PromoInputs(infos, promos, members, tried) }
             .mapLatest { (infos, promos, members, tried) ->
                 val lines = snapshot.value?.lines.orEmpty()
                 app.necessityq.domain.PromoOffers.forList(lines, infos, promos, nowLocal(), members).also {
                     // matched to the list's items after the primary branch's promotions arrived: the opening may finish
                     val primary = primaryBranchId.value
-                    if (primary != null && primary in tried && snapshot.value != null) promosMatchedFor.value = primary
+                    if (primary != null && primary in tried && snapshot.value != null && promoInfosFor.value == primary) promosMatchedFor.value = primary
                 }
             }
             .flowOn(kotlinx.coroutines.Dispatchers.Default)

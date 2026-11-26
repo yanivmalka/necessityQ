@@ -82,6 +82,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.necessityq.domain.Dish
+import app.necessityq.domain.DishKind
 import app.necessityq.domain.Flavor
 import app.necessityq.domain.HebrewStem
 import app.necessityq.domain.LineStatus
@@ -199,9 +200,10 @@ fun RecipeScreen(vm: AppViewModel, dishId: String, onBack: () -> Unit, onEdit: (
             Modifier.weight(1f).fadingVerticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            val stars = data.members.mapNotNull { data.rating(it.id, dish.id) }.filter { it > 0 }
+            val stars = if (dish.isKit) emptyList() else data.members.mapNotNull { data.rating(it.id, dish.id) }.filter { it > 0 }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                dish.flavor?.let { InfoPill(it.label) }
+                if (dish.isKit) InfoPill("ערכה")
+                dish.flavor?.takeIf { !dish.isKit }?.let { InfoPill(it.label) }
                 if (stars.isNotEmpty()) InfoPill("★ " + String.format(java.util.Locale.US, "%.1f", stars.average()))
                 if (dish.nutritionCode != null) InfoPill("ממאגר צמרת")
             }
@@ -214,6 +216,7 @@ fun RecipeScreen(vm: AppViewModel, dishId: String, onBack: () -> Unit, onEdit: (
                 recipeYield = dish.servings,
                 familySize = data.members.size,
                 onChange = { servings = it.coerceIn(1, 40) },
+                kit = dish.isKit,
             )
 
             SegmentedTabs(
@@ -256,7 +259,7 @@ fun RecipeScreen(vm: AppViewModel, dishId: String, onBack: () -> Unit, onEdit: (
             }
 
             // ---- family stars ----
-            if (data.members.isNotEmpty()) {
+            if (data.members.isNotEmpty() && !dish.isKit) {
                 DetailCard("מה המשפחה חושבת") {
                     data.members.forEach { m ->
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -282,7 +285,7 @@ fun RecipeScreen(vm: AppViewModel, dishId: String, onBack: () -> Unit, onEdit: (
             if (upcoming.isNotEmpty()) {
                 DetailCard("בתפריט") {
                     upcoming.forEach { (day, meal) ->
-                        Text("יום ${MealPlanner.dayNames[MealPlanner.weekdayIndex(day)]} ${day.format(dateFmt)} · ${meal.slot.label}" + if (meal.cooked) " · בושל ✓" else "")
+                        Text("יום ${MealPlanner.dayNames[MealPlanner.weekdayIndex(day)]} ${day.format(dateFmt)} · ${meal.slot.label}" + if (meal.cooked) (if (dish.isKit) " · בוצע ✓" else " · בושל ✓") else "")
                     }
                 }
             }
@@ -419,7 +422,7 @@ fun SegmentedTabs(labels: List<String>, selected: Int, onSelect: (Int) -> Unit) 
 /** "בשביל כמה?": − n + and quick choices (2, as written, the whole family, double). */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ServingsCard(servings: Int, recipeYield: Int, familySize: Int, onChange: (Int) -> Unit) {
+private fun ServingsCard(servings: Int, recipeYield: Int, familySize: Int, onChange: (Int) -> Unit, kit: Boolean = false) {
     val presets = buildList {
         add(2); add(recipeYield)
         if (familySize > 0) add(familySize)
@@ -428,10 +431,11 @@ private fun ServingsCard(servings: Int, recipeYield: Int, familySize: Int, onCha
     DetailCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("בשביל כמה?", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(if (kit) "כמה ערכות?" else "בשביל כמה?", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 val k = servings.toDouble() / recipeYield.coerceAtLeast(1)
                 Text(
-                    if (servings == recipeYield) "המתכון המקורי הוא ל-$recipeYield מנות"
+                    if (kit) "הכמויות כפול מספר הערכות"
+                    else if (servings == recipeYield) "המתכון המקורי הוא ל-$recipeYield מנות"
                     else "המתכון המקורי ל-$recipeYield · הכמויות ×" + app.necessityq.domain.Quantity.formatNumber(k),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -439,7 +443,7 @@ private fun ServingsCard(servings: Int, recipeYield: Int, familySize: Int, onCha
             }
             ServingsStepper(servings, onChange = onChange)
         }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (!kit) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             presets.forEach { n ->
                 val label = when (n) {
                     recipeYield -> "$n · המקורי"
@@ -864,19 +868,24 @@ fun RecipeEditScreen(vm: AppViewModel, dishId: String?, onBack: () -> Unit, onSa
     var name by remember(existing?.id) { mutableStateOf(existing?.name.orEmpty()) }
     var servings by remember(existing?.id) { mutableIntStateOf(existing?.servings ?: Dish.DEFAULT_SERVINGS) }
     var flavor by remember(existing?.id) { mutableStateOf(existing?.flavor) }
+    var kind by remember(existing?.id) { mutableStateOf(existing?.kind ?: DishKind.MEAL) }
     var instructions by remember(existing?.id) { mutableStateOf(existing?.instructions.orEmpty()) }
     val ingredients = remember(existing?.id) {
         mutableStateListOf<String>().apply { addAll(existing?.ingredients.orEmpty()); add("") }
     }
 
+    // lines on the list are matched to a recipe by its name, so two recipes may not share one
+    val nameTaken = name.isNotBlank() && data.dishes.any { it.id != existing?.id && it.name.trim() == name.trim() }
+
     fun save() {
-        if (name.isBlank()) return
+        if (name.isBlank() || nameTaken) return
         val id = existing?.id ?: UUID.randomUUID().toString()
         val dish = (existing ?: Dish(id, "", emptyList())).copy(
             name = name.trim(),
-            servings = servings,
-            cookServings = existing?.cookServings ?: servings,
-            flavor = flavor,
+            kind = kind,
+            servings = if (kind == DishKind.KIT) 1 else servings,
+            cookServings = if (kind == DishKind.KIT) 1 else existing?.cookServings ?: servings,
+            flavor = if (kind == DishKind.KIT) null else flavor,
             instructions = instructions.trim(),
             ingredients = ingredients.map { it.trim() }.filter { it.isNotEmpty() },
         )
@@ -887,8 +896,8 @@ fun RecipeEditScreen(vm: AppViewModel, dishId: String?, onBack: () -> Unit, onSa
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         TopAppBar(
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.Close, contentDescription = "ביטול") } },
-            title = { Text(if (existing == null) "מתכון חדש" else "עריכת מתכון", fontWeight = FontWeight.ExtraBold) },
-            actions = { TextButton(enabled = name.isNotBlank(), onClick = ::save) { Text("שמירה", fontWeight = FontWeight.Bold) } },
+            title = { Text(if (existing == null) "מתכון או ערכה חדשים" else "עריכה", fontWeight = FontWeight.ExtraBold) },
+            actions = { TextButton(enabled = name.isNotBlank() && !nameTaken, onClick = ::save) { Text("שמירה", fontWeight = FontWeight.Bold) } },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
         )
         Column(
@@ -903,16 +912,26 @@ fun RecipeEditScreen(vm: AppViewModel, dishId: String?, onBack: () -> Unit, onSa
                 modifier = Modifier.fillMaxWidth(),
                 trailingIcon = if (name.isNotEmpty()) { { IconButton(onClick = { name = "" }) { Icon(Icons.Default.Close, contentDescription = "מחיקת הטקסט") } } } else null,
             )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("כמה מנות יוצאות מהמתכון?", fontWeight = FontWeight.Bold)
-                    Text("הכמויות שלמטה הן לכמות הזאת", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                ServingsStepper(servings, onChange = { servings = it })
+            if (nameTaken) {
+                Text("כבר יש מתכון בשם הזה", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
+            // a kit is a bundle of products (a party, cleaning day, school bags): no servings, taste or ratings
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("טעם:", fontWeight = FontWeight.Bold)
-                Flavor.entries.forEach { f -> FilterChip(selected = flavor == f, onClick = { flavor = if (flavor == f) null else f }, label = { Text(f.label) }) }
+                Text("סוג:", fontWeight = FontWeight.Bold)
+                DishKind.entries.forEach { k -> FilterChip(selected = kind == k, onClick = { kind = k }, label = { Text(k.label) }) }
+            }
+            if (kind == DishKind.MEAL) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("כמה מנות יוצאות מהמתכון?", fontWeight = FontWeight.Bold)
+                        Text("הכמויות שלמטה הן לכמות הזאת", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    ServingsStepper(servings, onChange = { servings = it })
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("טעם:", fontWeight = FontWeight.Bold)
+                    Flavor.entries.forEach { f -> FilterChip(selected = flavor == f, onClick = { flavor = if (flavor == f) null else f }, label = { Text(f.label) }) }
+                }
             }
 
             Text("מרכיבים", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -944,7 +963,7 @@ fun RecipeEditScreen(vm: AppViewModel, dishId: String?, onBack: () -> Unit, onSa
                 shape = NqShapes.Field,
                 modifier = Modifier.fillMaxWidth(),
             )
-            Button(onClick = ::save, enabled = name.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("שמירה") }
+            Button(onClick = ::save, enabled = name.isNotBlank() && !nameTaken, modifier = Modifier.fillMaxWidth()) { Text("שמירה") }
             Spacer(Modifier.height(24.dp))
         }
     }

@@ -61,6 +61,9 @@ data class FamilyMember(
     val initial: String get() = name.trim().take(1).ifEmpty { "?" }
 }
 
+/** What a saved "dish" is: a meal that is cooked and rated, or a kit (a shopping bundle, not necessarily food). */
+enum class DishKind(val label: String) { MEAL("מאכל"), KIT("ערכה") }
+
 /**
  * A recipe. Ingredients are free text with an optional amount for the recipe's own yield
  * ("4 ביצים", "500 גרם פסטה", "בצל").
@@ -83,7 +86,11 @@ data class Dish(
     val listSkip: Set<String> = emptySet(),
     /** What the household chose the last time the recipe was put on the list; null = never confirmed. */
     val listMemory: ListMemory? = null,
+    /** [DishKind.KIT]: no flavour, no family ratings, no "cooked" wording; it is a bundle of products. */
+    val kind: DishKind = DishKind.MEAL,
 ) {
+    val isKit: Boolean get() = kind == DishKind.KIT
+
     val plannedServings: Int get() = cookServings ?: servings
 
     companion object {
@@ -104,7 +111,11 @@ data class ListMemory(
     val skipped: Set<String> = emptySet(),
 )
 
-enum class MealSlot(val label: String) { BREAKFAST("בוקר"), LUNCH("צהריים"), DINNER("ערב"), SHABBAT("שבת") }
+enum class MealSlot(val label: String) {
+    BREAKFAST("בוקר"), LUNCH("צהריים"), DINNER("ערב"), SHABBAT("שבת"),
+    /** Extra slots a day can have besides the three meals: a snack or dessert, or a kit. */
+    SNACK("נשנוש"), OTHER("אחר"),
+}
 
 /** One cooked meal in the cycle. [day] is 0..(7×cycleWeeks−1), 0 = Sunday of week A; an empty [audience] means everyone. */
 data class PlannedMeal(
@@ -246,6 +257,9 @@ object MealPlanner {
     /** Slots offered for every day. */
     val daySlots = listOf(MealSlot.BREAKFAST, MealSlot.LUNCH, MealSlot.DINNER)
 
+    /** Slots a day can add when needed (shown only once they hold something, or when added). */
+    val extraSlots = listOf(MealSlot.SNACK, MealSlot.OTHER)
+
     fun key(epochDay: Long, slot: MealSlot) = "$epochDay:${slot.name}"
 
     /** 0 = Sunday … 6 = Saturday. */
@@ -328,7 +342,7 @@ object MealPlanner {
         return data.dishes.mapNotNull { dish ->
             val stars = people.mapNotNull { data.rating(it.id, dish.id) }
             if (Rating.NEVER in stars) return@mapNotNull null
-            if (people.any { dislikes(it, dish) }) return@mapNotNull null
+            if (!dish.isKit && people.any { dislikes(it, dish) }) return@mapNotNull null
             val flavorBonus = people.count { p ->
                 dish.flavor != null && (p.flavor == FlavorPref.BOTH || p.flavor?.name == dish.flavor.name)
             }
@@ -515,6 +529,13 @@ object RecipeListSync {
             else -> Removal.Shrink(line.id, current, rest)
         }
     }
+
+    /**
+     * Whether the recipe has open lines on the list from any route: put on by itself ([onList]) or through the
+     * menu ("מרכיבים לרשימה" for the week). Used to show the same state everywhere; the sync itself uses [onList].
+     */
+    fun onListAny(lines: List<ListLine>, dish: Dish): Boolean =
+        lines.any { l -> l.status == LineStatus.NEEDED && ((l.recipe == dish.name && l.source == LineSource.RECIPE) || l.recipeParts.any { it.dish == dish.name }) }
 
     /** Open lines that came from this recipe. */
     fun onList(lines: List<ListLine>, dish: Dish): List<ListLine> =

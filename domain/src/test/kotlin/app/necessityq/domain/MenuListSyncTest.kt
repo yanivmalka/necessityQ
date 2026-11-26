@@ -79,4 +79,23 @@ class MenuListSyncTest {
         // nothing known about the weight of a piece: the newer entry wins, as before
         assertEquals(Quantity(1.0, QuantityUnit.LITER), ListRules.combine("חלב", Quantity.pieces(2), Quantity(1.0, QuantityUnit.LITER)))
     }
+
+    @Test fun `a dish on the list through the menu counts as on the list everywhere`() {
+        val lines = apply(emptyList(), MenuListSync.plan(emptyList(), menu(0 to shakshuka)))
+        // the recipe's own sync does not own these lines, but every screen must show the same state
+        assertTrue(RecipeListSync.onList(lines, shakshuka).isEmpty())
+        assertTrue(RecipeListSync.onListAny(lines, shakshuka))
+        assertTrue(!RecipeListSync.onListAny(lines, salad))
+    }
+
+    @Test fun `kits and extra slots take part in the plan like any dish`() {
+        val kit = Dish("k", "ערכת יום הולדת", listOf("2 בלונים", "1 ק\"ג סוכר"), kind = DishKind.KIT)
+        assertTrue(kit.isKit)
+        val data = MealData(
+            dishes = listOf(kit),
+            plan = MealPlan(meals = listOf(PlannedMeal(0, MealSlot.OTHER, "k"), PlannedMeal(0, MealSlot.SNACK, "k"))),
+        )
+        assertEquals(2, MealPlanner.mealsOn(data, MealPlan.DEFAULT_ANCHOR).size)
+        assertTrue(MealPlanner.extraSlots.all { it !in MealPlanner.daySlots })
+    }
 }

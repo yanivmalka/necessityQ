@@ -322,10 +322,20 @@ fun ListScreen(
     // recipes whose ingredients are on the list: their servings can be changed (or the recipe removed) from here
     val mealData by vm.meals.collectAsStateWithLifecycle()
     val showRecipes = !shopping && searchText.isBlank() && features.isOn(app.necessityq.domain.Feature.RECIPES_ON_LIST, mode)
+    // from every route (the recipe itself, a meal, the whole menu): the same recipes the menu shows as "on the list"
     val recipesOnList = remember(mealData.dishes, snapshot?.lines) {
-        val lines = snapshot?.lines.orEmpty()
-        mealData.dishes.mapNotNull { d -> RecipeListSync.onList(lines, d).size.takeIf { it > 0 }?.let { d to it } }
+        val lines = snapshot?.lines.orEmpty().filter { it.status == LineStatus.NEEDED }
+        mealData.dishes.mapNotNull { d ->
+            val own = RecipeListSync.onList(lines, d).size
+            val all = lines.count { l ->
+                l.recipeParts.any { it.dish == d.name } || (l.recipe == d.name && l.source == app.necessityq.domain.LineSource.RECIPE)
+            }
+            if (all == 0) null else RecipeOnList(d, all, menuOnly = own == 0)
+        }.sortedBy { it.dish.name }
     }
+    // like "כנראה נגמר בקרוב": one folded line ("5 מתכונים ברשימה · הצגה ›") so the products stay on screen; once tapped, the choice holds
+    var recipesExpandedChoice by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<Boolean?>(null) }
+    val recipesExpanded = recipesExpandedChoice ?: false
 
     // "משכו שמאלה…" is shown the first three times the list opens with items, then it is learned
     val showSwipeHint = remember { vm.swipeHintDue() }
@@ -679,6 +689,8 @@ fun ListScreen(
                 item(key = "recipes") {
                     RecipesOnListCard(
                         recipesOnList,
+                        expanded = recipesExpanded,
+                        onToggle = { recipesExpandedChoice = !recipesExpanded },
                         onServings = { dish, n -> vm.addRecipeToList(dish.id, n) },
                         onRemove = { dish -> vm.removeRecipeFromList(dish.id) },
                     )
@@ -2462,35 +2474,70 @@ private fun ShopBottomBar(onScan: () -> Unit, onFinish: () -> Unit) {
     }
 }
 
+/** A recipe with lines on the list; [menuOnly] = they came through the menu, whose meals decide the amounts. */
+private data class RecipeOnList(val dish: Dish, val count: Int, val menuOnly: Boolean)
+
 /**
  * "מתכונים ברשימה": each recipe whose ingredients are on the list, with its servings. Changing them updates the
  * amounts on the list (after a short pause between taps); ✕ takes the recipe's ingredients off the list.
+ * Folded to one line ("5 מתכונים ברשימה · הצגה ›") when there are several, so it does not push the products away.
  */
 @Composable
-private fun RecipesOnListCard(recipes: List<Pair<Dish, Int>>, onServings: (Dish, Int) -> Unit, onRemove: (Dish) -> Unit) {
+private fun RecipesOnListCard(
+    recipes: List<RecipeOnList>,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onServings: (Dish, Int) -> Unit,
+    onRemove: (Dish) -> Unit,
+) {
+    if (!expanded) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clip(NqShapes.Panel)
+                .background(MaterialTheme.colorScheme.primaryContainer)
+                .clickable(role = Role.Button, onClickLabel = "הצגת המתכונים שברשימה", onClick = onToggle)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Default.Restaurant, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                (if (recipes.size == 1) "מתכון אחד ברשימה" else "${recipes.size} מתכונים ברשימה") + " · ",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            Text("הצגה ›", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+        }
+        return
+    }
     Column(
         Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().clip(NqShapes.Tile)
             .background(MaterialTheme.colorScheme.surface).border(1.dp, NqTheme.colors.hairline, NqShapes.Tile)
-            .padding(start = 14.dp, end = 4.dp, top = 10.dp, bottom = 4.dp),
+            .padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = "כיווץ המתכונים", onClick = onToggle).padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Icon(Icons.Default.Restaurant, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
-            Text("מתכונים ברשימה", style = MaterialTheme.typography.titleSmall)
+            Text("מתכונים ברשימה", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            Icon(Icons.Default.UnfoldLess, contentDescription = "כיווץ", modifier = Modifier.padding(end = 10.dp).size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        recipes.forEach { (dish, count) ->
-            androidx.compose.runtime.key(dish.id) { RecipeOnListRow(dish, count, onServings, onRemove) }
+        recipes.forEach { r ->
+            androidx.compose.runtime.key(r.dish.id) { RecipeOnListRow(r, onServings, onRemove) }
         }
     }
 }
 
 @Composable
-private fun RecipeOnListRow(dish: Dish, count: Int, onServings: (Dish, Int) -> Unit, onRemove: (Dish) -> Unit) {
+private fun RecipeOnListRow(recipe: RecipeOnList, onServings: (Dish, Int) -> Unit, onRemove: (Dish) -> Unit) {
+    val dish = recipe.dish
+    val count = recipe.count
     val listed = dish.listServings ?: dish.plannedServings
     var pending by remember(dish.id, listed) { mutableIntStateOf(listed) }
     LaunchedEffect(pending) {
-        if (pending != listed) {
+        if (!recipe.menuOnly && pending != listed) {
             kotlinx.coroutines.delay(700)
             onServings(dish, pending)
         }
@@ -2499,10 +2546,15 @@ private fun RecipeOnListRow(dish: Dish, count: Int, onServings: (Dish, Int) -> U
         Column(Modifier.weight(1f)) {
             Text(dish.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                if (count == 1) "פריט אחד ברשימה" else "$count פריטים ברשימה",
+                (if (count == 1) "פריט אחד ברשימה" else "$count פריטים ברשימה") + if (recipe.menuOnly) " · מהתפריט" else "",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+        if (recipe.menuOnly) {
+            // the menu's meals decide the amounts: they change in the menu, not here
+            Text("לפי הארוחות", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = 12.dp))
+            return@Row
         }
         Row(
             Modifier.clip(NqShapes.Panel).background(MaterialTheme.colorScheme.surfaceVariant),
@@ -2511,7 +2563,10 @@ private fun RecipeOnListRow(dish: Dish, count: Int, onServings: (Dish, Int) -> U
             IconButton(onClick = { pending = (pending + 1).coerceAtMost(40) }, modifier = Modifier.size(40.dp)) {
                 Icon(Icons.Default.Add, contentDescription = "עוד מנה: ${dish.name}", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
             }
-            Text("$pending מנות", fontWeight = FontWeight.SemiBold, modifier = Modifier.widthIn(min = 56.dp), textAlign = TextAlign.Center)
+            Text(
+                if (dish.isKit) "$pending ×" else "$pending מנות",
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.widthIn(min = 56.dp), textAlign = TextAlign.Center,
+            )
             IconButton(onClick = { pending = (pending - 1).coerceAtLeast(1) }, modifier = Modifier.size(40.dp), enabled = pending > 1) {
                 Icon(Icons.Default.Remove, contentDescription = "מנה פחות: ${dish.name}", Modifier.size(18.dp))
             }
