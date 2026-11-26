@@ -847,6 +847,7 @@ fun ListScreen(
                                 onMinus = { vm.adjustQuantity(line, -1) },
                                 onSetQuantity = { q, approved -> vm.changeQuantity(line, q, approved) },
                                 quantityCheck = { vm.quantityCheck(line, it) },
+                                packs = mealData.packs,
                                 onOpen = { openItem = line },
                             )
                         }
@@ -1360,6 +1361,8 @@ private fun ProductTile(
     onMinus: () -> Unit,
     onSetQuantity: ((Quantity?, Boolean) -> Unit)? = null,
     quantityCheck: (Quantity) -> app.necessityq.domain.QuantityCheck? = { null },
+    /** The pack size the household buys per item ([app.necessityq.domain.MealData.packs]), for "לקנות". */
+    packs: Map<String, Long> = emptyMap(),
     /** Opens the item's page: on a tap or a double tap, as chosen in the settings. */
     onOpen: () -> Unit,
 ) {
@@ -1429,7 +1432,7 @@ private fun ProductTile(
                                     }
                                 }
                                 // a recipe's exact need, rounded up to what the shop sells ("לקנות 1.5 ליטר · צריך 1.1 ליטר")
-                                val toBuy = line.toBuy
+                                val toBuy = line.toBuy(packs)
                                 val need = line.quantity
                                 if (toBuy != null && need != null && toBuy != need) {
                                     Text(

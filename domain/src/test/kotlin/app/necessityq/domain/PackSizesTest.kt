@@ -76,9 +76,9 @@ class PackSizesTest {
         fun line(source: LineSource, parts: List<RecipePart> = emptyList()) = ListLine(
             "1", "קמח", "קמח", null, Category.PANTRY, kilos(0.5), null, LineStatus.NEEDED, source, "u", 0, 0, recipeParts = parts,
         )
-        assertEquals(kilos(1.0), line(LineSource.RECIPE).toBuy)
-        assertEquals(kilos(1.0), line(LineSource.MENU).toBuy)
-        assertEquals(kilos(0.5), line(LineSource.MANUAL).toBuy)
+        assertEquals(kilos(1.0), line(LineSource.RECIPE).toBuy())
+        assertEquals(kilos(1.0), line(LineSource.MENU).toBuy())
+        assertEquals(kilos(0.5), line(LineSource.MANUAL).toBuy())
     }
 
     @Test fun `every catalogue item is either given pack sizes or left as it is on purpose`() {

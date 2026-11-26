@@ -33,7 +33,7 @@ object Staples {
         if (alwaysStarts.any { key == it || key.startsWith("$it ") }) return true
         val pack = littleOf.entries.firstOrNull { (name, _) -> key == name || key.startsWith("$name ") } ?: return false
         quantity ?: return true // "שמן לטיגון": no amount means a little
-        val packBase = PackSizes.smallestPack(item.name)?.let { if (it.dimension == quantity.dimension) it.baseAmount else null }
+        val packBase = PackSizes.smallestPack(item.name, item.variant)?.let { if (it.dimension == quantity.dimension) it.baseAmount else null }
             ?: pack.value.takeIf { quantity.dimension != Dimension.COUNT }
             ?: return false
         return quantity.baseAmount <= packBase * SMALL_SHARE + 1e-9

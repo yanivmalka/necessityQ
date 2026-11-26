@@ -494,28 +494,46 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     /**
      * Puts a recipe's ingredients on the list for [servings]. When the recipe is already on the list,
      * the quantities there are changed by the difference instead of adding everything again.
-     * [only]: the item ids to add the first time (from the review sheet); null = everything not at home.
-     * What was left out is remembered on the dish, so changing servings later does not add it.
+     *
+     * The first time, the recipe screen asks which kind of each ingredient and which pack size, and passes the answer:
+     * [only] the ingredients to add (base ids), [variants] the kind chosen per ingredient, [packs] the pack size
+     * per item (null = any). That is remembered on the dish ([ListMemory]); from then on the recipe goes on the
+     * list with the same products and a message says so. What was left out is also remembered, so changing
+     * servings later does not add it.
      */
-    fun addRecipeToList(dishId: String, servings: Int, only: Set<String>? = null) {
+    fun addRecipeToList(
+        dishId: String,
+        servings: Int,
+        only: Set<String>? = null,
+        variants: Map<String, String>? = null,
+        packs: Map<String, Long?>? = null,
+    ) {
         val (hid, uid, _) = ctx() ?: return
         val data = meals.value
-        val dish = data.dish(dishId) ?: return
+        val stored = data.dish(dishId) ?: return
+        val confirming = variants != null
+        // the dish as it is added: with the kinds just chosen
+        val dish = if (confirming) stored.copy(listMemory = (stored.listMemory ?: app.necessityq.domain.ListMemory()).copy(variants = variants.orEmpty())) else stored
         val lines = snapshot.value?.lines.orEmpty()
         val onList = app.necessityq.domain.RecipeListSync.onList(lines, dish).isNotEmpty()
         val from = dish.listServings?.takeIf { onList }
         launchSafe {
             var current = lines
             var skip = dish.listSkip
+            var memory = dish.listMemory
             if (from == null) {
                 val all = app.necessityq.domain.Recipes.scaled(dish, servings)
-                val chosen = all.filter { if (only != null) it.item.id in only else !data.isAtHome(it) }
+                val chosen = all.filter { if (only != null) it.baseId in only else !data.leavesOut(dish, it) }
                 chosen.forEach { ing ->
                     container.service.add(hid, uid, ing.item, ing.quantity, LineSource.RECIPE, current, recipe = dish.name)
                     current = container.service.snapshot(hid).first().lines
                 }
-                skip = all.map { it.item.id }.toSet() - chosen.map { it.item.id }.toSet()
-                _messages.tryEmit("${dish.name}: ${chosen.size} מרכיבים ל-$servings מנות נוספו לרשימה")
+                skip = all.map { it.baseId }.toSet() - chosen.map { it.baseId }.toSet()
+                if (confirming) memory = app.necessityq.domain.ListMemory(variants.orEmpty(), all.map { it.baseId }.toSet(), skip)
+                _messages.tryEmit(
+                    if (!confirming && dish.listMemory != null) "${dish.name}: נוספו אותם מוצרים כמו בפעם הקודמת (${chosen.size} מרכיבים ל-$servings מנות)"
+                    else "${dish.name}: ${chosen.size} מרכיבים ל-$servings מנות נוספו לרשימה",
+                )
             } else {
                 app.necessityq.domain.RecipeListSync.plan(current, dish, from, servings, skip = data.pantry + dish.listSkip).forEach { change ->
                     when (change) {
@@ -531,7 +549,10 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                 }
                 _messages.tryEmit("${dish.name}: הכמויות ברשימה עודכנו ל-$servings מנות")
             }
-            updateMeals { d -> d.dish(dishId)?.let { d.withDish(it.copy(listServings = servings, cookServings = servings, listSkip = skip)) } ?: d }
+            updateMeals { d ->
+                val withPacks = packs?.entries?.fold(d) { acc, (key, size) -> acc.withPack(key, size) } ?: d
+                withPacks.dish(dishId)?.let { withPacks.withDish(it.copy(listServings = servings, cookServings = servings, listSkip = skip, listMemory = memory)) } ?: withPacks
+            }
         }
     }
 
@@ -559,7 +580,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             updateMeals { d -> d.dish(dishId)?.let { d.withDish(it.copy(listServings = null, listSkip = emptySet())) } ?: d }
             _undo.tryEmit(
                 UndoEvent("${dish.name} הוסר מהרשימה") {
-                    val all = app.necessityq.domain.Recipes.scaled(dish, servings).map { it.item.id }.toSet()
+                    val all = app.necessityq.domain.Recipes.scaled(dish, servings).map { it.baseId }.toSet()
                     addRecipeToList(dishId, servings, only = all - skip)
                 },
             )

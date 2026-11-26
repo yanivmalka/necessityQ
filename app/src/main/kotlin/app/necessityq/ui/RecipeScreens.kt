@@ -54,6 +54,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
+import androidx.compose.material3.Surface
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -62,10 +63,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -292,10 +296,11 @@ fun RecipeScreen(vm: AppViewModel, dishId: String, onBack: () -> Unit, onEdit: (
                 val fresh = preview.count { it.kind == RecipeListPreview.Kind.NEW }
                 val merged = preview.count { it.kind == RecipeListPreview.Kind.MERGE }
                 val enabled = preview.any { it.kind != RecipeListPreview.Kind.AT_HOME }
+                Column(Modifier.fillMaxWidth()) {
                 Row(
                     Modifier.fillMaxWidth().height(56.dp).clip(NqShapes.Field)
                         .background(if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
-                        .clickable(enabled = enabled, role = Role.Button, onClick = { reviewOpen = true })
+                        .clickable(enabled = enabled, role = Role.Button, onClick = { if (dish.listMemory != null) vm.addRecipeToList(dish.id, servings) else reviewOpen = true })
                         .padding(horizontal = 18.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -303,7 +308,11 @@ fun RecipeScreen(vm: AppViewModel, dishId: String, onBack: () -> Unit, onEdit: (
                     Column(Modifier.weight(1f)) {
                         Text("הוספה לרשימת הקניות", color = ink, fontWeight = FontWeight.SemiBold)
                         Text(
-                            if (enabled) "$fresh חדשים · $merged יתווספו לקיימים · $servings מנות" else "אין מה להוסיף: הכל בבית",
+                            when {
+                                !enabled -> "אין מה להוסיף: הכל בבית"
+                                dish.listMemory != null -> "אותם מוצרים כמו בפעם הקודמת · $servings מנות"
+                                else -> "$fresh חדשים · $merged יתווספו לקיימים · $servings מנות"
+                            },
                             color = ink.copy(alpha = 0.85f),
                             style = MaterialTheme.typography.bodySmall,
                             maxLines = 1,
@@ -311,6 +320,12 @@ fun RecipeScreen(vm: AppViewModel, dishId: String, onBack: () -> Unit, onEdit: (
                         )
                     }
                     Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = ink)
+                }
+                    if (dish.listMemory != null && enabled) {
+                        TextButton(onClick = { reviewOpen = true }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                            Text("שינוי הבחירות (סוג ואריזה)")
+                        }
+                    }
                 }
             } else {
                 Row(
@@ -338,13 +353,14 @@ fun RecipeScreen(vm: AppViewModel, dishId: String, onBack: () -> Unit, onEdit: (
         }
 
         if (reviewOpen) {
-            RecipeReviewSheet(
-                dishName = dish.name,
+            RecipeAddTile(
+                dish = dish,
                 servings = servings,
-                rows = RecipeListPreview.of(lines, dish, servings, data.pantry, data.buy),
-                onConfirm = { chosen ->
+                lines = lines,
+                data = data,
+                onConfirm = { chosen, variants, packs ->
                     reviewOpen = false
-                    vm.addRecipeToList(dish.id, servings, only = chosen)
+                    vm.addRecipeToList(dish.id, servings, only = chosen, variants = variants, packs = packs)
                 },
                 onDismiss = { reviewOpen = false },
             )
@@ -483,15 +499,16 @@ private fun IngredientsSection(
             dish.ingredients.forEachIndexed { i, text ->
                 if (i > 0) androidx.compose.material3.HorizontalDivider(color = NqTheme.colors.hairline)
                 val parsed = remember(text) { Recipes.parse(text) }
-                val name = parsed?.item?.displayName ?: text
+                val listed = parsed?.item?.let { Recipes.listItem(it, dish.listMemory?.variants.orEmpty()) }
+                val name = listed?.displayName ?: text
                 val shown = parsed?.quantity?.let { Recipes.scale(it, factor) }
                 val amount = shown?.format() ?: "לפי הטעם"
                 val id = parsed?.item?.id
-                val line = id?.let { openLines[it] }
+                val line = listed?.id?.let { openLines[it] }
                 val state = when {
                     id == null -> null
                     id in pantry || (id !in buy && parsed != null && app.necessityq.domain.Staples.assumedAtHome(parsed.item, shown)) -> IngredientState.AT_HOME
-                    id in ownIds -> IngredientState.ON_LIST
+                    listed?.id in ownIds -> IngredientState.ON_LIST
                     line != null -> IngredientState.MERGE
                     else -> IngredientState.BUY
                 }
@@ -666,102 +683,173 @@ private fun StepsSection(steps: List<String>, done: List<Int>, onToggle: (Int) -
 }
 
 /**
- * "מה ייכנס לרשימה": new items, amounts added to lines already on the list (before → after), and what is at home.
- * Everything not at home starts checked; the button adds only what is checked.
+ * The floating tile that opens when a recipe is added to the list: what it will add, with a choice of kind
+ * ("איזה קמח?") and pack size ("באיזה גודל אריזה?") for each ingredient. The first time everything is asked; what is
+ * confirmed is remembered on the recipe ([app.necessityq.domain.ListMemory]) and the pack sizes on the household, so
+ * the next time the recipe goes on the list with the same products and a message says so. Everything not at home
+ * starts checked; the button adds only what is checked.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun RecipeReviewSheet(
-    dishName: String,
+fun RecipeAddTile(
+    dish: Dish,
     servings: Int,
-    rows: List<RecipeListPreview.Row>,
-    onConfirm: (Set<String>) -> Unit,
+    lines: List<app.necessityq.domain.ListLine>,
+    data: app.necessityq.domain.MealData,
+    onConfirm: (chosen: Set<String>, variants: Map<String, String>, packs: Map<String, Long?>) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val chosen = remember(rows) {
-        mutableStateListOf<String>().apply { addAll(rows.filter { it.kind != RecipeListPreview.Kind.AT_HOME }.map { it.item.id }) }
+    val memory = dish.listMemory
+    val variants = remember(dish.id) { mutableStateMapOf<String, String>().apply { putAll(memory?.variants.orEmpty()) } }
+    // pack sizes changed in this tile (null = "any size"); what is not here is what the household has stored
+    val packs = remember(dish.id) { mutableStateMapOf<String, Long?>() }
+    val asked = dish.copy(listMemory = (memory ?: app.necessityq.domain.ListMemory()).copy(variants = variants.toMap()))
+    val rows = RecipeListPreview.of(lines, asked, servings, data.pantry, data.buy)
+    val chosen = remember(dish.id) {
+        mutableStateListOf<String>().apply {
+            addAll(
+                rows.filter { r ->
+                    if (memory != null && r.baseId in memory.known) r.baseId !in memory.skipped else r.kind != RecipeListPreview.Kind.AT_HOME
+                }.map { it.baseId },
+            )
+        }
     }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(horizontal = 20.dp)) {
-                Text("מה ייכנס לרשימה", style = MaterialTheme.typography.titleLarge)
-                Text("$dishName · $servings מנות", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            val ingredientList = androidx.compose.foundation.lazy.rememberLazyListState()
-            LazyColumn(
-                Modifier.weight(1f, fill = false).fadingEdges(ingredientList, horizontal = false),
-                state = ingredientList,
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                listOf(
-                    RecipeListPreview.Kind.NEW to "חדש ברשימה",
-                    RecipeListPreview.Kind.MERGE to "מתווסף לפריט שכבר ברשימה",
-                    RecipeListPreview.Kind.AT_HOME to "יש בבית · לא ייכנס",
-                ).forEach { (kind, title) ->
-                    val group = rows.filter { it.kind == kind }
-                    if (group.isEmpty()) return@forEach
-                    item(key = "h_" + kind.name) {
-                        Text(
-                            "$title · ${group.count { it.item.id in chosen }} / ${group.size}",
-                            Modifier.padding(horizontal = 4.dp),
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    item(key = "g_" + kind.name) {
-                        Column(
-                            Modifier.fillMaxWidth().clip(NqShapes.Tile).background(MaterialTheme.colorScheme.surface)
-                                .border(1.dp, NqTheme.colors.hairline, NqShapes.Tile),
-                        ) {
-                            group.forEachIndexed { i, row ->
-                                if (i > 0) androidx.compose.material3.HorizontalDivider(color = NqTheme.colors.hairline)
-                                val on = row.item.id in chosen
-                                Row(
-                                    Modifier.fillMaxWidth().heightIn(min = 60.dp)
-                                        .toggleable(value = on, role = Role.Checkbox, onValueChange = { if (on) chosen.remove(row.item.id) else chosen.add(row.item.id) })
-                                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Checkbox(checked = on, onCheckedChange = null)
-                                    Spacer(Modifier.width(6.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text(row.item.displayName, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                                        val detail = when (row.kind) {
-                                            RecipeListPreview.Kind.MERGE -> listOfNotNull(
-                                                row.current?.let { "ברשימה ${it.format()}" },
-                                                row.quantity?.let { "+ ${it.format()} למתכון" },
-                                            ).joinToString(" ")
-                                            RecipeListPreview.Kind.AT_HOME -> "סימנתם: יש בבית"
-                                            RecipeListPreview.Kind.NEW -> ""
+    fun packFor(key: String): Long? = if (packs.containsKey(key)) packs[key] else data.packs[key]
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            shape = NqShapes.Tile,
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+            shadowElevation = 12.dp,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 24.dp).fillMaxWidth().heightIn(max = 680.dp),
+        ) {
+            Column(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp)) {
+                    Text("מה ייכנס לרשימה", style = MaterialTheme.typography.titleLarge)
+                    Text("${dish.name} · $servings מנות", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        if (memory == null) "בפעם הראשונה בוחרים סוג וגודל אריזה. בפעמים הבאות המתכון יתווסף עם אותם מוצרים, בלי לשאול."
+                        else "אלה הבחירות מהפעם הקודמת. אפשר לשנות אותן.",
+                        Modifier.padding(top = 6.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+                LazyColumn(
+                    Modifier.weight(1f, fill = false).fadingEdges(listState, horizontal = false),
+                    state = listState,
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    listOf(
+                        RecipeListPreview.Kind.NEW to "חדש ברשימה",
+                        RecipeListPreview.Kind.MERGE to "מתווסף לפריט שכבר ברשימה",
+                        RecipeListPreview.Kind.AT_HOME to "יש בבית · לא ייכנס",
+                    ).forEach { (kind, title) ->
+                        val group = rows.filter { it.kind == kind }
+                        if (group.isEmpty()) return@forEach
+                        item(key = "h_" + kind.name) {
+                            Text(
+                                "$title · ${group.count { it.baseId in chosen }} / ${group.size}",
+                                Modifier.padding(horizontal = 4.dp),
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        item(key = "g_" + kind.name) {
+                            Column(
+                                Modifier.fillMaxWidth().clip(NqShapes.Panel).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                                    .border(1.dp, NqTheme.colors.hairline, NqShapes.Panel),
+                            ) {
+                                group.forEachIndexed { i, row ->
+                                    if (i > 0) androidx.compose.material3.HorizontalDivider(color = NqTheme.colors.hairline)
+                                    val on = row.baseId in chosen
+                                    Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp)) {
+                                        Row(
+                                            Modifier.fillMaxWidth().heightIn(min = 52.dp)
+                                                .toggleable(value = on, role = Role.Checkbox, onValueChange = { if (on) chosen.remove(row.baseId) else chosen.add(row.baseId) }),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Checkbox(checked = on, onCheckedChange = null)
+                                            Spacer(Modifier.width(6.dp))
+                                            Column(Modifier.weight(1f)) {
+                                                Text(row.item.displayName, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                                                val detail = when (row.kind) {
+                                                    RecipeListPreview.Kind.MERGE -> listOfNotNull(
+                                                        row.current?.let { "ברשימה ${it.format()}" },
+                                                        row.quantity?.let { "+ ${it.format()} למתכון" },
+                                                    ).joinToString(" ")
+                                                    RecipeListPreview.Kind.AT_HOME -> "סימנתם: יש בבית"
+                                                    RecipeListPreview.Kind.NEW -> ""
+                                                }
+                                                if (detail.isNotEmpty()) {
+                                                    Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                }
+                                            }
+                                            val amount = (if (row.kind == RecipeListPreview.Kind.MERGE) row.after else row.quantity)?.format() ?: ""
+                                            Text(
+                                                amount,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = if (on) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
                                         }
-                                        if (detail.isNotEmpty()) {
-                                            Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        if (on && row.kind != RecipeListPreview.Kind.AT_HOME) {
+                                            val kinds = app.necessityq.domain.ItemOptions.kindsFor(row.base)
+                                            if (kinds.isNotEmpty()) {
+                                                Text("איזה סוג?", Modifier.padding(start = 8.dp, top = 2.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                FlowRow(Modifier.padding(start = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                    kinds.forEach { k ->
+                                                        FilterChip(
+                                                            selected = variants[row.baseId] == k,
+                                                            onClick = { if (variants[row.baseId] == k) variants.remove(row.baseId) else variants[row.baseId] = k },
+                                                            label = { Text(k) },
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                            val sizes = app.necessityq.domain.PackSizes.sizesFor(row.item.name, row.item.variant)
+                                            val key = app.necessityq.domain.PackSizes.keyFor(row.item.name, row.item.variant)
+                                            if (key != null && sizes.size > 1) {
+                                                Text("באיזה גודל אריזה קונים?", Modifier.padding(start = 8.dp, top = 4.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                FlowRow(Modifier.padding(start = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                    FilterChip(selected = packFor(key) == null, onClick = { packs[key] = null }, label = { Text("הכי מתאים") })
+                                                    sizes.forEach { size ->
+                                                        val base = size.baseAmount.toLong()
+                                                        FilterChip(selected = packFor(key) == base, onClick = { packs[key] = base }, label = { Text(size.format()) })
+                                                    }
+                                                }
+                                            }
+                                            val buy = app.necessityq.domain.PackSizes.toBuy(row.item.name, row.quantity, row.item.variant, key?.let { packFor(it) })
+                                            if (buy != null && row.quantity != null && buy != row.quantity) {
+                                                Text(
+                                                    "לקנות ${buy.format()} · צריך ${row.quantity!!.format()}",
+                                                    Modifier.padding(start = 8.dp, top = 4.dp, bottom = 2.dp),
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                )
+                                            }
                                         }
                                     }
-                                    val amount = (if (row.kind == RecipeListPreview.Kind.MERGE) row.after else row.quantity)?.format() ?: ""
-                                    Text(
-                                        amount,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = if (on) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
                                 }
                             }
                         }
                     }
                 }
-            }
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                OutlinedButton(onClick = onDismiss, modifier = Modifier.height(56.dp), shape = NqShapes.Field) { Text("חזרה") }
-                Button(
-                    onClick = { onConfirm(chosen.toSet()) },
-                    enabled = chosen.isNotEmpty(),
-                    modifier = Modifier.weight(1f).height(56.dp),
-                    shape = NqShapes.Field,
-                ) { Text(if (chosen.isEmpty()) "אין מה להוסיף" else "הוספת ${chosen.size} פריטים לרשימה") }
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    OutlinedButton(onClick = onDismiss, modifier = Modifier.height(56.dp), shape = NqShapes.Field) { Text("חזרה") }
+                    Button(
+                        onClick = { onConfirm(chosen.toSet(), variants.toMap(), packs.toMap()) },
+                        enabled = chosen.isNotEmpty(),
+                        modifier = Modifier.weight(1f).height(56.dp),
+                        shape = NqShapes.Field,
+                    ) { Text(if (chosen.isEmpty()) "אין מה להוסיף" else "אישור והוספת ${chosen.size} פריטים") }
+                }
             }
         }
     }

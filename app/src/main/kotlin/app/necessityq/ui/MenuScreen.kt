@@ -147,6 +147,8 @@ private fun MenuHome(vm: AppViewModel, modifier: Modifier, onOpen: (MenuPage) ->
     val horizon = 7 * data.plan.cycleWeeks
     var selected by rememberSaveable { mutableLongStateOf(todayDay) }
     var picking by remember { mutableStateOf<Pair<Long, MealSlot>?>(null) }
+    // a meal whose recipe goes on the list for the first time: the tile asks which products
+    var addTile by remember { mutableStateOf<Pair<app.necessityq.domain.Dish, Int>?>(null) }
     var showAllRecipes by remember { mutableStateOf(false) }
     /** Recipes ticked for deletion; null = not in selection mode. */
     var picked by remember { mutableStateOf<Set<String>?>(null) }
@@ -228,7 +230,11 @@ private fun MenuHome(vm: AppViewModel, modifier: Modifier, onOpen: (MenuPage) ->
                         members = data.members,
                         onList = slotDish != null && app.necessityq.domain.RecipeListSync.onList(listLines, slotDish).isNotEmpty(),
                         onAddToList = {
-                            if (slotDish != null && meal != null) vm.addRecipeToList(slotDish.id, meal.servings ?: slotDish.plannedServings)
+                            if (slotDish != null && meal != null) {
+                                val n = meal.servings ?: slotDish.plannedServings
+                                // first time: the tile asks which products; after that the same ones go on with a message
+                                if (slotDish.listMemory != null) vm.addRecipeToList(slotDish.id, n) else addTile = slotDish to n
+                            }
                         },
                         onPick = { picking = selected to slot },
                         onOpenRecipe = { id -> onOpen(MenuPage.Recipe(id)) },
@@ -341,6 +347,20 @@ private fun MenuHome(vm: AppViewModel, modifier: Modifier, onOpen: (MenuPage) ->
             }
             Spacer(Modifier.height(24.dp))
         }
+    }
+
+    addTile?.let { (dish, servings) ->
+        RecipeAddTile(
+            dish = dish,
+            servings = servings,
+            lines = listLines,
+            data = data,
+            onConfirm = { chosen, variants, packs ->
+                addTile = null
+                vm.addRecipeToList(dish.id, servings, only = chosen, variants = variants, packs = packs)
+            },
+            onDismiss = { addTile = null },
+        )
     }
 
     picking?.let { (day, slot) ->
