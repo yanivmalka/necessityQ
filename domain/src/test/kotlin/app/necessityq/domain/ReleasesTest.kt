@@ -13,6 +13,13 @@ class ReleasesTest {
         assertNull(Releases.versionCodeOf("nightly"))
     }
 
+    @Test fun `new tags carry the build after -b and the name restarts per line`() {
+        assertEquals(235, Releases.versionCodeOf("v0.2.1-b235"))
+        assertEquals(240, Releases.versionCodeOf("v0.3.0-b240"))
+        assertEquals("0.3.0", Releases.versionNameOf("v0.3.0-b240"))
+        assertEquals("0.1.5", Releases.versionNameOf("v0.1.5"))
+    }
+
     @Test fun `only a higher build counts as an update`() {
         assertTrue(Releases.isNewer(6, 5))
         assertFalse(Releases.isNewer(5, 5))

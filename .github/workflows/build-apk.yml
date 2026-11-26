@@ -26,11 +26,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The version (versionCode and the vMAJOR.MINOR.N tag; MAJOR.MINOR is in version.txt): this workflow's run number + 200, above every release built
+      # The version (versionCode and the tag vMAJOR.MINOR.N-bCODE; version.txt holds MAJOR.MINOR and the build at which it started): this workflow's run number + 200, above every release built
       # by the old "Android CI/CD" workflow (its run numbers are below 200), so each new APK installs over the
       # previous one and the in-app update check sees it as newer. The app build reads VERSION_CODE.
       - name: Version
-        run: echo "VERSION_CODE=$((GITHUB_RUN_NUMBER + 200))" >> "$GITHUB_ENV"
+        run: |
+          CODE=$((GITHUB_RUN_NUMBER + 200))
+          LINE=$(sed -n 1p version.txt | tr -d '[:space:]')
+          BASE=$(sed -n 2p version.txt | tr -d '[:space:]')
+          NAME="$LINE.$((CODE - ${BASE:-0}))"
+          echo "VERSION_CODE=$CODE" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=$NAME" >> "$GITHUB_ENV"
+          echo "Version $NAME (build $CODE)"
 
       - uses: actions/setup-java@v4
         with:
@@ -102,8 +109,8 @@ jobs:
             echo "::error::Refusing to publish a release signed with the dev keystore. Set KEYSTORE_BASE64, SIGNING_STORE_PASSWORD, SIGNING_KEY_ALIAS and SIGNING_KEY_PASSWORD in the repository secrets."
             exit 1
           fi
-          TAG="v$(tr -d '[:space:]' < version.txt).${{ env.VERSION_CODE }}"
+          TAG="v${{ env.VERSION_NAME }}-b${{ env.VERSION_CODE }}"
           gh release create "$TAG" "necessityQ-${{ env.VERSION_CODE }}.apk" \
-            --title "necessityQ $TAG" \
+            --title "necessityQ ${{ env.VERSION_NAME }} (${{ env.VERSION_CODE }})" \
             --notes "בנייה אוטומטית מ-${GITHUB_SHA::7}. להתקנה: הורידו את קובץ ה-APK בטלפון ופתחו אותו." \
             --latest
