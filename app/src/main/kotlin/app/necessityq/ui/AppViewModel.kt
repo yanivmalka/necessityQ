@@ -241,18 +241,31 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         val snap = snapshot.value ?: return emptyList()
         return app.necessityq.domain.ListGenerator.propose(
             mode, snap.stats.values, purchases.value, snap.lines, java.time.LocalDate.now(),
+            suppressed = snap.suppressed,
         )
     }
 
-    fun addGenerated(items: List<app.necessityq.domain.GeneratedItem>) {
+    /**
+     * Adds the reviewed proposal. [rejected]: preselected items the household took off, which the app remembers
+     * (hidden for a while, unselected next time). [onAdded] gets the undo of exactly this addition, so the sheet can
+     * show what was added and offer to cancel it.
+     */
+    fun addGenerated(
+        items: List<app.necessityq.domain.GeneratedItem>,
+        rejected: List<app.necessityq.domain.GeneratedItem> = emptyList(),
+        onAdded: ((undo: () -> Unit) -> Unit)? = null,
+    ) {
         val (hid, uid, lines) = ctx() ?: return
         if (items.isEmpty()) return
         launchSafe {
+            if (rejected.isNotEmpty()) container.service.rejectGenerated(hid, rejected, snapshot.value?.stats.orEmpty())
             val onList = lines.filter { it.status == LineStatus.NEEDED }.map { it.itemId }.toSet()
             val names = items.filter { it.identity.id !in onList }.map { it.identity.displayName }.distinct()
             val added = container.service.addGenerated(hid, uid, items, lines)
             if (added.isEmpty()) return@launchSafe
-            _undo.tryEmit(UndoEvent("נוספו מקניות עבר: " + HebrewText.nameList(names.ifEmpty { listOf("${added.size} פריטים") })) { launchSafe { container.service.undoGenerated(hid, added) } })
+            val undo = { launchSafe { container.service.undoGenerated(hid, added) }; Unit }
+            if (onAdded != null) onAdded(undo)
+            else _undo.tryEmit(UndoEvent("נוספו מקניות עבר: " + HebrewText.nameList(names.ifEmpty { listOf("${added.size} פריטים") })) { undo() })
         }
     }
 

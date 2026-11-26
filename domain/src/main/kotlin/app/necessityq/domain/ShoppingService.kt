@@ -16,6 +16,8 @@ data class ListSnapshot(
     val frequent: List<Suggestion>,
     /** Recycle bin: deleted lines and bought lines that were cleared, newest first. */
     val removed: List<ListLine> = emptyList(),
+    /** Items whose suggestion was recently turned down (hidden until their date). */
+    val suppressed: Set<String> = emptySet(),
 )
 
 /**
@@ -50,6 +52,7 @@ class ShoppingService(
             runningLow = suggestions.runningLow,
             frequent = suggestions.frequent,
             removed = lines.filter { it.status == LineStatus.REMOVED }.sortedByDescending { it.removedAtMillis ?: 0 },
+            suppressed = suppressions.filter { it.untilEpochDay > today.toEpochDay() }.map { it.itemId }.toSet(),
         )
     }
 
@@ -248,6 +251,17 @@ class ShoppingService(
             added += id
         }
         return added
+    }
+
+    /**
+     * Learning from a proposal: items that were preselected but the household took off before adding are treated
+     * like a dismissed suggestion (hidden for a while, and not preselected again in "מקניות עבר").
+     */
+    suspend fun rejectGenerated(householdId: String, items: List<GeneratedItem>, stats: Map<String, ItemStats>) {
+        items.distinctBy { it.identity.id }.forEach { item ->
+            val until = suggestionEngine.dismissUntil(stats[item.identity.id], today())
+            repository.suppress(householdId, SuggestionSuppression(item.identity.id, until.toEpochDay()))
+        }
     }
 
     /** Undo of [addGenerated]: the lines never really existed, so they are removed for good. */

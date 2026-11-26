@@ -72,6 +72,8 @@ object ListGenerator {
         today: LocalDate,
         horizonDays: Long = 7,
         zone: ZoneId = ZoneId.systemDefault(),
+        /** Items the household recently turned down: still shown (they asked for the whole list), but not preselected. */
+        suppressed: Set<String> = emptySet(),
     ): List<GeneratedItem> {
         val onList = current.filter { it.status == LineStatus.NEEDED }.map { it.itemId }.toSet()
         val proposed = when (mode) {
@@ -102,6 +104,7 @@ object ListGenerator {
         return proposed
             .filter { it.identity.id !in onList }
             .distinctBy { it.identity.id }
+            .map { if (it.identity.id in suppressed) it.copy(preselected = false, reason = it.reason + " · דחיתם לאחרונה") else it }
             .sortedWith(compareBy({ it.identity.category.order }, { it.identity.displayName }))
     }
 }

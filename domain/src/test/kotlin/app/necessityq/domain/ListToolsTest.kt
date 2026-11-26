@@ -129,6 +129,29 @@ class ListToolsTest {
         assertFalse(service.snapshot("h").first().lines.any { it.id in added })
     }
 
+    @Test fun `rejected proposal items are remembered and come back unselected`() = runBlocking {
+        val repo = InMemoryShoppingRepository()
+        val service = ShoppingService(
+            repo,
+            object : Clock { override fun nowMillis() = 1_000L },
+            object : IdGenerator { override fun newId() = "id" },
+            zone,
+        )
+        val milk = GeneratedItem(ItemIdentity.fromText("חלב"), null, "נקנה בקנייה הקודמת")
+        assertTrue(service.snapshot("h").first().suppressed.isEmpty())
+
+        service.rejectGenerated("h", listOf(milk), emptyMap())
+
+        val suppressed = service.snapshot("h").first().suppressed
+        assertEquals(setOf(milk.identity.id), suppressed)
+        val proposed = ListGenerator.propose(
+            GenerateMode.LAST_TRIP, emptyList(), listOf(purchase("חלב", start)), emptyList(), start.plusDays(1),
+            zone = zone, suppressed = suppressed,
+        ).single()
+        assertFalse(proposed.preselected)
+        assertTrue(proposed.reason.contains("דחיתם לאחרונה"))
+    }
+
     @Test fun `filter and price estimate`() {
         val lines = listOf(
             line("a", "חלב", Category.DAIRY, source = LineSource.AUTO, quantity = Quantity.pieces(2)),
