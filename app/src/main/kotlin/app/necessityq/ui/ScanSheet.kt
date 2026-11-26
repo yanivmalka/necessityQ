@@ -115,7 +115,7 @@ private fun ScanContent(vm: AppViewModel, r: ScanResult) {
     val selected by vm.selectedPriceBranches.collectAsStateWithLifecycle()
     val here by vm.hereBranch.collectAsStateWithLifecycle()
     val mode by vm.mode.collectAsStateWithLifecycle()
-    fun title(id: String?) = branches.firstOrNull { it.id == id }?.title ?: "סניף"
+    fun title(id: String?) = branches.firstOrNull { it.id == id }?.title ?: "סופר"
     val atHere = here?.branch?.id != null && here?.branch?.id == r.branchId
     val unit = LocalWeightPriceUnit.current
 
@@ -130,8 +130,8 @@ private fun ScanContent(vm: AppViewModel, r: ScanResult) {
         if (nb.branch.id !in selected) {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("הסניף הזה עוד לא במעקב, ולכן אין לו מחירים. במעקב המחירים שלו נטענים תוך כמה דקות ומתעדכנים כל יום.", style = MaterialTheme.typography.bodySmall)
-                    Button(onClick = vm::followHereBranch) { Text("מעקב אחרי הסניף") }
+                    Text("הסופר הזה עוד לא במעקב, ולכן אין לו מחירים. במעקב המחירים שלו נטענים תוך כמה דקות ומתעדכנים כל יום.", style = MaterialTheme.typography.bodySmall)
+                    Button(onClick = vm::followHereBranch) { Text("מעקב אחרי הסופר") }
                 }
             }
         }
@@ -141,8 +141,8 @@ private fun ScanContent(vm: AppViewModel, r: ScanResult) {
     if (p == null) {
         Text("המוצר לא נמצא", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text(
-            if (selected.isEmpty()) "עוד לא נבחרו סניפים בלשונית \"מחירים\", ולכן אין מחירים לחפש בהם."
-            else "הברקוד לא מופיע בקבצי המחירים של הסניפים שאתם עוקבים אחריהם.",
+            if (selected.isEmpty()) "עוד לא נבחרו סופרים בלשונית \"מחירים\", ולכן אין מחירים לחפש בהם."
+            else "הברקוד לא מופיע בקבצי המחירים של הסופרים שאתם עוקבים אחריהם.",
             style = MaterialTheme.typography.bodyMedium,
         )
     } else {
@@ -160,7 +160,7 @@ private fun ScanContent(vm: AppViewModel, r: ScanResult) {
                 Column(Modifier.weight(1f)) {
                     Text(if (atHere) "המחיר כאן" else "ב${title(r.branchId)}", style = MaterialTheme.typography.bodyMedium)
                     if (hereProduct.high > hereProduct.low) {
-                        Text("טווח בסניף: ${PriceData.formatRange(hereProduct.low, hereProduct.high)}", style = MaterialTheme.typography.bodySmall)
+                        Text("טווח בסופר: ${PriceData.formatRange(hereProduct.low, hereProduct.high)}", style = MaterialTheme.typography.bodySmall)
                     }
                     hereProduct.unitPrice?.let { Text("ליחידת מידה: ${PriceData.formatPrice(it)}", style = MaterialTheme.typography.bodySmall) }
                 }
@@ -172,7 +172,7 @@ private fun ScanContent(vm: AppViewModel, r: ScanResult) {
         r.verdict?.let { VerdictCard(it) }
         if (r.elsewhere.isNotEmpty()) {
             HorizontalDivider()
-            Text("בסניפים האחרים שלך", style = MaterialTheme.typography.titleSmall)
+            Text("בסופרים האחרים שלך", style = MaterialTheme.typography.titleSmall)
             // in the unit of the product shown (per 100 g or per kg alike); a branch whose unit can't be matched shows its own
             val inUnit = r.prices
             r.elsewhere.forEach { hit ->

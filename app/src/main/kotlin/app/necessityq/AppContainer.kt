@@ -39,6 +39,8 @@ class AppContainer(context: Context) {
     init {
         val firebase = if (BuildConfig.FIREBASE_CONFIGURED) FirebaseApp.initializeApp(context) else null
         if (firebase != null) {
+            // crashes reach the developer from release builds only (a debug build is the developer's own)
+            runCatching { com.google.firebase.crashlytics.FirebaseCrashlytics.getInstance().setCrashlyticsCollectionEnabled(!BuildConfig.DEBUG) }
             val db = FirebaseFirestore.getInstance(firebase)
             db.firestoreSettings = FirebaseFirestoreSettings.Builder()
                 .setLocalCacheSettings(PersistentCacheSettings.newBuilder().build()) // full offline support

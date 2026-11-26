@@ -23,6 +23,15 @@ object CrashReport {
         }
     }
 
+    /**
+     * Sends a handled failure to Crashlytics (it shows up as a non-fatal issue). Does nothing without Firebase,
+     * and never throws: reporting must not become a second failure.
+     */
+    fun record(error: Throwable) {
+        if (!app.necessityq.BuildConfig.FIREBASE_CONFIGURED) return
+        runCatching { com.google.firebase.crashlytics.FirebaseCrashlytics.getInstance().recordException(error) }
+    }
+
     /** The saved report, if the app crashed last time. */
     fun pending(context: Context): String? =
         runCatching { File(context.filesDir, FILE).takeIf { it.exists() }?.readText()?.takeIf { it.isNotBlank() } }.getOrNull()

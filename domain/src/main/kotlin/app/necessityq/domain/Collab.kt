@@ -302,7 +302,7 @@ enum class ListSort(val label: String, val hint: String?, val hasDirection: Bool
     GROUPS("לפי קבוצות", null, false),
     ALPHA("א–ב", null, true),
     ADDED("לפי סדר הוספה", null, true),
-    PICK("לפי המסלול שלי בחנות", "נלמד מהסדר שבו סימנתם בקניות קודמות", false),
+    PICK("לפי המסלול שלי בסופר", "נלמד מהסדר שבו סימנתם בקניות קודמות", false),
     CART_LOAD("כבדים קודם, קירור בסוף", "כבדים לתחתית העגלה, ירקות ולחם למעלה, קפואים אחרונים", false),
 }
 

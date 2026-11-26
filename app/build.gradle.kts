@@ -12,6 +12,8 @@ plugins {
 val firebaseConfigured = file("google-services.json").exists()
 if (firebaseConfigured) {
     apply(plugin = libs.plugins.google.services.get().pluginId)
+    // uploads the R8 mapping so crash reports from release builds are readable
+    apply(plugin = libs.plugins.firebase.crashlytics.get().pluginId)
 }
 
 // Signing: CI passes a keystore through environment variables (see .github/workflows/android.yml).
@@ -106,6 +108,7 @@ dependencies {
     implementation(libs.firebase.storage)
     implementation(libs.firebase.functions)
     implementation(libs.firebase.messaging)
+    implementation(libs.firebase.crashlytics)
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play)
     implementation(libs.googleid)

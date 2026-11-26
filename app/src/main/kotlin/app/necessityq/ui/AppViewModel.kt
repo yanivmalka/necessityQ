@@ -8,6 +8,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import app.necessityq.AppContainer
 import app.necessityq.domain.Autocomplete
+import app.necessityq.domain.retryWithBackoff
 import app.necessityq.domain.HebrewText
 import app.necessityq.domain.ItemIdentity
 import app.necessityq.domain.LineSource
@@ -80,13 +81,14 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     val snapshot: StateFlow<ListSnapshot?> = householdId
         .flatMapLatest { hid -> if (hid == null) emptyFlow() else container.service.snapshot(hid) }
-        .catch { _messages.tryEmit("שגיאה בסנכרון: ${it.message}") }
+        // a dropped listener is subscribed again (growing pause); the user is told once, not on every retry
+        .retryWithBackoff { cause, attempt -> if (attempt == 0L) _messages.tryEmit("שגיאה בסנכרון, מנסים שוב: ${cause.message}") }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val purchases: StateFlow<List<Purchase>> = householdId
         .flatMapLatest { hid -> if (hid == null) emptyFlow() else container.service.purchases(hid) }
         .map { list -> list.sortedByDescending { it.boughtAtMillis } }
-        .catch { emit(emptyList()) }
+        .retryWithBackoff()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** Quick-add text box. */
@@ -119,7 +121,10 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun showMessage(text: String) { _messages.tryEmit(text) }
 
     private fun launchSafe(block: suspend () -> Unit) = viewModelScope.launch {
-        runCatching { block() }.onFailure { _messages.tryEmit(it.message ?: "פעולה נכשלה") }
+        runCatching { block() }.onFailure {
+            app.necessityq.platform.CrashReport.record(it)
+            _messages.tryEmit(it.message ?: "פעולה נכשלה")
+        }
     }
 
     private val _added = MutableSharedFlow<String>(extraBufferCapacity = 4)
@@ -1516,7 +1521,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         launchSafe {
             container.collab.saveStore(hid, store)
             selectStore(store.id)
-            if (location == null) _messages.tryEmit("החנות נשמרה בלי מיקום (אין הרשאת מיקום)")
+            if (location == null) _messages.tryEmit("הסופר נשמר בלי מיקום (אין הרשאת מיקום)")
         }
     }
 

@@ -100,7 +100,7 @@ fun StartupScreen(step: StartupStep, palette: AppPalette, onDone: () -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 StepRow("מתחברים לחשבון", StartupStep.ACCOUNT, step)
                 StepRow("טוענים את הרשימה של הבית", StartupStep.LIST, step)
-                StepRow("טוענים מחירים ומבצעים מהסניף", StartupStep.PRICES, step)
+                StepRow("טוענים מחירים ומבצעים מהסופר", StartupStep.PRICES, step)
             }
             Spacer(Modifier.height(24.dp))
             // fades in after a few seconds; until then it keeps its place, so nothing jumps
