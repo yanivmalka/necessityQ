@@ -18,6 +18,7 @@ import app.necessityq.domain.ListMode
 import app.necessityq.domain.MealData
 import app.necessityq.domain.MealPlanner
 import app.necessityq.domain.PickOrder
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.filter
 import app.necessityq.domain.LineStatus
@@ -1696,10 +1697,26 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     val me: String get() = (session.value as? Session.SignedIn)?.userId.orEmpty()
 
-    private val allMessages: StateFlow<List<ItemMessage>> = householdId
+    /** The latest messages of the whole household (a window of all items together). */
+    private val windowMessages: StateFlow<List<ItemMessage>> = householdId
         .flatMapLatest { hid -> if (hid == null) emptyFlow() else container.collab.messages(hid) }
         .catch { emit(emptyList()) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    private val openChatItem = MutableStateFlow<String?>(null)
+
+    /** The conversation on screen is loaded whole, so a busy chat elsewhere cannot push its messages out of the window. */
+    fun setOpenChat(itemId: String?) { openChatItem.value = itemId }
+
+    private val openChatMessages: Flow<List<ItemMessage>> = combine(householdId, openChatItem) { hid, item -> hid to item }
+        .flatMapLatest { (hid, item) ->
+            if (hid == null || item == null) kotlinx.coroutines.flow.flowOf(emptyList())
+            else container.collab.itemMessages(hid, item).catch { emit(emptyList()) }
+        }
+
+    private val allMessages: StateFlow<List<ItemMessage>> = combine(windowMessages, openChatMessages) { window, open ->
+        if (open.isEmpty()) window else (open + window).distinctBy { it.id }.sortedBy { it.atMillis }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     /** Conversations of the current shopping event (what the list and the messages screen show). */
     val itemMessages: StateFlow<List<ItemMessage>> = allMessages
@@ -1831,27 +1848,30 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     /** Other members typing right now, in any item conversation (only while connected: marks are live). */
     val typingNow: StateFlow<List<app.necessityq.domain.TypingState>> = householdId
-        .flatMapLatest { hid -> if (hid == null) emptyFlow() else container.collab.typing(hid) }
-        .catch { emit(emptyList()) }
+        .flatMapLatest { hid ->
+            if (hid == null) emptyFlow()
+            else {
+                // marks are re-stamped with OUR clock (the writer's clock may differ by seconds), and a failed
+                // listener is retried instead of leaving "typing…" dead until the screen is reopened
+                val tracker = app.necessityq.domain.TypingTracker()
+                container.collab.typing(hid)
+                    .map { tracker.observe(it, System.currentTimeMillis()) }
+                    .retryWhen { _, _ -> kotlinx.coroutines.delay(3_000); true }
+            }
+        }
         .let { marks -> combine(marks, clockTick) { all, now -> app.necessityq.domain.Typing.active(all, me, now) } }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private var typingItem: String? = null
+    private var typingKind = app.necessityq.domain.TypingKind.TEXT
     private var typingAnnouncedAt = 0L
     private var typingIdle: kotlinx.coroutines.Job? = null
 
     /** The text box of an item conversation changed: announce typing (throttled), stop when emptied or idle. */
     fun onDraftChanged(itemId: String, itemName: String, text: String) {
         if (text.isBlank()) { stopTyping(); return }
-        val (hid, uid, _) = ctx() ?: return
-        val now = System.currentTimeMillis()
-        if (app.necessityq.domain.Typing.shouldAnnounce(typingItem, typingAnnouncedAt, itemId, now)) {
-            typingItem = itemId
-            typingAnnouncedAt = now
-            val state = app.necessityq.domain.TypingState(uid, authorName(uid), itemId, itemName, now)
-            viewModelScope.launch { runCatching { container.collab.setTyping(hid, uid, state) } }
-        }
+        announce(itemId, itemName, app.necessityq.domain.TypingKind.TEXT)
         typingIdle?.cancel()
         typingIdle = viewModelScope.launch {
             kotlinx.coroutines.delay(app.necessityq.domain.Typing.IDLE_MS)
@@ -1859,12 +1879,35 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** Called every moment of a voice recording: others see "באמצע הקלטה…" until [stopTyping]. */
+    fun onRecordingTick(itemId: String, itemName: String) {
+        typingIdle?.cancel()
+        typingIdle = null
+        announce(itemId, itemName, app.necessityq.domain.TypingKind.RECORDING)
+    }
+
+    private fun announce(itemId: String, itemName: String, kind: app.necessityq.domain.TypingKind) {
+        val (hid, uid, _) = ctx() ?: return
+        val now = System.currentTimeMillis()
+        if (kind != typingKind || app.necessityq.domain.Typing.shouldAnnounce(typingItem, typingAnnouncedAt, itemId, now)) {
+            typingItem = itemId
+            typingKind = kind
+            typingAnnouncedAt = now
+            val state = app.necessityq.domain.TypingState(uid, authorName(uid), itemId, itemName, now, kind)
+            viewModelScope.launch { runCatching { container.collab.setTyping(hid, uid, state) } }
+        }
+    }
+
+    /** When the conversation was last opened (before this opening); messages of others after it are unread. */
+    fun lastReadAt(itemId: String): Long = prefs.readAt(itemId)
+
     /** Sent, emptied, idle or the conversation was closed. */
     fun stopTyping() {
         typingIdle?.cancel()
         typingIdle = null
         if (typingItem == null) return
         typingItem = null
+        typingKind = app.necessityq.domain.TypingKind.TEXT
         typingAnnouncedAt = 0L
         val (hid, uid, _) = ctx() ?: return
         viewModelScope.launch { runCatching { container.collab.setTyping(hid, uid, null) } }

@@ -483,6 +483,10 @@ internal fun MessageDetailsDialog(vm: AppViewModel, m: ItemMessage, onDismiss: (
                 if (m.pending) Text("ממתינה לשליחה (אין חיבור).", style = MaterialTheme.typography.bodySmall)
                 HorizontalDivider()
                 Text("מי קיבל וקרא", fontWeight = FontWeight.Bold)
+                if (receipts.size > 1) {
+                    val readBy = receipts.count { it.state == app.necessityq.domain.DeliveryStatus.READ }
+                    Text("נקראה על ידי $readBy מתוך ${receipts.size}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                }
                 if (receipts.isEmpty()) Text("אין עוד משתתפים בבית.", style = MaterialTheme.typography.bodySmall)
                 receipts.forEach { r ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -613,7 +617,7 @@ private const val PAST_PAGE = 50
 fun MessagesScreen(vm: AppViewModel, modifier: Modifier = Modifier, onOpen: (itemId: String, itemName: String) -> Unit) {
     val typing by vm.typingNow.collectAsStateWithLifecycle()
     fun typingHere(id: String): String? =
-        typing.filter { it.itemId == id }.takeIf { it.isNotEmpty() }?.let { t -> app.necessityq.domain.Typing.label(t.map { it.name }) }
+        typing.filter { it.itemId == id }.takeIf { it.isNotEmpty() }?.let { t -> app.necessityq.domain.Typing.labelFor(t) }
     val all by vm.itemMessages.collectAsStateWithLifecycle()
     val archived by vm.archivedMessages.collectAsStateWithLifecycle()
     val retention by vm.chatRetention.collectAsStateWithLifecycle()

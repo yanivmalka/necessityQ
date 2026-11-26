@@ -13,4 +13,16 @@ class ReceiptsTest {
         assertEquals(DeliveryStatus.DELIVERED, Receipts.status(m, "me", mapOf("keren" to Receipt(seenAt = 150)), members))
         assertEquals(DeliveryStatus.READ, Receipts.status(m, "me", mapOf("keren" to Receipt(read = mapOf("milk" to 120))), members))
     }
+
+    @Test fun `group ticks need everyone`() {
+        val three = listOf("me", "keren", "yaniv")
+        val readByKeren = mapOf("keren" to Receipt(read = mapOf("milk" to 120)))
+        assertEquals(DeliveryStatus.SENT, Receipts.status(m, "me", readByKeren, three))
+        val seenByYaniv = readByKeren + ("yaniv" to Receipt(seenAt = 130))
+        assertEquals(DeliveryStatus.DELIVERED, Receipts.status(m, "me", seenByYaniv, three))
+        val both = readByKeren + ("yaniv" to Receipt(read = mapOf("milk" to 140)))
+        assertEquals(DeliveryStatus.READ, Receipts.status(m, "me", both, three))
+        assertEquals(1 to 2, Receipts.readProgress(m, "me", readByKeren, three))
+        assertEquals(DeliveryStatus.SENT, Receipts.status(m, "me", emptyMap(), listOf("me")))
+    }
 }

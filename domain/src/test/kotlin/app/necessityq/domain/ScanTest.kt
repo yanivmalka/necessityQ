@@ -156,6 +156,32 @@ class TypingTest {
         assertTrue(Typing.shouldAnnounce("milk", 1_000, "milk", 4_500))
         assertTrue(Typing.shouldAnnounce("milk", 1_000, "bread", 1_500))
     }
+
+    @Test
+    fun recordingLabel() {
+        val rec = TypingState("a", "קרן", "milk", "milk", 1, TypingKind.RECORDING)
+        assertEquals("קרן באמצע הקלטה…", Typing.labelFor(listOf(rec)))
+        assertEquals(
+            "יניב באמצע הקלדה… · קרן באמצע הקלטה…",
+            Typing.labelFor(listOf(t("יניב", 1), rec)),
+        )
+    }
+
+    @Test
+    fun trackerUsesTheReadersClockNotTheWritersClock() {
+        val tracker = TypingTracker()
+        // the writer's clock is a minute behind ours: irrelevant
+        val first = tracker.observe(listOf(t("keren", 40_000)), 100_000)
+        assertTrue("already there when listening started: stale", Typing.active(first, "me", 100_000).isEmpty())
+        val beat = tracker.observe(listOf(t("keren", 43_000)), 103_000)
+        assertEquals(listOf("keren"), Typing.active(beat, "me", 103_000).map { it.userId })
+        // an unrelated snapshot does not refresh it; it fades once heartbeats stop
+        val same = tracker.observe(listOf(t("keren", 43_000), t("yaniv", 50_000)), 106_000)
+        assertEquals(103_000L, same.first { it.userId == "keren" }.atMillis)
+        assertTrue(Typing.active(same, "me", 110_000).none { it.userId == "keren" })
+        // deleted mark disappears
+        assertTrue(tracker.observe(emptyList(), 107_000).isEmpty())
+    }
 }
 
 class PieceWeightTest {

@@ -110,12 +110,27 @@ data class Receipt(val seenAt: Long = 0, val read: Map<String, Long> = emptyMap(
 enum class DeliveryStatus { PENDING, SENT, DELIVERED, READ }
 
 object Receipts {
+    /** The others who can read [m]: every member except me and the author. */
+    private fun others(m: ItemMessage, me: String, members: Collection<String>) = members.filter { it != me && it != m.authorId }
+
+    private fun hasRead(m: ItemMessage, id: String, receipts: Map<String, Receipt>) = (receipts[id]?.read?.get(m.itemId) ?: 0L) >= m.atMillis
+    private fun hasSeen(m: ItemMessage, id: String, receipts: Map<String, Receipt>) = (receipts[id]?.seenAt ?: 0L) >= m.atMillis
+
+    /** As in a WhatsApp group: blue ticks only once EVERYONE read it, grey double ticks once everyone received it. */
     fun status(m: ItemMessage, me: String, receipts: Map<String, Receipt>, members: Collection<String>): DeliveryStatus {
         if (m.pending) return DeliveryStatus.PENDING
-        val others = members.filter { it != me && it != m.authorId }
-        if (others.any { (receipts[it]?.read?.get(m.itemId) ?: 0L) >= m.atMillis }) return DeliveryStatus.READ
-        if (others.any { (receipts[it]?.seenAt ?: 0L) >= m.atMillis }) return DeliveryStatus.DELIVERED
+        val others = others(m, me, members)
+        if (others.isEmpty()) return DeliveryStatus.SENT
+        if (others.all { hasRead(m, it, receipts) }) return DeliveryStatus.READ
+        if (others.all { hasRead(m, it, receipts) || hasSeen(m, it, receipts) }) return DeliveryStatus.DELIVERED
         return DeliveryStatus.SENT
+    }
+
+    /** "read by N of M" for the message details; null when nobody else is in the household. */
+    fun readProgress(m: ItemMessage, me: String, receipts: Map<String, Receipt>, members: Collection<String>): Pair<Int, Int>? {
+        val others = others(m, me, members)
+        if (others.isEmpty()) return null
+        return others.count { hasRead(m, it, receipts) } to others.size
     }
 }
 
@@ -133,6 +148,12 @@ interface CollabRepository {
     suspend fun setFavorite(householdId: String, itemId: String, favorite: Boolean)
 
     fun messages(householdId: String): Flow<List<ItemMessage>>
+    /**
+     * The whole conversation of one item, whatever the size of the household-wide window of [messages]
+     * (which holds only the latest messages of all items together).
+     */
+    fun itemMessages(householdId: String, itemId: String): Flow<List<ItemMessage>> =
+        messages(householdId).map { all -> all.filter { it.itemId == itemId } }
     suspend fun sendMessage(householdId: String, message: ItemMessage)
     /** [mentions]: the members tagged in the new text (a tag may be added or removed by the edit). */
     suspend fun editMessage(householdId: String, messageId: String, text: String, editedAtMillis: Long, mentions: List<String> = emptyList())

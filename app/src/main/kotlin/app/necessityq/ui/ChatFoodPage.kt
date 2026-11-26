@@ -3,6 +3,7 @@ package app.necessityq.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,14 +23,17 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.necessityq.domain.ItemMessage
 import app.necessityq.domain.LineStatus
+import kotlinx.coroutines.launch
 
 /**
  * צ'אט פוד about one product, on a page of its own: it opens from the product page ("צ'אט פוד על המוצר", next to
@@ -76,19 +81,34 @@ fun ChatFoodPage(
     // no alert sound for the conversation that is open on screen
     DisposableEffect(itemId) {
         app.necessityq.platform.MentionAlerter.openItemId = itemId
-        onDispose { if (app.necessityq.platform.MentionAlerter.openItemId == itemId) app.necessityq.platform.MentionAlerter.openItemId = null }
+        vm.setOpenChat(itemId) // the whole conversation, not only what the household-wide window holds
+        onDispose {
+            if (app.necessityq.platform.MentionAlerter.openItemId == itemId) app.necessityq.platform.MentionAlerter.openItemId = null
+            vm.setOpenChat(null)
+        }
     }
+    // when this conversation was last read, taken before the page marks it as read now: the "unread" divider
+    val openedReadAt = remember(itemId) { vm.lastReadAt(itemId) }
     // reading the page marks the conversation as read, also for messages that arrive while it is open
     LaunchedEffect(itemId, thread.size) { vm.markRead(itemId) }
 
     val scroll = rememberScrollState()
+    val scope = rememberCoroutineScope()
     // opens at the latest message; a new message (sent or received) brings the end into view, as in a chat app
     LaunchedEffect(itemId) { scroll.scrollTo(scroll.maxValue) }
     var seenMessages by remember(itemId) { mutableIntStateOf(thread.size) }
+    // messages that arrived while reading older ones: counted on the jump-down button, not forced on screen
+    var awayMessages by remember(itemId) { mutableIntStateOf(0) }
     LaunchedEffect(thread.size) {
-        if (thread.size > seenMessages) scroll.animateScrollTo(scroll.maxValue)
+        if (thread.size > seenMessages) {
+            val nearEnd = scroll.maxValue - scroll.value < 600
+            val mine = thread.lastOrNull()?.authorId == vm.me
+            if (nearEnd || mine) scroll.animateScrollTo(scroll.maxValue) else awayMessages += thread.size - seenMessages
+        }
         seenMessages = thread.size
     }
+    val farFromEnd by remember { derivedStateOf { scroll.maxValue - scroll.value > 500 } }
+    LaunchedEffect(farFromEnd) { if (!farFromEnd) awayMessages = 0 }
     val typingHere = typing.filter { it.itemId == itemId }
     LaunchedEffect(typingHere.size) {
         if (typingHere.isNotEmpty() && scroll.maxValue - scroll.value < 600) scroll.animateScrollTo(scroll.maxValue)
@@ -145,7 +165,7 @@ fun ChatFoodPage(
                     Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         TypingDots()
                         Text(
-                            "  " + app.necessityq.domain.Typing.label(group.map { it.name }).removeSuffix("…") + " על ${first.itemName}",
+                            "  " + app.necessityq.domain.Typing.labelFor(group).removeSuffix("…") + " על ${first.itemName}",
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.weight(1f),
                         )
@@ -153,8 +173,9 @@ fun ChatFoodPage(
                     }
                 }
             }
+            Box(Modifier.fillMaxWidth().weight(1f)) {
             Column(
-                Modifier.fillMaxWidth().weight(1f).fadingVerticalScroll(scroll).padding(horizontal = 12.dp, vertical = 4.dp),
+                Modifier.fillMaxSize().fadingVerticalScroll(scroll).padding(horizontal = 12.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (thread.isEmpty() && typingHere.isEmpty()) {
@@ -168,6 +189,7 @@ fun ChatFoodPage(
                 ChatFoodThread(
                     thread, vm = vm,
                     typing = typingHere,
+                    unreadAfter = openedReadAt,
                     selectedId = selectedMessageId,
                     onSelect = { selectedMessageId = it?.id },
                     onReply = { replyTo = it; editingMessage = null },
@@ -178,6 +200,18 @@ fun ChatFoodPage(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.padding(bottom = 8.dp))
+            }
+            if (farFromEnd) {
+                SmallFloatingActionButton(
+                    onClick = { scope.launch { scroll.animateScrollTo(scroll.maxValue) } },
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "לסוף השיחה")
+                        if (awayMessages > 0) Text("$awayMessages", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
             }
             Column(
                 Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerLow)

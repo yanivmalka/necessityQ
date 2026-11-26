@@ -163,6 +163,8 @@ internal fun ChatFoodThread(
     readOnly: Boolean = false,
     /** Others typing in this conversation right now: shown at its end as WhatsApp does. */
     typing: List<app.necessityq.domain.TypingState> = emptyList(),
+    /** Messages of others after this moment are unread: a divider is drawn before the first one (Long.MAX_VALUE = none). */
+    unreadAfter: Long = Long.MAX_VALUE,
 ) {
     val names by vm.memberNames.collectAsStateWithLifecycle()
     val photos by vm.memberPhotos.collectAsStateWithLifecycle()
@@ -184,6 +186,8 @@ internal fun ChatFoodThread(
     val members by vm.chatMembers.collectAsStateWithLifecycle()
     val slots = remember(thread) { ChatLayout.slots(thread, System.currentTimeMillis()) }
     val byId = remember(thread) { thread.associateBy { it.id } }
+    val firstUnread = remember(thread, unreadAfter) { thread.firstOrNull { it.authorId != vm.me && it.atMillis > unreadAfter } }
+    val unreadCount = remember(thread, unreadAfter) { thread.count { it.authorId != vm.me && it.atMillis > unreadAfter } }
     val requesters = remember { HashMap<String, BringIntoViewRequester>() }
     val scope = rememberCoroutineScope()
     var flashId by remember { mutableStateOf<String?>(null) }
@@ -204,6 +208,7 @@ internal fun ChatFoodThread(
             slots.forEach { slot ->
                 key(slot.message.id) {
                     slot.dayHeader?.let { ChatDayChip(it) }
+                    if (slot.message.id == firstUnread?.id) ChatDayChip(if (unreadCount == 1) "הודעה אחת שלא נקראה" else "$unreadCount הודעות שלא נקראו")
                     BubbleRow(
                         slot = slot,
                         vm = vm,
@@ -239,7 +244,8 @@ private fun TypingBubble(
     photos: Map<String, androidx.compose.ui.graphics.ImageBitmap>,
     colorOf: (String) -> Color,
 ) {
-    val label = app.necessityq.domain.Typing.label(typing.map { it.name })
+    val label = app.necessityq.domain.Typing.labelFor(typing)
+    val recording = typing.all { it.kind == app.necessityq.domain.TypingKind.RECORDING }
     Row(
         Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp).semantics { contentDescription = label },
         verticalAlignment = Alignment.CenterVertically,
@@ -261,10 +267,11 @@ private fun TypingBubble(
             border = BorderStroke(1.dp, NqTheme.colors.hairline),
         ) {
             Box(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
-                TypingDots(color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (recording) Icon(Icons.Default.Mic, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
+                else TypingDots(color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        if (typing.size > 1) {
+        if (typing.size > 1 || typing.any { it.kind == app.necessityq.domain.TypingKind.RECORDING }) {
             Spacer(Modifier.width(8.dp))
             Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
@@ -962,6 +969,7 @@ internal fun ChatFoodComposer(
     }
 
     fun sendRecording(r: VoiceRecorder.Recording) {
+        vm.stopTyping()
         vm.sendMedia(
             itemId, itemName, MessageKind.AUDIO, MediaBlob("audio/mp4", r.bytes),
             durationMs = r.durationMs, replyToId = replyTo?.id, waveform = r.waveform,
@@ -1005,6 +1013,8 @@ internal fun ChatFoodComposer(
     }
     LaunchedEffect(recording) {
         while (recording) {
+            // others see "באמצע הקלטה…" from the first moment, renewed every 2.5 seconds
+            if (elapsed % 2_500L == 0L) vm.onRecordingTick(itemId, itemName)
             delay(VoiceRecorder.SAMPLE_MS)
             vm.recorder.sample()
             elapsed += VoiceRecorder.SAMPLE_MS
@@ -1061,7 +1071,7 @@ internal fun ChatFoodComposer(
                 modifier = Modifier.weight(1f).heightIn(min = 48.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 4.dp)) {
-                    IconButton(onClick = { vm.recorder.stopQuietly(); recording = false }) {
+                    IconButton(onClick = { vm.recorder.stopQuietly(); recording = false; vm.stopTyping() }) {
                         Icon(Icons.Default.Delete, contentDescription = "ביטול ההקלטה", tint = MaterialTheme.colorScheme.error)
                     }
                     Box(Modifier.size(10.dp).background(MaterialTheme.colorScheme.error, CircleShape))
@@ -1076,7 +1086,7 @@ internal fun ChatFoodComposer(
             ComposerAction(Icons.AutoMirrored.Filled.Send, "שליחת ההקלטה") {
                 recording = false
                 val result = vm.recorder.stop()
-                if (result == null) vm.reportError("ההקלטה קצרה מדי") else sendRecording(result)
+                if (result == null) { vm.stopTyping(); vm.reportError("ההקלטה קצרה מדי") } else sendRecording(result)
             }
         }
         return
