@@ -126,10 +126,11 @@ data class Purchase(
     }
 }
 
-/** User feedback on a suggestion: hidden until [untilEpochDay]. */
+/** User feedback on a suggestion: hidden until [untilEpochDay]; [dismissals] = how often it was rejected so far. */
 data class SuggestionSuppression(
     val itemId: String,
     val untilEpochDay: Long,
+    val dismissals: Int = 1,
 )
 
 data class Household(

@@ -177,6 +177,38 @@ class StatsAndSuggestionsTest {
         assertEquals(Quantity.pieces(2), trip.first { it.identity.displayName == "חלב 3%" }.quantity)
     }
 
+    @Test fun `a rejected suggestion loses weight and is given up after three rejections`() {
+        val today = start.plusDays(29)
+        val stats = engine.compute(every("חלב 3%", 5, 6) + every("לחם", 3, 8), today).values
+        val milk = ItemIdentity.fromText("חלב 3%").id
+        val bread = ItemIdentity.fromText("לחם").id
+        val engine = SuggestionEngine()
+        val plain = engine.forNextTrip(stats, emptySet(), emptyList(), today)
+        val once = engine.forNextTrip(stats, emptySet(), emptyList(), today, rejections = mapOf(milk to 1))
+        assertEquals(plain.first { it.itemId == milk }.score / 2, once.first { it.itemId == milk }.score, 0.0001)
+        assertEquals(plain.first { it.itemId == bread }.score, once.first { it.itemId == bread }.score, 0.0001)
+        val gone = engine.forNextTrip(stats, emptySet(), emptyList(), today, rejections = mapOf(milk to 3))
+        assertTrue(gone.none { it.itemId == milk } && gone.any { it.itemId == bread })
+        assertTrue(engine.suggest(stats, emptySet(), emptyList(), today, mapOf(milk to 3)).runningLow.none { it.itemId == milk })
+    }
+
+    @Test fun `each dismissal doubles how long the suggestion stays hidden`() {
+        val today = start.plusDays(29)
+        val s = engine.compute(every("חלב 3%", 5, 6), today).values.single()
+        val e = SuggestionEngine()
+        assertEquals(today.plusDays(3), e.dismissUntil(s, today))
+        assertEquals(today.plusDays(6), e.dismissUntil(s, today, priorRejections = 1))
+        assertEquals(today.plusDays(12), e.dismissUntil(s, today, priorRejections = 2))
+    }
+
+    @Test fun `deleted suggestions count as rejections, recent ones only`() {
+        val now = 100L * 86_400_000L
+        fun gone(id: String, at: Long, from: LineStatus = LineStatus.NEEDED) =
+            line(id, LineSource.SUGGESTED, LineStatus.REMOVED, removedFrom = from).copy(itemId = "x", removedAtMillis = at)
+        val lines = listOf(gone("1", now - 1000), gone("2", now - 2000), gone("3", 0L), gone("4", now - 3000, LineStatus.BOUGHT))
+        assertEquals(mapOf("x" to 2), SuggestionAccuracy.rejectionsByItem(lines, now - 60L * 86_400_000L))
+    }
+
     private fun line(id: String, source: LineSource, status: LineStatus, removedFrom: LineStatus? = null, recipe: String? = null) = ListLine(
         id = id, itemId = id, name = id, variant = null, category = Category.PRODUCE, quantity = null, note = null,
         status = status, source = source, addedBy = "u1", addedAtMillis = 0, updatedAtMillis = 0,

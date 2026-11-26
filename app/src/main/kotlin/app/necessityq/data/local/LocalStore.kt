@@ -52,6 +52,8 @@ internal data class StateDto(
     val lines: List<LineDto> = emptyList(),
     val purchases: List<PurchaseDto> = emptyList(),
     val suppressions: Map<String, Long> = emptyMap(),
+    /** How often each suggestion was dismissed (older files have none: one). */
+    val dismissals: Map<String, Int> = emptyMap(),
 )
 
 /**
@@ -94,6 +96,7 @@ class LocalStore(private val file: File) {
             lines = shopping.current.value.lines.values.map { it.toDto() },
             purchases = shopping.current.value.purchases.values.map { it.toDto() },
             suppressions = shopping.current.value.suppressions.mapValues { it.value.untilEpochDay },
+            dismissals = shopping.current.value.suppressions.mapValues { it.value.dismissals },
         )
         writer.execute {
             val tmp = File(file.parentFile, file.name + ".tmp")
@@ -147,5 +150,5 @@ private fun StateDto.toDomain(): LocalState = LocalState(
             quantity = d.quantity?.toDomain(), boughtAtMillis = d.boughtAt, boughtBy = d.boughtBy, lineId = d.lineId,
         )
     },
-    suppressions = suppressions.mapValues { (itemId, until) -> SuggestionSuppression(itemId, until) },
+    suppressions = suppressions.mapValues { (itemId, until) -> SuggestionSuppression(itemId, until, dismissals[itemId] ?: 1) },
 )
