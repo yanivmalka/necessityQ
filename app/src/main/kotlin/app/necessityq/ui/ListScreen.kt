@@ -134,7 +134,9 @@ import app.necessityq.domain.ListLine
 import app.necessityq.domain.ListMode
 import app.necessityq.domain.ListOrdering
 import app.necessityq.domain.ListSort
+import app.necessityq.domain.GeneratedItem
 import app.necessityq.domain.Quantity
+import app.necessityq.domain.QuantitySteps
 import app.necessityq.domain.StoreType
 import app.necessityq.domain.Suggestion
 import app.necessityq.domain.TagKind
@@ -240,6 +242,7 @@ fun ListScreen(
     var showFilter by remember { mutableStateOf(false) }
     var showGenerate by remember { mutableStateOf(false) }
     var showReset by remember { mutableStateOf(false) }
+    var showFinish by remember { mutableStateOf(false) }
     var showBin by remember { mutableStateOf(false) }
     val scan = rememberBarcodeScan(vm) { vm.onScanned(it) }
     var showStoreDialog by remember { mutableStateOf(false) }
@@ -588,7 +591,7 @@ fun ListScreen(
                 Box(Modifier.weight(1f)) { sortFilterChips() }
                 collapseButton()
                 // the end of the trip: an icon beside chat and ⋮, not a line of text in the way of the list
-                IconButton(onClick = vm::finishShopping) {
+                IconButton(onClick = { showFinish = true }) {
                     Icon(Icons.Default.CheckCircle, contentDescription = "סיום קנייה", tint = MaterialTheme.colorScheme.primary)
                 }
                 if (chatOn) messagesButton(MaterialTheme.colorScheme.onSurface)
@@ -976,6 +979,26 @@ fun ListScreen(
     }
     if (showGenerate) GenerateSheet(vm, onDismiss = { showGenerate = false })
     if (showTrip) TripPlanSheet(vm, onDismiss = { showTrip = false })
+    if (showFinish) {
+        val summary = app.necessityq.domain.TripSummary.of(snapshot?.lines.orEmpty())
+        // a decision dialog (ACTIONS.md): "ביטול" and the verb of the action. What was bought goes to the recycle bin
+        AlertDialog(
+            onDismissRequest = { showFinish = false },
+            title = { Text("לסיים את הקנייה?") },
+            text = {
+                Column {
+                    Text(summary.text())
+                    Text(
+                        "הפריטים שנקנו עוברים לסל המחזור ואפשר להחזיר אותם. מה שלא נקנה ומה שחסר נשאר ברשימה.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { showFinish = false; vm.finishShopping() }) { Text("סיום קנייה") } },
+            dismissButton = { TextButton(onClick = { showFinish = false }) { Text("ביטול") } },
+        )
+    }
     if (showReset) ResetDialog(snapshot?.lines.orEmpty(), onReset = { vm.resetList(it); showReset = false }, onDismiss = { showReset = false })
 
     openItem?.let { line ->
@@ -1769,11 +1792,42 @@ private fun GenerateSheet(vm: AppViewModel, onDismiss: () -> Unit) {
     var mode by remember { mutableStateOf(GenerateMode.DUE) }
     val proposal = remember(mode) { vm.proposeList(mode) }
     var chosen by remember(proposal) { mutableStateOf(proposal.filter { it.preselected }.map { it.identity.id }.toSet()) }
+    // amounts changed in the review, by item id (null value = "no amount")
+    var quantities by remember(proposal) { mutableStateOf<Map<String, Quantity?>>(emptyMap()) }
+    fun quantityOf(item: GeneratedItem) = if (item.identity.id in quantities) quantities[item.identity.id] else item.quantity
+    // after adding: what was added, and the undo of exactly that
+    var result by remember { mutableStateOf<List<GeneratedItem>?>(null) }
+    var undoAdded by remember { mutableStateOf<(() -> Unit)?>(null) }
     ModalBottomSheet(onDismissRequest = onDismiss) {
+        val added = result
+        if (added != null) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(if (added.size == 1) "נוסף פריט אחד" else "נוספו ${added.size} פריטים", style = MaterialTheme.typography.titleLarge)
+                Text(
+                    "הם מסומנים \"אוטומטי\" ברשימה. אפשר להסיר פריט בהחלקה, או לבטל את כל ההוספה.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+                    items(added, key = { it.identity.id }) { item ->
+                        Text(
+                            "• " + item.identity.displayName + (item.quantity?.let { " · " + it.format() } ?: ""),
+                            Modifier.padding(vertical = 2.dp),
+                        )
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { undoAdded?.invoke(); onDismiss() }, Modifier.weight(1f), enabled = undoAdded != null) { Text("ביטול ההוספה") }
+                    Button(onClick = onDismiss, Modifier.weight(1f)) { Text("סגירה") }
+                }
+            }
+            return@ModalBottomSheet
+        }
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("רשימה מקניות עבר", style = MaterialTheme.typography.titleLarge)
             Text(
-                "הפריטים יסומנו \"אוטומטי\" כדי שיהיה ברור מה נוצר מההיסטוריה ומה נוסף ידנית.",
+                "בדקו מה יתווסף: אפשר לבטל סימון ולשנות כמות לפני ההוספה. מה שהוצע מראש והסרתם, האפליקציה תזכור ותציע פחות. " +
+                    "הפריטים יסומנו \"אוטומטי\".",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1794,6 +1848,7 @@ private fun GenerateSheet(vm: AppViewModel, onDismiss: () -> Unit) {
             LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).fadingEdges(proposalList, horizontal = false), state = proposalList) {
                 items(proposal, key = { it.identity.id }) { item ->
                     val on = item.identity.id in chosen
+                    val quantity = quantityOf(item)
                     Row(
                         Modifier.fillMaxWidth()
                             .clickable { chosen = if (on) chosen - item.identity.id else chosen + item.identity.id }
@@ -1804,14 +1859,24 @@ private fun GenerateSheet(vm: AppViewModel, onDismiss: () -> Unit) {
                         Box(Modifier.size(10.dp).clip(CircleShape).background(categoryColor(item.identity.category)))
                         Spacer(Modifier.width(8.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(item.identity.displayName + (item.quantity?.let { " · " + it.format() } ?: ""), fontWeight = FontWeight.Bold)
+                            Text(item.identity.displayName, fontWeight = FontWeight.Bold)
                             Text(item.reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
+                        // the amount is editable here; changing it also selects the item
+                        QuantityStepper(
+                            quantity,
+                            onMinus = { quantities = quantities + (item.identity.id to QuantitySteps.step(quantity, -1)) },
+                            onPlus = { quantities = quantities + (item.identity.id to QuantitySteps.step(quantity, +1)); chosen = chosen + item.identity.id },
+                        )
                     }
                 }
             }
             Button(
-                onClick = { vm.addGenerated(proposal.filter { it.identity.id in chosen }); onDismiss() },
+                onClick = {
+                    val toAdd = proposal.filter { it.identity.id in chosen }.map { it.copy(quantity = quantityOf(it)) }
+                    val rejected = proposal.filter { it.preselected && it.identity.id !in chosen }
+                    vm.addGenerated(toAdd, rejected) { undo -> undoAdded = undo; result = toAdd }
+                },
                 enabled = chosen.isNotEmpty(),
                 modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
             ) { Text("הוספת ${chosen.size} פריטים לרשימה") }

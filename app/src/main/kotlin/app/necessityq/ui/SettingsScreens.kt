@@ -822,4 +822,37 @@ fun AboutScreen(modifier: Modifier = Modifier) = PageScaffold("אודות", modi
     TextButton(onClick = {
         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/yanivmalka/necessityQ")))
     }) { Text("קוד המקור ב-GitHub") }
+    if (BuildConfig.FIREBASE_CONFIGURED) CrashlyticsCheck()
+}
+
+/**
+ * Lets the owner verify that Crashlytics receives reports: a handled failure (shows as non-fatal) or a real crash
+ * (reported on the next launch). Reports are collected only in release builds (see `AppContainer`).
+ */
+@Composable
+private fun CrashlyticsCheck() {
+    val context = LocalContext.current
+    var confirmCrash by remember { mutableStateOf(false) }
+    Text("בדיקת דיווח קריסות", style = MaterialTheme.typography.titleMedium)
+    Text(
+        if (BuildConfig.DEBUG) "בבניית debug הדיווח כבוי. הבדיקה עובדת רק בבנייה רגילה (release)."
+        else "שליחת כשל לבדיקה: מופיע בקונסולת Firebase (Crashlytics) תוך כמה דקות.",
+        style = MaterialTheme.typography.bodySmall,
+    )
+    TextButton(onClick = {
+        app.necessityq.platform.CrashReport.record(IllegalStateException("בדיקת Crashlytics: כשל מטופל"))
+        android.widget.Toast.makeText(context, "נשלח דיווח בדיקה (כשל מטופל)", android.widget.Toast.LENGTH_LONG).show()
+    }) { Text("שליחת כשל מטופל לבדיקה") }
+    TextButton(onClick = { confirmCrash = true }) { Text("גרימת קריסה לבדיקה") }
+    if (confirmCrash) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmCrash = false },
+            title = { Text("לגרום לקריסה?") },
+            text = { Text("האפליקציה תיסגר מיד. הדיווח יישלח בהפעלה הבאה.") },
+            confirmButton = {
+                TextButton(onClick = { throw IllegalStateException("בדיקת Crashlytics: קריסה יזומה") }) { Text("קריסה") }
+            },
+            dismissButton = { TextButton(onClick = { confirmCrash = false }) { Text("ביטול") } },
+        )
+    }
 }
