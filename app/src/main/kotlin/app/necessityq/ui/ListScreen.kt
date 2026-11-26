@@ -433,7 +433,14 @@ fun ListScreen(
     val menuButton: @Composable (Color) -> Unit = { tint ->
         Box {
             IconButton(onClick = { showMore = true }) { Icon(Icons.Default.MoreVert, contentDescription = "פעולות על הרשימה", tint = tint) }
-            DropdownMenu(expanded = showMore, onDismissRequest = { showMore = false }) {
+            DropdownMenu(
+                expanded = showMore,
+                onDismissRequest = { showMore = false },
+                shape = NqShapes.Field,
+                containerColor = MaterialTheme.colorScheme.surface,
+                tonalElevation = 0.dp,
+                shadowElevation = 6.dp,
+            ) {
                 // in the shop: what only the trip needs — an item that is not on the list yet, another store, the end
                 if (shopping) {
                     DropdownMenuItem(
@@ -497,13 +504,17 @@ fun ListScreen(
 
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (shopping) {
-            // a clean, slim top row (room to spare for what may come here later): back, chat, ⋮. Where the trip stands
-            // is at the bottom (with "סיום קנייה"), and "החלפת סופר" / "הוספה לרשימה" are in the ⋮ menu
+            // a clean, slim top row (room to spare for what may come here later): back, "סיום קנייה", chat, ⋮. Where the trip stands
+            // is at the bottom, and "החלפת סופר" / "הוספה לרשימה" are in the ⋮ menu
             Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { vm.setMode(ListMode.PLAN) }) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "חזרה להכנת רשימה")
                 }
                 Spacer(Modifier.weight(1f))
+                // the end of the trip: an icon beside chat and ⋮, not a line of text in the way of the list
+                IconButton(onClick = vm::finishShopping) {
+                    Icon(Icons.Default.CheckCircle, contentDescription = "סיום קנייה", tint = MaterialTheme.colorScheme.primary)
+                }
                 if (chatOn) messagesButton(MaterialTheme.colorScheme.onSurface)
                 menuButton(MaterialTheme.colorScheme.onSurface)
             }
@@ -591,7 +602,14 @@ fun ListScreen(
                     label = { Text(sort.label + if (!sort.hasDirection) "" else if (descending) " ↓" else " ↑", maxLines = 1) },
                     leadingIcon = { Icon(Icons.AutoMirrored.Filled.Sort, null, Modifier.size(18.dp)) },
                 )
-                DropdownMenu(expanded = showSortMenu, onDismissRequest = { showSortMenu = false }) {
+                DropdownMenu(
+                    expanded = showSortMenu,
+                    onDismissRequest = { showSortMenu = false },
+                    shape = NqShapes.Field,
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 0.dp,
+                    shadowElevation = 6.dp,
+                ) {
                     sortOptions.forEach { option ->
                         val recommended = shopping && option == ListSort.CART_LOAD
                         DropdownMenuItem(
@@ -882,7 +900,6 @@ fun ListScreen(
                 storeName = storeName,
                 remaining = if (showTotal && snap != null) app.necessityq.domain.ListCost.of(snap.lines, prices, itemPrices) else null,
                 onScan = scan,
-                onFinish = vm::finishShopping,
             )
         } else if (snap != null) {
             // one clear way into the store, with the estimated total of the open lines
@@ -2466,7 +2483,7 @@ private fun GoShoppingBar(
 
 /**
  * Bottom of the list while shopping: how many of the items are in the cart (with a progress line and what is left to
- * pay), the scan button — scanning a product puts it in the cart — and "סיום קנייה". Switching store is in ⋮.
+ * pay), and the scan button — scanning a product puts it in the cart. "סיום קנייה" is an icon in the top row; switching store is in ⋮.
  */
 @Composable
 private fun ShopBottomBar(
@@ -2475,7 +2492,6 @@ private fun ShopBottomBar(
     storeName: String?,
     remaining: app.necessityq.domain.ListCostEstimate?,
     onScan: () -> Unit,
-    onFinish: () -> Unit,
 ) {
     val c = NqTheme.colors
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -2519,12 +2535,6 @@ private fun ShopBottomBar(
             if (fraction > 0f) {
                 Box(Modifier.fillMaxWidth(fraction).fillMaxHeight().clip(NqShapes.Pill).background(c.shopProgress))
             }
-        }
-        // the only way a trip ends: always in sight, not hidden in ⋮ (the back arrow only returns to preparing)
-        TextButton(onClick = onFinish, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
-            Icon(Icons.Default.CheckCircle, contentDescription = null, Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("סיום קנייה", fontWeight = FontWeight.SemiBold)
         }
     }
 }
