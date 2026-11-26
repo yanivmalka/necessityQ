@@ -149,10 +149,13 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     /** A suggestion with no amount of its own gets one from the size of the household (family profiles). */
-    private fun sized(s: Suggestion): Suggestion = app.necessityq.domain.SmartQuantities.fill(
-        s, snapshot.value?.stats?.get(s.itemId),
-        app.necessityq.domain.HouseholdSize.people(meals.value.members, java.time.LocalDate.now()),
-    )
+    private fun sized(s: Suggestion): Suggestion {
+        val people = app.necessityq.domain.HouseholdSize.people(meals.value.members, java.time.LocalDate.now())
+        val stats = snapshot.value?.stats.orEmpty()
+        return app.necessityq.domain.SmartQuantities.fill(
+            s, stats[s.itemId], people, app.necessityq.domain.SmartQuantities.calibration(stats.values, people),
+        )
+    }
 
     fun accept(suggestion: Suggestion) {
         val (hid, uid, lines) = ctx() ?: return
