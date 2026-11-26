@@ -2215,7 +2215,29 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
      * Every return to the app checks for an update (when automatic checks are on), at most every
      * 15 minutes. The first call comes from the activity's start, so this also covers opening the app.
      */
+    private var presenceJob: kotlinx.coroutines.Job? = null
+
+    /** While the app is in front, a heartbeat every minute tells the household this member is here. */
+    private fun startPresence() {
+        presenceJob?.cancel()
+        presenceJob = viewModelScope.launch {
+            while (true) {
+                runCatching { container.household.setPresence(true) }
+                kotlinx.coroutines.delay(60_000L)
+            }
+        }
+    }
+
+    /** The app left the front: the others see this member as gone at once. */
+    fun onBackground() {
+        presenceJob?.cancel()
+        presenceJob = null
+        // not in viewModelScope's cancelled work: a short one-off write
+        viewModelScope.launch { runCatching { container.household.setPresence(false) } }
+    }
+
     fun onForeground() {
+        startPresence()
         // back in the app: promotions and stock are checked again when the last check is half an hour old
         refreshOffers()
         // standing in a followed branch while preparing the list? (offers to switch to shopping)

@@ -130,6 +130,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         app.necessityq.platform.MentionAlerter.appVisible = false
+        vm.onBackground()
         // a new app icon waits until the user leaves the app (home, recents, back): switching it closes the app
         if (!isChangingConfigurations && !openingOther) app.necessityq.platform.AppIcons.applyPending(this)
         super.onStop()
@@ -348,7 +349,7 @@ private fun Root(vm: AppViewModel) {
                     }.takeIf { declinedAdvice.isNotEmpty() },
                 ),
                 listOf(
-                    HubEntry(Dest.ACCOUNT.title, Icons.Default.AccountCircle, connected = !s.account.isAnonymous) { go(Dest.ACCOUNT, from = Dest.HOME) },
+                    HubEntry(Dest.ACCOUNT.title, Icons.Default.AccountCircle) { go(Dest.ACCOUNT, from = Dest.HOME) },
                     HubEntry(Dest.SETTINGS.title, Icons.Default.Tune) { settingsTab = SettingsTab.FEATURES; go(Dest.SETTINGS, from = Dest.HOME) },
                 ),
                 listOf(

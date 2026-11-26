@@ -28,7 +28,7 @@ class HelpCatalogTest {
         assertEquals("feature-chat", HelpCatalog.search("צ'אט פוד").first().id)
         assertEquals("feature-chat", HelpCatalog.search("הקלטה").first().id)
         assertTrue(HelpCatalog.search("מה זה כנראה נגמר בקרוב").any { it.id == "feature-running_low" })
-        assertTrue(HelpCatalog.search("נקודה ירוקה").any { it.id == "account-dot" })
+        assertTrue(HelpCatalog.search("נקודה ירוקה").any { it.id == "online-dot" })
         assertTrue(HelpCatalog.search("נגיעה כפולה").any { it.id == "tap-mode" })
     }
 
@@ -50,5 +50,17 @@ class HelpCatalogTest {
         val text = HelpCatalog.entries.flatMap { listOfNotNull(it.title, it.what, it.benefit, it.drawback, it.howTo) } +
             HelpCatalog.problems.flatMap { listOf(it.title, it.why) + it.steps }
         assertTrue(text.none { line -> line.any { it in "←→↑↓" } })
+    }
+}
+
+class MemberPresenceTest {
+    private fun member(seen: Long?) = Member("u", "דנה", null, MemberRole.MEMBER, lastSeenMillis = seen)
+
+    @Test
+    fun `a member is active while the heartbeat is recent`() {
+        val now = 1_000_000L
+        assertTrue(member(now - 60_000).isActive(now))
+        assertTrue(!member(now - Member.ACTIVE_WINDOW_MS - 1).isActive(now))
+        assertTrue(!member(null).isActive(now))
     }
 }

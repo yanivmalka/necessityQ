@@ -271,10 +271,14 @@ private fun SectionTitle(text: String) = Text(text, style = MaterialTheme.typogr
 @Composable
 private fun MemberRow(member: Member, isMe: Boolean, canRemove: Boolean, onRemove: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        ProfileAvatar(member.displayName, member.photo, size = 40.dp)
+        val active = isMe || member.isActive(rememberNowMillis())
+        Box {
+            ProfileAvatar(member.displayName, member.photo, size = 40.dp)
+            if (active) ConnectedDot(Modifier.align(Alignment.TopEnd), size = 13.dp)
+        }
         Column(Modifier.weight(1f)) {
             Text(member.displayName + if (isMe) " (את/ה)" else "")
-            val sub = listOfNotNull(if (member.role == MemberRole.OWNER) "מנהל הבית" else null, member.email).joinToString(" · ")
+            val sub = listOfNotNull(if (member.role == MemberRole.OWNER) "מנהל הבית" else null, if (active) "פעיל/ה עכשיו" else null, member.email).joinToString(" · ")
             if (sub.isNotBlank()) Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (canRemove) {
@@ -308,8 +312,8 @@ fun AccountCard(vm: AppViewModel, account: Account) {
                     Box(Modifier.clip(CircleShape).clickable { photoMenu = true }) {
                         ProfileAvatar(account.displayName ?: "?", account.photo, size = 64.dp)
                     }
-                    // a green dot: signed in with a Google account
-                    if (!account.isAnonymous) ConnectedDot(Modifier.align(Alignment.TopEnd), size = 16.dp)
+                    // a green dot: you are in the app right now
+                    ConnectedDot(Modifier.align(Alignment.TopEnd), size = 16.dp)
                     Box(
                         Modifier.align(Alignment.BottomStart).size(22.dp)
                             .background(MaterialTheme.colorScheme.primary, CircleShape),
@@ -400,7 +404,19 @@ fun AccountCard(vm: AppViewModel, account: Account) {
     }
 }
 
-/** The small green dot on a profile picture of someone who is signed in (with a ring in the surface colour, to stand out). */
+/** The current time, refreshed every 30 seconds: a member's presence expires without anything else changing. */
+@Composable
+fun rememberNowMillis(): Long {
+    val now by androidx.compose.runtime.produceState(System.currentTimeMillis()) {
+        while (true) {
+            kotlinx.coroutines.delay(30_000L)
+            value = System.currentTimeMillis()
+        }
+    }
+    return now
+}
+
+/** The small green dot on the picture of a member who is in the app right now (ringed, to stand out). */
 @Composable
 fun ConnectedDot(modifier: Modifier = Modifier, size: androidx.compose.ui.unit.Dp = 14.dp) {
     Box(
