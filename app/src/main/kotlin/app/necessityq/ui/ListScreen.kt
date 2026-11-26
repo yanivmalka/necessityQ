@@ -502,15 +502,90 @@ fun ListScreen(
         }
     }
 
+    // sort and filter on one line; a long choice does not stretch the chip: its words shrink and are cut with "…"
+    val sortFilterChips: @Composable () -> Unit = {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Box(Modifier.weight(1f, fill = false)) {
+                AssistChip(
+                    onClick = { showSortMenu = true },
+                    label = {
+                        Text(
+                            sort.label + if (!sort.hasDirection) "" else if (descending) " ↓" else " ↑",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.Sort, null, Modifier.size(18.dp)) },
+                )
+                DropdownMenu(
+                    expanded = showSortMenu,
+                    onDismissRequest = { showSortMenu = false },
+                    shape = NqShapes.Field,
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 0.dp,
+                    shadowElevation = 6.dp,
+                ) {
+                    sortOptions.forEach { option ->
+                        val recommended = shopping && option == ListSort.CART_LOAD
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text((if (option == sort) "✓ " else "") + option.label + if (recommended) " (מומלץ)" else "")
+                                    // what the order does, in a line under it
+                                    option.hint?.let {
+                                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            },
+                            onClick = { vm.setSort(option); showSortMenu = false },
+                        )
+                    }
+                    // ascending / descending only where it means something: by name and by the order of adding
+                    if (sort.hasDirection) {
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text((if (!descending) "✓ " else "") + "סדר עולה ↑") },
+                            onClick = { vm.setDescending(false); showSortMenu = false },
+                        )
+                        DropdownMenuItem(
+                            text = { Text((if (descending) "✓ " else "") + "סדר יורד ↓") },
+                            onClick = { vm.setDescending(true); showSortMenu = false },
+                        )
+                    }
+                }
+            }
+            FilterChip(
+                selected = filter.isActive,
+                onClick = { showFilter = true },
+                label = { Text(if (filter.isActive) "סינון · ${filter.activeCount}" else "סינון", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                leadingIcon = { Icon(Icons.Default.FilterList, null, Modifier.size(18.dp)) },
+            )
+        }
+    }
+    val collapseButton: @Composable () -> Unit = {
+        if (titledKeys.isNotEmpty()) {
+            IconButton(onClick = {
+                if (filtering) filterCollapsed = if (allCollapsed) emptySet() else titledKeys
+                else vm.setAllCollapsed(if (allCollapsed) null else titledKeys)
+            }) {
+                Icon(
+                    if (allCollapsed) Icons.Default.UnfoldMore else Icons.Default.UnfoldLess,
+                    contentDescription = if (allCollapsed) "פתיחת כל הקבוצות" else "כיווץ כל הקבוצות",
+                )
+            }
+        }
+    }
+
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (shopping) {
-            // a clean, slim top row (room to spare for what may come here later): back, "סיום קנייה", chat, ⋮. Where the trip stands
+            // one top row: back, sort and filter (they shrink first), collapse, "סיום קנייה", chat, ⋮. Where the trip stands
             // is at the bottom, and "החלפת סופר" / "הוספה לרשימה" are in the ⋮ menu
             Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { vm.setMode(ListMode.PLAN) }) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "חזרה להכנת רשימה")
                 }
-                Spacer(Modifier.weight(1f))
+                Box(Modifier.weight(1f)) { sortFilterChips() }
+                collapseButton()
                 // the end of the trip: an icon beside chat and ⋮, not a line of text in the way of the list
                 IconButton(onClick = vm::finishShopping) {
                     Icon(Icons.Default.CheckCircle, contentDescription = "סיום קנייה", tint = MaterialTheme.colorScheme.primary)
@@ -590,72 +665,12 @@ fun ListScreen(
             }
         }
 
-        // list toolbar: sort (with direction), filter, collapse/expand all ("תצוגה" is in the ⋮ menu)
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Box {
-                AssistChip(
-                    onClick = { showSortMenu = true },
-                    label = { Text(sort.label + if (!sort.hasDirection) "" else if (descending) " ↓" else " ↑", maxLines = 1) },
-                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.Sort, null, Modifier.size(18.dp)) },
-                )
-                DropdownMenu(
-                    expanded = showSortMenu,
-                    onDismissRequest = { showSortMenu = false },
-                    shape = NqShapes.Field,
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 0.dp,
-                    shadowElevation = 6.dp,
-                ) {
-                    sortOptions.forEach { option ->
-                        val recommended = shopping && option == ListSort.CART_LOAD
-                        DropdownMenuItem(
-                            text = {
-                                Column {
-                                    Text((if (option == sort) "✓ " else "") + option.label + if (recommended) " (מומלץ)" else "")
-                                    // what the order does, in a line under it
-                                    option.hint?.let {
-                                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-                            },
-                            onClick = { vm.setSort(option); showSortMenu = false },
-                        )
-                    }
-                    // ascending / descending only where it means something: by name and by the order of adding
-                    if (sort.hasDirection) {
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text((if (!descending) "✓ " else "") + "סדר עולה ↑") },
-                            onClick = { vm.setDescending(false); showSortMenu = false },
-                        )
-                        DropdownMenuItem(
-                            text = { Text((if (descending) "✓ " else "") + "סדר יורד ↓") },
-                            onClick = { vm.setDescending(true); showSortMenu = false },
-                        )
-                    }
-                }
-            }
-            FilterChip(
-                selected = filter.isActive,
-                onClick = { showFilter = true },
-                label = { Text(if (filter.isActive) "סינון · ${filter.activeCount}" else "סינון") },
-                leadingIcon = { Icon(Icons.Default.FilterList, null, Modifier.size(18.dp)) },
-            )
-            Spacer(Modifier.weight(1f))
-            if (titledKeys.isNotEmpty()) {
-                IconButton(onClick = {
-                    if (filtering) filterCollapsed = if (allCollapsed) emptySet() else titledKeys
-                    else vm.setAllCollapsed(if (allCollapsed) null else titledKeys)
-                }) {
-                    Icon(
-                        if (allCollapsed) Icons.Default.UnfoldMore else Icons.Default.UnfoldLess,
-                        contentDescription = if (allCollapsed) "פתיחת כל הקבוצות" else "כיווץ כל הקבוצות",
-                    )
-                }
+        // list toolbar while preparing: sort (with direction), filter, collapse/expand all ("תצוגה" is in the ⋮ menu).
+        // While shopping the same controls sit in the top row, so the head of the list is one line
+        if (!shopping) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { sortFilterChips() }
+                collapseButton()
             }
         }
         // what is filtered, one removable chip per criterion
