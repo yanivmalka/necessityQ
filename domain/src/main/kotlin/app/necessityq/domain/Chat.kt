@@ -18,6 +18,13 @@ object MessageRules {
 
     fun canDelete(m: ItemMessage, me: String): Boolean = m.authorId == me && !m.isDeleted
 
+    /**
+     * Whether [m] is waiting to be read by [me]: from someone else, after the conversation was last read ([readAt]).
+     * A deleted message has nothing left to read, so it never counts.
+     */
+    fun isUnread(m: ItemMessage, me: String, readAt: Long): Boolean =
+        m.authorId != me && !m.isDeleted && m.atMillis > readAt
+
     /** What a deleted message says in its place. */
     fun deletedLabel(m: ItemMessage, me: String, authorName: String): String =
         if (m.authorId == me) "🚫 מחקת את ההודעה" else "🚫 ההודעה נמחקה על ידי $authorName"
