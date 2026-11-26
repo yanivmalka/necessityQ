@@ -79,8 +79,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.ui.layout.layout
-import androidx.compose.ui.zIndex
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -1832,27 +1830,19 @@ fun PromoGift(modifier: Modifier = Modifier) {
 }
 
 /**
- * Promotion line right under a product tile; renders nothing when there is no promotion. It looks like it slides out
- * from behind the tile: rounded like the tile but narrower on both sides, and tucked under the tile's lower edge.
+ * Promotion line right under a product tile; renders nothing when there is no promotion. It starts exactly where the
+ * tile ends and hangs from it: narrower than the tile on both sides, with rounded lower corners.
  */
 @Composable
 fun PromoStrip(promo: String?) {
     if (promo == null) return
-    val tuck = 16.dp
     Text(
         "🏷 $promo",
         Modifier
             .fillMaxWidth()
-            .zIndex(-1f)
-            // pulled up under the tile (takes no extra height), so no seam shows between them
-            .layout { measurable, constraints ->
-                val placeable = measurable.measure(constraints)
-                val pull = tuck.roundToPx()
-                layout(placeable.width, placeable.height - pull) { placeable.place(0, -pull) }
-            }
             .padding(horizontal = 22.dp)
             .background(NqTheme.colors.promoBackground, RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp))
-            .padding(start = 12.dp, end = 12.dp, top = tuck + 2.dp, bottom = 6.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         fontWeight = FontWeight.Bold,
         color = NqTheme.colors.promoInk,
     )
