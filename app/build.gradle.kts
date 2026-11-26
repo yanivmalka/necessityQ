@@ -24,6 +24,8 @@ fun signingValue(env: String, prop: String): String? =
     System.getenv(env)?.takeIf { it.isNotBlank() } ?: signingProps.getProperty(prop)
 
 val ciVersionCode = System.getenv("VERSION_CODE")?.toIntOrNull()
+// The release line (major.minor) lives in version.txt at the repo root; the last number is the build.
+val versionLine = rootProject.file("version.txt").readText().trim()
 
 android {
     namespace = "app.necessityq"
@@ -34,7 +36,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = ciVersionCode ?: 1
-        versionName = "0.1.${ciVersionCode ?: 0}"
+        versionName = "$versionLine.${ciVersionCode ?: 0}"
         buildConfigField("boolean", "FIREBASE_CONFIGURED", firebaseConfigured.toString())
     }
 

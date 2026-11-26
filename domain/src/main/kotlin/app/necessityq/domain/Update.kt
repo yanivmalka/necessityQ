@@ -13,7 +13,7 @@ data class ReleaseInfo(
 
 object Releases {
     /**
-     * CI tags every build `v0.1.<run number>` and uses the run number as the Android versionCode,
+     * CI tags every build `v<version.txt>.<run number>` and uses the run number as the Android versionCode,
      * so the last number of the tag is the comparable build number.
      */
     fun versionCodeOf(tag: String): Int? = tag.trim().trimStart('v', 'V').substringAfterLast('.').toIntOrNull()
