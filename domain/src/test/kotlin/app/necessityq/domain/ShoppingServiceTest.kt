@@ -55,6 +55,29 @@ class ShoppingServiceTest {
         assertTrue(service.snapshot(hh).first().runningLow.isEmpty())
     }
 
+    @Test fun `deleted item does not count in statistics or purchases, cleared one does`() = runBlocking {
+        val repo = InMemoryShoppingRepository()
+        val clock = FakeClock(day0)
+        val service = ShoppingService(repo, clock, SeqIds(), zone)
+        val hh = "h"
+        service.addFromText(hh, "u", "חלב 3%", service.snapshot(hh).first().lines)
+        service.addFromText(hh, "u", "לחם", service.snapshot(hh).first().lines)
+        val lines = service.snapshot(hh).first().grouped.flatMap { it.second }
+        val milk = lines.first { it.name.contains("חלב") }
+        val bread = lines.first { it.name.contains("לחם") }
+        service.checkOff(hh, "u", milk)
+        service.checkOff(hh, "u", bread)
+
+        val bought = service.snapshot(hh).first().lines.filter { it.status == LineStatus.BOUGHT }
+        service.delete(hh, bought.first { it.id == milk.id })        // deleted: must not count
+        service.clearBought(hh, listOf(bought.first { it.id == bread.id })) // cleared after buying: counts
+
+        val snap = service.snapshot(hh).first()
+        assertEquals(setOf(bread.itemId), snap.stats.keys)
+        assertEquals(listOf(bread.itemId), service.purchases(hh).first().map { it.itemId })
+        assertEquals(2, snap.removed.size) // both are in the bin, under "removed"
+    }
+
     @Test fun `check off then reopen removes the purchase`() = runBlocking {
         val repo = InMemoryShoppingRepository()
         val service = ShoppingService(repo, FakeClock(day0), SeqIds(), zone)

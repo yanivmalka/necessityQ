@@ -36,8 +36,9 @@ class ShoppingService(
         repository.lines(householdId),
         repository.purchases(householdId),
         repository.suppressions(householdId),
-    ) { lines, purchases, suppressions ->
+    ) { lines, allPurchases, suppressions ->
         val today = today()
+        val purchases = counted(allPurchases, lines)
         val stats = statsEngine.compute(purchases, today)
         val needed = lines.filter { it.status == LineStatus.NEEDED }.map { it.itemId }.toSet()
         val suggestions = suggestionEngine.suggest(stats.values, needed, suppressions, today)
@@ -52,7 +53,10 @@ class ShoppingService(
         )
     }
 
-    fun purchases(householdId: String): Flow<List<Purchase>> = repository.purchases(householdId)
+    /** The purchases that count: those of items the household deleted are left out (they show under "removed"). */
+    fun purchases(householdId: String): Flow<List<Purchase>> =
+        combine(repository.purchases(householdId), repository.lines(householdId), ::counted)
+
 
     /** Adds a free-text entry ("2 קוטג' 5%"); returns the parsed entry, or null if the text was empty. */
     suspend fun addFromText(householdId: String, userId: String, text: String, current: List<ListLine>): ParsedEntry? {
@@ -316,5 +320,16 @@ class ShoppingService(
     companion object {
         /** Deterministic: checking the same line off twice (two members at once) records one purchase. */
         fun purchaseIdFor(lineId: String) = "p_$lineId"
+
+        /**
+         * Purchases of lines that were deleted (reason [RemoveReason.DELETED]) do not count in the history or the
+         * statistics. Clearing after a purchase or resetting the list keeps them: the item really was bought.
+         */
+        fun counted(purchases: List<Purchase>, lines: List<ListLine>): List<Purchase> {
+            val deleted = lines
+                .filter { it.status == LineStatus.REMOVED && it.removedReason == RemoveReason.DELETED }
+                .map { it.id }.toSet()
+            return if (deleted.isEmpty()) purchases else purchases.filter { it.lineId !in deleted }
+        }
     }
 }

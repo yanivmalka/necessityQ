@@ -31,6 +31,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -220,9 +222,51 @@ fun HistoryScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
         .sortedWith(compareBy({ it.classification.ordinal }, { -it.frequencyScore }))
     val zone = ZoneId.systemDefault()
 
+    val removed = snapshot?.removed.orEmpty()
+    var showRemoved by remember { mutableStateOf(false) }
+
     Column(modifier.fillMaxSize()) {
         TopAppBar(navigationIcon = { BackNavButton() }, title = { Text("היסטוריה") })
+        TabRow(selectedTabIndex = if (showRemoved) 1 else 0) {
+            Tab(selected = !showRemoved, onClick = { showRemoved = false }, text = { Text("נקנו") })
+            Tab(
+                selected = showRemoved, onClick = { showRemoved = true },
+                text = { Text("הוסרו" + if (removed.isNotEmpty()) " (${removed.size})" else "") },
+            )
+        }
         val historyList = androidx.compose.foundation.lazy.rememberLazyListState()
+        if (showRemoved) {
+            LazyColumn(Modifier.fillMaxSize().fadingEdges(historyList, horizontal = false), state = historyList) {
+                item {
+                    Text(
+                        "פריטים שנמחקו או נוקו מהרשימה. פריט שנמחק לא נספר בסטטיסטיקה.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(16.dp),
+                    )
+                }
+                if (removed.isEmpty()) item { Text("אין פריטים שהוסרו.", Modifier.padding(horizontal = 16.dp)) }
+                items(removed, key = { "r_" + it.id }) { line ->
+                    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(line.displayName, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                listOfNotNull(
+                                    line.removedReason?.label,
+                                    line.removedAtMillis?.let { Instant.ofEpochMilli(it).atZone(zone).format(DateTimeFormatter.ofPattern("d.M HH:mm")) },
+                                    line.quantity?.format(),
+                                ).joinToString(" · "),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        TextButton(onClick = { vm.restoreToList(line) }) { Text("לרשימה") }
+                    }
+                    HorizontalDivider(thickness = 0.5.dp)
+                }
+            }
+            return@Column
+        }
         LazyColumn(Modifier.fillMaxSize().fadingEdges(historyList, horizontal = false), state = historyList) {
             if (stats.isEmpty()) {
                 item {
