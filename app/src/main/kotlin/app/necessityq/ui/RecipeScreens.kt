@@ -977,7 +977,14 @@ fun RecipeSearchScreen(vm: AppViewModel, onBack: () -> Unit, onOpen: (String) ->
     var shown by remember { mutableIntStateOf(PAGE) }
     val focus = remember { FocusRequester() }
 
-    LaunchedEffect(Unit) { vm.loadNutrition(); runCatching { focus.requestFocus() } }
+    LaunchedEffect(Unit) { vm.loadNutrition() }
+    // The field takes focus only after the page has finished sliding in. Focusing it while the page is still
+    // off to the side makes the enclosing tabs pager try to scroll the field into view: it flips between tabs
+    // while the keyboard opens and the whole screen shakes.
+    LaunchedEffect(Unit) {
+        delay(400)
+        runCatching { focus.requestFocus() }
+    }
     LaunchedEffect(query) {
         delay(300)
         debounced = query.trim()
