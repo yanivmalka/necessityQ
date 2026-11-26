@@ -442,7 +442,7 @@ fun ListScreen(
                         onClick = { showMore = false; addOpen = !addOpen },
                     )
                     DropdownMenuItem(
-                        text = { Text(if (storeName == null) "בחירת חנות" else "החלפת חנות · $storeName") },
+                        text = { Text(if (storeName == null) "בחירת סופר" else "החלפת סופר · $storeName") },
                         leadingIcon = { Icon(Icons.Default.Storefront, null) },
                         onClick = { showMore = false; showStoreDialog = true },
                     )
@@ -503,7 +503,7 @@ fun ListScreen(
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (shopping) {
             // a clean, slim top row (room to spare for what may come here later): back, chat, ⋮. Where the trip stands
-            // is at the bottom, and "החלפת חנות" / "הוספת פריט" / "סיום קנייה" are in the ⋮ menu
+            // is at the bottom, and "החלפת סופר" / "הוספת פריט" / "סיום קנייה" are in the ⋮ menu
             Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { vm.setMode(ListMode.PLAN) }) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "חזרה להכנת רשימה")
@@ -568,7 +568,7 @@ fun ListScreen(
             val entries = buildList<Pair<String?, app.necessityq.domain.ItemIdentity?>> {
                 if (completions.isNotEmpty() && onlineCompletions.isNotEmpty()) add("שלי" to null)
                 completions.forEach { add(null to it) }
-                if (onlineCompletions.isNotEmpty()) add("מהסניף" to null)
+                if (onlineCompletions.isNotEmpty()) add("מהסופר" to null)
                 onlineCompletions.forEach { add("" to it) }
             }
             TwoRowStrip(entries, fullHeight = { it.second == null }) { (label, item) ->
@@ -972,7 +972,7 @@ private fun StorePromptCard(vm: AppViewModel) {
                 Text("איפה קונים היום?", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 TextButton(onClick = { vm.answerStorePrompt(null, skipped = true) }) { Text("דלג") }
             }
-            Text("לא חובה. מציג את המחירים של החנות ולומד את סדר האיסוף בה. אפשר לשנות בהמשך מהכותרת.", style = MaterialTheme.typography.bodySmall)
+            Text("לא חובה. מציג את המחירים של הסופר ולומד את סדר האיסוף בו. אפשר לשנות בהמשך מהכותרת.", style = MaterialTheme.typography.bodySmall)
             StoreChooser(vm, allowNone = false, onChosen = { vm.answerStorePrompt(it) })
         }
     }
@@ -1047,8 +1047,8 @@ private fun StoreChooser(vm: AppViewModel, allowNone: Boolean, onChosen: (String
         stores.filter { it.id !in branchStoreIds && it.id != hereStore?.id }.forEach { store ->
             FilterChip(selected = store.id == currentId, onClick = { onChosen(store.id) }, label = { Text(store.name + " · בלי מחירים") })
         }
-        AssistChip(onClick = { adding = true }, label = { Text("חנות אחרת") }, leadingIcon = { Icon(Icons.Default.Add, null, Modifier.size(18.dp)) })
-        if (allowNone && currentId != null) AssistChip(onClick = { onChosen(null) }, label = { Text("ללא חנות") })
+        AssistChip(onClick = { adding = true }, label = { Text("סופר אחר") }, leadingIcon = { Icon(Icons.Default.Add, null, Modifier.size(18.dp)) })
+        if (allowNone && currentId != null) AssistChip(onClick = { onChosen(null) }, label = { Text("ללא סופר") })
         if (!hasPermission) {
             TextButton(onClick = {
                 permission.launch(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION))
@@ -1061,7 +1061,7 @@ private fun StoreChooser(vm: AppViewModel, allowNone: Boolean, onChosen: (String
         var type by remember { mutableStateOf(StoreType.SUPERMARKET) }
         AlertDialog(
             onDismissRequest = { adding = false },
-            title = { Text("חנות אחרת") },
+            title = { Text("סופר אחר") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(name, { name = it }, label = { Text("שם (למשל: רמי לוי תלפיות)") }, singleLine = true)
@@ -1069,9 +1069,9 @@ private fun StoreChooser(vm: AppViewModel, allowNone: Boolean, onChosen: (String
                         StoreType.entries.forEach { t -> FilterChip(selected = type == t, onClick = { type = t }, label = { Text(t.label) }) }
                     }
                     Text(
-                        "חנות שאינה סניף במעקב נשמרת בלי מחירים (סניף עם מחירים מוסיפים בלשונית המחירים). " +
-                            if (hasPermission) "המיקום הנוכחי יישמר כדי להציע את החנות כשתגיעו אליה."
-                            else "בלי הרשאת מיקום החנות תישמר בלי מיקום.",
+                        "סופר שאינו במעקב נשמר בלי מחירים (סופר עם מחירים מוסיפים בלשונית המחירים). " +
+                            if (hasPermission) "המיקום הנוכחי יישמר כדי להציע את הסופר כשתגיעו אליו."
+                            else "בלי הרשאת מיקום הסופר יישמר בלי מיקום.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -1912,7 +1912,7 @@ fun comparisonInk(level: app.necessityq.domain.PriceLevel): androidx.compose.ui.
     app.necessityq.domain.PriceLevel.FAIR -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
-/** "יקר ב-12% מהסניפים שלך" as a filled pill (cheaper green, dearer amber, about the same muted). */
+/** "יקר ב-12% מהסופרים שלך" as a filled pill (cheaper green, dearer amber, about the same muted). */
 @Composable
 fun PriceComparisonPill(c: app.necessityq.domain.PriceComparison, modifier: Modifier = Modifier) {
     val fill = comparisonInk(c.level)

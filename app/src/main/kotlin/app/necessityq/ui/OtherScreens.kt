@@ -89,7 +89,7 @@ fun OnboardingScreen(vm: AppViewModel, account: Account, modifier: Modifier = Mo
         listOf(
             "כל בני הבית רואים ומעדכנים את אותה רשימה, בזמן אמת.",
             "האפליקציה לומדת כל כמה זמן אתם קונים כל מוצר, ומזכירה לפני שהוא נגמר.",
-            "אם תרצו: מחירים בסניף שלכם, מבצעים ותפריט שבועי.",
+            "אם תרצו: מחירים בסופר שלכם, מבצעים ותפריט שבועי.",
         ).forEach { line ->
             Row(verticalAlignment = Alignment.Top) {
                 Text("✓", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)

@@ -64,7 +64,7 @@ private data class SearchResults(val query: String, val items: List<app.necessit
 
 private const val PRODUCT_SEARCH_DELAY_MS = 120L
 
-private enum class PricesTab(val label: String) { BRANCHES("סניפים קרובים"), PRODUCTS("מוצרים ומחירים") }
+private enum class PricesTab(val label: String) { BRANCHES("סופרים קרובים"), PRODUCTS("מוצרים ומחירים") }
 
 /** Branches near the user (from the price-transparency files) and product prices with ranges per chosen branch. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -93,7 +93,7 @@ fun PricesScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
         }
         if (branches.isEmpty()) {
             Text(
-                "עדיין אין נתוני סניפים. השרת קורא את קבצי השקיפות של הרשתות פעם ביום; " +
+                "עדיין אין נתוני סופרים. השרת קורא את קבצי השקיפות של הרשתות פעם ביום; " +
                     "אם המסך נשאר ריק, ייתכן שפונקציות המחירים עוד לא הופעלו בפרויקט." +
                     (branchesError?.let { "\n\nשגיאת קריאה (מנסה שוב): $it" } ?: ""),
                 Modifier.padding(16.dp),
@@ -160,17 +160,17 @@ private fun BranchesTab(vm: AppViewModel, branches: List<PriceBranch>, selected:
                         Text("אתם כנראה ב${nb.branch.title}", fontWeight = FontWeight.Bold)
                         Text("לפי המיקום (${PriceData.formatDistance(nb.distanceMeters ?: 0.0)} מהכתובת)", style = MaterialTheme.typography.bodySmall)
                     }
-                    if (nb.branch.id !in selected) OutlinedButton(onClick = vm::followHereBranch) { Text("מעקב אחרי הסניף") }
+                    if (nb.branch.id !in selected) OutlinedButton(onClick = vm::followHereBranch) { Text("מעקב אחרי הסופר") }
                     else Text("במעקב ✓", color = MaterialTheme.colorScheme.primary)
                 }
             }
         }
         OutlinedTextField(
-            filter, { filter = it }, label = { Text("חיפוש רשת או סניף") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            filter, { filter = it }, label = { Text("חיפוש רשת או סופר") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
             trailingIcon = if (filter.isNotEmpty()) { { IconButton(onClick = { filter = "" }) { Icon(Icons.Default.Close, contentDescription = "מחיקת הטקסט") } } } else null,
         )
         Text(
-            "סמנו את הסניפים שאתם קונים בהם (עד ${AppViewModel.MAX_BRANCHES}). המחירים שלהם נטענים פעם ביום, וגם כשנכנסים למצב \"בקנייה\".",
+            "סמנו את הסופרים שאתם קונים בהם (עד ${AppViewModel.MAX_BRANCHES}). המחירים שלהם נטענים פעם ביום, וגם כשנכנסים למצב \"בקנייה\".",
             style = MaterialTheme.typography.bodySmall,
         )
     }
@@ -179,9 +179,9 @@ private fun BranchesTab(vm: AppViewModel, branches: List<PriceBranch>, selected:
         if (pinned.isNotEmpty()) {
             item(key = "pinned-title") { BranchSectionTitle("במעקב · ${pinned.size}") }
             items(pinned, key = { "pinned-" + it.branch.id }) { nb -> BranchRow(nb, true, status[nb.branch.id]) { vm.toggleBranch(nb.branch.id) } }
-            item(key = "others-title") { BranchSectionTitle("סניפים נוספים") }
+            item(key = "others-title") { BranchSectionTitle("סופרים נוספים") }
         }
-        if (list.isEmpty()) item(key = "empty") { Text("אין סניפים נוספים ברדיוס הזה.") }
+        if (list.isEmpty()) item(key = "empty") { Text("אין סופרים נוספים ברדיוס הזה.") }
         items(list, key = { it.branch.id }) { nb -> BranchRow(nb, false, status[nb.branch.id]) { vm.toggleBranch(nb.branch.id) } }
     }
 }
@@ -228,8 +228,8 @@ private fun ProductsTab(
 ) {
     if (mine.isEmpty()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("עוד לא נבחרו סניפים.")
-            OutlinedButton(onClick = onPickBranches) { Text("בחירת סניפים קרובים") }
+            Text("עוד לא נבחרו סופרים.")
+            OutlinedButton(onClick = onPickBranches) { Text("בחירת סופרים קרובים") }
         }
         return
     }
@@ -293,7 +293,7 @@ private fun ProductsTab(
         AnimatedVisibility(visible = !searchActive) {
           Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fadingHorizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (mine.size > 1) FilterChip(selected = allChosen, onClick = { chosenRaw = mineIds.joinToString(",") }, label = { Text("כל הסניפים שלי") })
+            if (mine.size > 1) FilterChip(selected = allChosen, onClick = { chosenRaw = mineIds.joinToString(",") }, label = { Text("כל הסופרים שלי") })
             mine.forEach { b ->
                 val on = b.id in ids
                 FilterChip(
@@ -312,13 +312,13 @@ private fun ProductsTab(
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                if (comparing) "השוואה בין ${chosen.size} סניפים · " + (if (anyLoading) "טוען מחירים…" else "הזול בכל מוצר מסומן")
+                if (comparing) "השוואה בין ${chosen.size} סופרים · " + (if (anyLoading) "טוען מחירים…" else "הזול בכל מוצר מסומן")
                 else statusLine(status[ids.first()]),
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.weight(1f),
             )
             IconButton(onClick = { ids.forEach(vm::refreshPrices) }, enabled = !anyLoading) {
-                Icon(Icons.Default.Refresh, contentDescription = if (comparing) "רענון המחירים של הסניפים שנבחרו" else "רענון המחירים של הסניף")
+                Icon(Icons.Default.Refresh, contentDescription = if (comparing) "רענון המחירים של הסופרים שנבחרו" else "רענון המחירים של הסופר")
             }
         }
           }
@@ -338,7 +338,7 @@ private fun ProductsTab(
         if (loadedCount > 0 && query.isBlank()) {
             val products = ids.sumOf { all[it]?.products?.size ?: 0 }
             Text(
-                (if (comparing) "$products מוצרים ב-$loadedCount סניפים. " else "$products מוצרים בסניף. ") + "הקלידו שם מוצר, למשל \"קוטג 5%\".",
+                (if (comparing) "$products מוצרים ב-$loadedCount סופרים. " else "$products מוצרים בסופר. ") + "הקלידו שם מוצר, למשל \"קוטג 5%\".",
                 style = MaterialTheme.typography.bodySmall,
             )
         }
@@ -438,7 +438,7 @@ private fun ProductCard(p: BranchProduct, rangeDays: Int, comparison: app.necess
                 Text(shownProductPrice(p, p.price, unit), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
             }
             Text(
-                "טווח $rangeDays יום בסניף: " + if (p.high > p.low) "${shownProductPrice(p, p.low, unit)}–${shownProductPrice(p, p.high, unit)}" else shownProductPrice(p, p.low, unit),
+                "טווח $rangeDays יום בסופר: " + if (p.high > p.low) "${shownProductPrice(p, p.low, unit)}–${shownProductPrice(p, p.high, unit)}" else shownProductPrice(p, p.low, unit),
                 style = MaterialTheme.typography.bodyMedium,
             )
             p.unitPrice?.let { Text("מחיר ליחידת מידה: ${PriceData.formatPrice(it)}", style = MaterialTheme.typography.bodySmall) }
@@ -450,7 +450,7 @@ private fun ProductCard(p: BranchProduct, rangeDays: Int, comparison: app.necess
                 val cheapest = mine.firstOrNull { it.id == comparison.cheapestBranchId }?.title
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
                     Text(
-                        "בסניפים שלך (${quotes.size}): ${PriceData.formatRange(low, high)}${if (comparison.unitKilos != null) " " + unit.label else ""}" + if (high > low && cheapest != null) " · הזול: $cheapest" else "",
+                        "בסופרים שלך (${quotes.size}): ${PriceData.formatRange(low, high)}${if (comparison.unitKilos != null) " " + unit.label else ""}" + if (high > low && cheapest != null) " · הזול: $cheapest" else "",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.weight(1f),

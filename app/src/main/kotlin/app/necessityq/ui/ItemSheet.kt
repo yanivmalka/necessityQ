@@ -835,8 +835,8 @@ private fun BranchPriceSection(vm: AppViewModel, itemId: String, info: app.neces
         val basic = info?.let { app.necessityq.domain.UnitPrices.of(it, unit) }
         Text(
             when {
-                !loaded.containsKey(branch.id) -> "המחירים של הסניף נטענים…"
-                info == null -> "לא נמצאו מוצרים מתאימים בסניף"
+                !loaded.containsKey(branch.id) -> "המחירים של הסופר נטענים…"
+                info == null -> "לא נמצאו מוצרים מתאימים בסופר"
                 basic == null -> "במשקל · ${info.candidates.size} מוצרים"
                 info.preferred != null -> "${app.necessityq.domain.PriceData.formatPrice(basic.low)} ${basic.per} · ${info.preferred!!.name}"
                 else -> "${app.necessityq.domain.PriceData.formatRange(basic.low, basic.high)} ${basic.per} · ${info.candidates.size} מוצרים"
@@ -892,7 +892,7 @@ private fun SimilarProducts(
         Text("בחירת מוצר מדויק", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         if (info == null || info.candidates.isEmpty()) {
             Text(
-                if (primary == null) "בחרו סניף בלשונית המחירים כדי לראות מוצרים ומחירים." else "לא נמצאו מוצרים בשם \"$title\" בסניף.",
+                if (primary == null) "בחרו סופר בלשונית המחירים כדי לראות מוצרים ומחירים." else "לא נמצאו מוצרים בשם \"$title\" בסופר.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -982,9 +982,9 @@ private fun ItemPromotions(vm: AppViewModel, itemId: String) {
 }
 
 /**
- * "השוואה לסניפים שלך" on the product page: the item here against the household's other followed branches (by the
+ * "השוואה לסופרים שלך" on the product page: the item here against the household's other followed branches (by the
  * chosen product's barcode, the products both sell, or the typical prices) — shown from the gap (₪) chosen in the
- * settings (הגדרות ← פיצ'רים ← השוואה בין הסניפים שלך).
+ * settings (הגדרות ← פיצ'רים ← השוואה בין הסופרים שלך).
  */
 @Composable
 private fun BranchComparisonTile(vm: AppViewModel, itemId: String, name: String, variant: String?, info: app.necessityq.domain.ItemPriceInfo?) {
@@ -1002,7 +1002,7 @@ private fun BranchComparisonTile(vm: AppViewModel, itemId: String, name: String,
     when {
         comparison != null -> if (comparison.reaches(display.compareMinShekels)) BranchComparison(comparison, allBranches)
         info != null && followed.size > 1 && followed.any { it != branch.id && !loaded.containsKey(it) } ->
-            Text("טוען את המחירים של הסניפים האחרים שלך להשוואה…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("טוען את המחירים של הסופרים האחרים שלך להשוואה…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -1024,7 +1024,7 @@ private fun BranchComparison(c: app.necessityq.domain.PriceComparison, branches:
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("השוואה לסניפים שלך", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text("השוואה לסופרים שלך", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             PriceComparisonPill(c)
         }
         (listOf(c.here) + c.others).forEach { q ->
@@ -1045,9 +1045,9 @@ private fun BranchComparison(c: app.necessityq.domain.PriceComparison, branches:
         }
         Text(
             when (c.basis) {
-                app.necessityq.domain.CompareBasis.SAME_PRODUCT -> "לפי אותו מוצר (ברקוד) בכל סניף"
-                app.necessityq.domain.CompareBasis.SHARED_PRODUCTS -> "לפי המוצרים שנמכרים גם כאן וגם בסניפים האחרים"
-                app.necessityq.domain.CompareBasis.TYPICAL -> "לפי המחיר הטיפוסי של המוצרים המתאימים בכל סניף"
+                app.necessityq.domain.CompareBasis.SAME_PRODUCT -> "לפי אותו מוצר (ברקוד) בכל סופר"
+                app.necessityq.domain.CompareBasis.SHARED_PRODUCTS -> "לפי המוצרים שנמכרים גם כאן וגם בסופרים האחרים"
+                app.necessityq.domain.CompareBasis.TYPICAL -> "לפי המחיר הטיפוסי של המוצרים המתאימים בכל סופר"
             },
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1097,7 +1097,7 @@ private fun BranchQuotesStrip(vm: AppViewModel, chosen: app.necessityq.domain.Br
     val cheapest = compared.minOfOrNull { it.price }
 
     Text(
-        "${chosen.name} בסניפים שבמעקב",
+        "${chosen.name} בסופרים שבמעקב",
         style = MaterialTheme.typography.labelLarge,
         fontWeight = FontWeight.Bold,
         maxLines = 1,

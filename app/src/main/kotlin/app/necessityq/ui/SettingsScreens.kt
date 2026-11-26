@@ -470,7 +470,7 @@ private fun FeatureSubSettings(
             OptionRow("סכום משוער בתחתית הרשימה", display.showTotal) { vm.setDisplay(display.copy(showTotal = it)) }
             Text("מחיר של מוצר במשקל", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
             Text(
-                "ירקות, פירות, בשר ומוצרים שנמכרים במשקל: ברשימה, בדף המוצר ובהשוואה בין הסניפים.",
+                "ירקות, פירות, בשר ומוצרים שנמכרים במשקל: ברשימה, בדף המוצר ובהשוואה בין הסופרים.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 4.dp),
@@ -488,7 +488,7 @@ private fun FeatureSubSettings(
         app.necessityq.domain.Feature.BRANCH_COMPARE ->
             CompareThreshold(display.compareMinShekels) { vm.setDisplay(display.copy(compareMinShekels = it)) }
         app.necessityq.domain.Feature.TRIP_PLAN ->
-            if (followed < 2) note("כדי להשוות צריך לעקוב אחרי שני סניפים לפחות (בלשונית \"מחירים\"). כרגע: $followed.")
+            if (followed < 2) note("כדי להשוות צריך לעקוב אחרי שני סופרים לפחות (בלשונית \"מחירים\"). כרגע: $followed.")
         app.necessityq.domain.Feature.CHAT -> note("מתי מקבלים התראה על הודעה: בלשונית \"התראות\".")
         else -> Unit
     }
@@ -658,7 +658,7 @@ private enum class AppPermission(val label: String, val hint: String, val permis
     ),
     LOCATION(
         "מיקום",
-        "סניפים קרובים במחירים, וזיהוי שאתם בסניף כדי לעבור לקנייה בנגיעה.",
+        "סופרים קרובים במחירים, וזיהוי שאתם בסופר כדי לעבור לקנייה בנגיעה.",
         listOf(android.Manifest.permission.ACCESS_COARSE_LOCATION, android.Manifest.permission.ACCESS_FINE_LOCATION),
     ),
     MICROPHONE(
@@ -817,7 +817,7 @@ fun AboutScreen(modifier: Modifier = Modifier) = PageScaffold("אודות", modi
     )
     Text("שלבי שימוש", style = MaterialTheme.typography.titleMedium)
     Text("• הכנת רשימה — מלאי, הצעות, מחיר ומבצע, חלוקה לקטגוריות.")
-    Text("• בקנייה — איסוף, סדר איסוף לפי חנות, חסרים והתייעצות על תחליפים.")
+    Text("• בקנייה — איסוף, סדר איסוף לפי סופר, חסרים והתייעצות על תחליפים.")
     Text("• תפריט — בני משפחה, מאכלים אהובים ותפריט שבועי שממלא את הרשימה.")
     TextButton(onClick = {
         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/yanivmalka/necessityQ")))

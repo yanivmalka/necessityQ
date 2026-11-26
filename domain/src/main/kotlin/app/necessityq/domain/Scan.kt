@@ -200,15 +200,15 @@ object PriceVerdicts {
             val m = median(otherBranches)
             val diff = (here.price - m) / m
             when {
-                diff >= NOTABLE -> { score += 2; reasons += "יקר ב-${pct(diff)} מהסניפים שאתם קונים בהם (${PriceData.formatPrice(m)})" }
-                diff <= -NOTABLE -> { score -= 2; reasons += "זול ב-${pct(diff)} מהסניפים שאתם קונים בהם (${PriceData.formatPrice(m)})" }
-                else -> reasons += "דומה לסניפים שאתם קונים בהם (${PriceData.formatRange(otherBranches.min(), otherBranches.max())})"
+                diff >= NOTABLE -> { score += 2; reasons += "יקר ב-${pct(diff)} מהסופרים שאתם קונים בהם (${PriceData.formatPrice(m)})" }
+                diff <= -NOTABLE -> { score -= 2; reasons += "זול ב-${pct(diff)} מהסופרים שאתם קונים בהם (${PriceData.formatPrice(m)})" }
+                else -> reasons += "דומה לסופרים שאתם קונים בהם (${PriceData.formatRange(otherBranches.min(), otherBranches.max())})"
             }
         }
         if (here.high - here.low >= 0.01) {
             when {
-                here.price >= here.high - 0.005 -> { score += 1; reasons += "המחיר הגבוה ביותר בסניף בתקופה האחרונה (היה גם ${PriceData.formatPrice(here.low)})" }
-                here.price <= here.low + 0.005 -> { score -= 1; reasons += "המחיר הנמוך ביותר בסניף בתקופה האחרונה (היה עד ${PriceData.formatPrice(here.high)})" }
+                here.price >= here.high - 0.005 -> { score += 1; reasons += "המחיר הגבוה ביותר בסופר בתקופה האחרונה (היה גם ${PriceData.formatPrice(here.low)})" }
+                here.price <= here.low + 0.005 -> { score -= 1; reasons += "המחיר הנמוך ביותר בסופר בתקופה האחרונה (היה עד ${PriceData.formatPrice(here.high)})" }
             }
         }
         val unit = here.unitPrice
@@ -216,9 +216,9 @@ object PriceVerdicts {
         if (unit != null && peers.size >= 3) {
             val (lo, hi) = ItemPrices.typicalRange(peers)!!
             when {
-                unit > hi * (1 + NOTABLE) -> { score += 1; reasons += "יקר ממוצרים דומים בסניף לפי מחיר ליחידת מידה" }
-                unit < lo * (1 - NOTABLE) -> { score -= 1; reasons += "זול ממוצרים דומים בסניף לפי מחיר ליחידת מידה" }
-                else -> reasons += "בטווח של מוצרים דומים בסניף לפי מחיר ליחידת מידה"
+                unit > hi * (1 + NOTABLE) -> { score += 1; reasons += "יקר ממוצרים דומים בסופר לפי מחיר ליחידת מידה" }
+                unit < lo * (1 - NOTABLE) -> { score -= 1; reasons += "זול ממוצרים דומים בסופר לפי מחיר ליחידת מידה" }
+                else -> reasons += "בטווח של מוצרים דומים בסופר לפי מחיר ליחידת מידה"
             }
         }
         if (reasons.isEmpty()) return null
