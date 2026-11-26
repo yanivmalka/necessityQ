@@ -448,38 +448,43 @@ fun ListScreen(
                     )
                     HorizontalDivider()
                 }
-                // in groups: filling the list · what it shows · clearing it · settings and help
-                DropdownMenuItem(
-                    text = { Text("יצירת רשימה מקניות עבר") },
-                    leadingIcon = { Icon(Icons.Default.AutoAwesome, null) },
-                    onClick = { showGenerate = true; showMore = false },
-                )
-                if (!shopping && tripPlanOn && followedBranches.size >= 2) {
+                // preparing only: filling the list · where it pays to shop · the recycle bin · clearing the list.
+                // None of these is on the shop's menu: the trip does not build, empty or restore the list
+                if (!shopping) {
                     DropdownMenuItem(
-                        text = { Text("איפה הכי משתלם לקנות?") },
-                        leadingIcon = { Icon(Icons.Default.PriceCheck, null) },
-                        onClick = { showMore = false; showTrip = true },
+                        text = { Text("יצירת רשימה מקניות עבר") },
+                        leadingIcon = { Icon(Icons.Default.AutoAwesome, null) },
+                        onClick = { showGenerate = true; showMore = false },
                     )
+                    if (tripPlanOn && followedBranches.size >= 2) {
+                        DropdownMenuItem(
+                            text = { Text("איפה הכי משתלם לקנות?") },
+                            leadingIcon = { Icon(Icons.Default.PriceCheck, null) },
+                            onClick = { showMore = false; showTrip = true },
+                        )
+                    }
+                    HorizontalDivider()
                 }
-                HorizontalDivider()
                 // what a tile shows, at this stage of use (the same sheet as in the settings)
                 DropdownMenuItem(
                     text = { Text("מה מוצג על כל פריט") },
                     leadingIcon = { Icon(Icons.Default.Tune, null) },
                     onClick = { showMore = false; showTileEditor = true },
                 )
-                HorizontalDivider()
-                DropdownMenuItem(
-                    text = { Text("סל מחזור" + (snapshot?.removed?.size?.takeIf { it > 0 }?.let { " ($it)" } ?: "")) },
-                    leadingIcon = { Icon(Icons.Default.RestoreFromTrash, null) },
-                    onClick = { showBin = true; showMore = false },
-                )
-                // one way to clear the list: the whole list, or only what was added automatically / by hand
-                DropdownMenuItem(
-                    text = { Text("ניקוי הרשימה…") },
-                    leadingIcon = { Icon(Icons.Default.DeleteSweep, null) },
-                    onClick = { showReset = true; showMore = false },
-                )
+                if (!shopping) {
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("סל מחזור" + (snapshot?.removed?.size?.takeIf { it > 0 }?.let { " ($it)" } ?: "")) },
+                        leadingIcon = { Icon(Icons.Default.RestoreFromTrash, null) },
+                        onClick = { showBin = true; showMore = false },
+                    )
+                    // one way to clear the list: the whole list, or only what was added automatically / by hand
+                    DropdownMenuItem(
+                        text = { Text("ניקוי הרשימה…") },
+                        leadingIcon = { Icon(Icons.Default.DeleteSweep, null) },
+                        onClick = { showReset = true; showMore = false },
+                    )
+                }
                 HorizontalDivider()
                 DropdownMenuItem(
                     text = { Text("הגדרות") },
