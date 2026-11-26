@@ -160,7 +160,7 @@ private fun MenuHome(vm: AppViewModel, modifier: Modifier, onOpen: (MenuPage) ->
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         TopAppBar(
             navigationIcon = { BackNavButton() },
-            title = { Text("התפריט", style = MaterialTheme.typography.titleLarge) },
+            title = { Text("תפריט", style = MaterialTheme.typography.titleLarge) },
             actions = { IconButton(onClick = { onOpen(MenuPage.Search) }) { Icon(Icons.Default.Search, contentDescription = "חיפוש מתכון") } },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
         )
@@ -287,9 +287,6 @@ private fun MenuHome(vm: AppViewModel, modifier: Modifier, onOpen: (MenuPage) ->
                         Spacer(Modifier.width(10.dp))
                         Text("חיפוש מתכון — שלי או ממאגר צמרת", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                }
-                if (data.dishes.isEmpty()) {
-                    OutlinedButton(onClick = { vm.updateMeals { it.copy(dishes = MealPlanner.sampleDishes) } }) { Text("טעינת מתכונים לדוגמה") }
                 }
                 val sorted = data.dishes.sortedBy { it.name }
                 // selection mode: long-press a recipe (or "בחירה") to tick several and delete them together

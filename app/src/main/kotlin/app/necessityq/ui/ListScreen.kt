@@ -462,7 +462,7 @@ fun ListScreen(
                 if (!shopping && tripPlanOn && followedBranches.size >= 2) {
                     DropdownMenuItem(
                         text = { Text("איפה הכי משתלם לקנות?") },
-                        leadingIcon = { Icon(Icons.Default.Storefront, null) },
+                        leadingIcon = { Icon(Icons.Default.PriceCheck, null) },
                         onClick = { showMore = false; showTrip = true },
                     )
                 }
@@ -492,8 +492,8 @@ fun ListScreen(
                     onClick = { showMore = false; onOpenDisplaySettings() },
                 )
                 DropdownMenuItem(
-                    text = { Text("עזרה: איך משתמשים") },
-                    leadingIcon = { Icon(Icons.Default.Info, null) },
+                    text = { Text("עזרה") },
+                    leadingIcon = { Icon(Icons.Default.Help, null) },
                     onClick = { showMore = false; onOpenHelp() },
                 )
             }
@@ -793,7 +793,7 @@ fun ListScreen(
                 item(key = "hint") {
                     val hint = swipes.hint
                     if (showSwipeHint && hint != null) Text(
-                        "$hint — והחזיקו עד שהטבעת מהבהבת. ההסבר המלא: ⋮ ← עזרה",
+                        "$hint — והחזיקו עד שהטבעת מהבהבת. ההסבר המלא בתפריט ⋮, תחת עזרה",
                         Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

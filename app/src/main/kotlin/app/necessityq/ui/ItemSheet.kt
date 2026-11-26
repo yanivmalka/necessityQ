@@ -89,6 +89,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -206,24 +207,17 @@ fun ItemSheet(
                 IconButton(onClick = scanProduct, modifier = Modifier.size(40.dp)) {
                     Icon(Icons.Default.QrCodeScanner, contentDescription = "סריקת המוצר")
                 }
-                // ⋮ actions — on the left edge in Hebrew layout
-                androidx.compose.foundation.layout.Box {
-                    var menu by remember { mutableStateOf(false) }
-                    IconButton(onClick = { menu = true }, modifier = Modifier.size(40.dp)) { Icon(Icons.Default.MoreVert, contentDescription = "פעולות") }
-                    // what has a button of its own on the page (נקנה, חסר, הסרה, צ'אט פוד, the pencil) is not repeated here
-                    androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(if (favorite) "הסרה מהמועדפים" else "הוספה למועדפים") },
-                            leadingIcon = { Icon(if (favorite) Icons.Default.StarBorder else Icons.Default.Star, null) },
-                            onClick = { vm.toggleFavorite(itemId); menu = false },
-                        )
-                        // the household's rhythm, category, source and statistics: for whoever wants them
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = { Text("פרטים נוספים על המוצר") },
-                            leadingIcon = { Icon(Icons.Default.Info, null) },
-                            onClick = { detailsOpen = true; menu = false },
-                        )
-                    }
+                // favourite and the product's details: two buttons of their own (no menu for two things)
+                IconButton(onClick = { vm.toggleFavorite(itemId) }, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        if (favorite) Icons.Default.Star else Icons.Default.StarBorder,
+                        contentDescription = if (favorite) "הסרה מהמועדפים" else "הוספה למועדפים",
+                        tint = if (favorite) NqPalette.FavoriteStar else LocalContentColor.current,
+                    )
+                }
+                // the household's rhythm, category, source and statistics: for whoever wants them
+                IconButton(onClick = { detailsOpen = true }, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Default.Info, contentDescription = "פרטים נוספים על המוצר")
                 }
             }
             if (line != null) {
@@ -327,7 +321,7 @@ fun ItemSheet(
             }
             if (line?.missing == true) {
                 Text(
-                    "מסומן כחסר — בני הבית שנבחרו לקבל התראות יקבלו הודעה (בלשונית הבית ← הגדרות ← התראות).",
+                    "מסומן כחסר — בני הבית שנבחרו לקבל התראות יקבלו הודעה (בלשונית הבית, בהגדרות, בהתראות).",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }

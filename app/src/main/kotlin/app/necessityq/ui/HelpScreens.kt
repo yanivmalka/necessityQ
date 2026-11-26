@@ -61,7 +61,7 @@ fun HelpScreen(modifier: Modifier = Modifier, onOpen: (HelpTarget) -> Unit = {})
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         TopAppBar(
             navigationIcon = { BackNavButton() },
-            title = { Text("עזרה: איך משתמשים", fontWeight = FontWeight.ExtraBold) },
+            title = { Text("עזרה", fontWeight = FontWeight.ExtraBold) },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
         )
         OutlinedTextField(

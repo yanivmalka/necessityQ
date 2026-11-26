@@ -141,8 +141,8 @@ class MainActivity : ComponentActivity() {
 private enum class Dest(val title: String) {
     LIST("רשימה"), MENU("תפריט"), PRICES("מחירים"), HOME("הבית"),
     HOUSEHOLD("בני הבית ושיתוף"), MESSAGES("צ'אט פוד"), HISTORY("היסטוריה"), ACCOUNT("חשבון"),
-    SETTINGS("הגדרות"), APPEARANCE("הגדרות"), UPDATES("עדכונים"), ABOUT("אודות"),
-    FAMILY_MEMBER("בן/בת משפחה"), HELP("עזרה: איך משתמשים"), SUGGESTIONS("הצעות שדחיתם"),
+    SETTINGS("הגדרות"), UPDATES("עדכונים"), ABOUT("אודות"),
+    FAMILY_MEMBER("בן/בת משפחה"), HELP("עזרה"), SUGGESTIONS("הצעות שדחיתם"),
 }
 
 /** The bottom-bar tabs (their order, and the one the app opens on, are chosen in the settings). */
@@ -353,7 +353,7 @@ private fun Root(vm: AppViewModel) {
                 ),
                 // about the app
                 listOf(
-                    HubEntry(Dest.HELP.title, Icons.Default.Info) { go(Dest.HELP, from = Dest.HOME) },
+                    HubEntry(Dest.HELP.title, Icons.Default.Help) { go(Dest.HELP, from = Dest.HOME) },
                     HubEntry(
                         Dest.UPDATES.title, Icons.Default.SystemUpdate,
                         badge = when (update) {
@@ -454,9 +454,7 @@ private fun Root(vm: AppViewModel) {
                                     onOpenSettings = { settingsTab = SettingsTab.NOTIFY; go(Dest.SETTINGS, from = Dest.HOUSEHOLD) },
                                 )
                                 Dest.ACCOUNT -> AccountScreen(vm, s.account, modifier)
-                                // "מראה" is a part of the settings' "האפליקציה" tab now
                                 Dest.SETTINGS -> SettingsScreen(vm, modifier, settingsTab)
-                                Dest.APPEARANCE -> SettingsScreen(vm, modifier, SettingsTab.LOOK)
                                 Dest.UPDATES -> UpdatesScreen(vm, modifier)
                                 Dest.ABOUT -> AboutScreen(modifier)
                                 Dest.HELP -> HelpScreen(modifier, onOpen = { target ->
@@ -497,7 +495,7 @@ private fun Root(vm: AppViewModel) {
                     text = {
                         Text(
                             if (code == household.joinCode) "הקישור הוא לבית \"${household.name}\", שכבר הצטרפת אליו."
-                            else "כדי להצטרף לבית אחר צריך קודם לצאת מ\"${household.name}\" (הבית ← בני הבית ושיתוף ← יציאה מהבית), ואז לפתוח שוב את הקישור.",
+                            else "כדי להצטרף לבית אחר צריך קודם לצאת מ\"${household.name}\" (בלשונית הבית, בבני הבית ושיתוף, יש \"יציאה מהבית\"), ואז לפתוח שוב את הקישור.",
                         )
                     },
                     confirmButton = { androidx.compose.material3.TextButton(onClick = vm::consumeJoin) { Text("הבנתי") } },

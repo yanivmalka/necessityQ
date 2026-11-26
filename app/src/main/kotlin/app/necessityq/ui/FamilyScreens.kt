@@ -185,7 +185,7 @@ fun MemberScreen(vm: AppViewModel, memberId: String?, onBack: () -> Unit, modifi
 
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         TopAppBar(
-            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "חזרה") } },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.Close, contentDescription = "ביטול") } },
             title = { Text(if (existing == null) "בן/בת משפחה חדש/ה" else existing.name, fontWeight = FontWeight.ExtraBold) },
             actions = { TextButton(enabled = name.isNotBlank(), onClick = ::save) { Text("שמירה", fontWeight = FontWeight.Bold) } },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
@@ -329,7 +329,6 @@ fun MemberScreen(vm: AppViewModel, memberId: String?, onBack: () -> Unit, modifi
                 }
             }
 
-            Button(onClick = ::save, enabled = name.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("שמירה") }
             if (existing != null) {
                 TextButton(onClick = { confirmDelete = true }, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Default.Delete, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("הסרה מהמשפחה")

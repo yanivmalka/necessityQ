@@ -141,7 +141,7 @@ private fun ScanContent(vm: AppViewModel, r: ScanResult) {
     if (p == null) {
         Text("המוצר לא נמצא", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text(
-            if (selected.isEmpty()) "עוד לא נבחרו סניפים במסך \"סניפים ומחירים\", ולכן אין מחירים לחפש בהם."
+            if (selected.isEmpty()) "עוד לא נבחרו סניפים בלשונית \"מחירים\", ולכן אין מחירים לחפש בהם."
             else "הברקוד לא מופיע בקבצי המחירים של הסניפים שאתם עוקבים אחריהם.",
             style = MaterialTheme.typography.bodyMedium,
         )

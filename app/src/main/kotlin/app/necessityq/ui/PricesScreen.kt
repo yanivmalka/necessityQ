@@ -83,7 +83,7 @@ fun PricesScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
             Column {
                 TopAppBar(
                     navigationIcon = { BackNavButton() },
-                    title = { Text("סניפים ומחירים", fontWeight = FontWeight.ExtraBold) },
+                    title = { Text("מחירים", fontWeight = FontWeight.ExtraBold) },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                 )
                 Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -160,7 +160,7 @@ private fun BranchesTab(vm: AppViewModel, branches: List<PriceBranch>, selected:
                         Text("אתם כנראה ב${nb.branch.title}", fontWeight = FontWeight.Bold)
                         Text("לפי המיקום (${PriceData.formatDistance(nb.distanceMeters ?: 0.0)} מהכתובת)", style = MaterialTheme.typography.bodySmall)
                     }
-                    if (nb.branch.id !in selected) OutlinedButton(onClick = vm::followHereBranch) { Text("מעקב") }
+                    if (nb.branch.id !in selected) OutlinedButton(onClick = vm::followHereBranch) { Text("מעקב אחרי הסניף") }
                     else Text("במעקב ✓", color = MaterialTheme.colorScheme.primary)
                 }
             }
@@ -293,7 +293,7 @@ private fun ProductsTab(
         AnimatedVisibility(visible = !searchActive) {
           Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fadingHorizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (mine.size > 1) FilterChip(selected = allChosen, onClick = { chosenRaw = mineIds.joinToString(",") }, label = { Text("הכל") })
+            if (mine.size > 1) FilterChip(selected = allChosen, onClick = { chosenRaw = mineIds.joinToString(",") }, label = { Text("כל הסניפים שלי") })
             mine.forEach { b ->
                 val on = b.id in ids
                 FilterChip(
