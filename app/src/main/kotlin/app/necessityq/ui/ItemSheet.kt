@@ -304,7 +304,9 @@ fun ItemSheet(
             }
             // then: what it costs at the branch (the products themselves are in "מוצרים דומים", lower on the page)
             val priceInfo = rememberItemPriceInfo(vm, itemId, productName, productVariant)
-            BranchPriceSection(vm, itemId = itemId, info = priceInfo)
+            // "בחירת מוצר מדויק": one tap on the price card opens the products in a sheet
+            var pickerOpen by remember(itemId) { mutableStateOf(false) }
+            BranchPriceSection(vm, itemId = itemId, info = priceInfo, onPick = { pickerOpen = true })
             // the chosen product at every followed branch, like a stock ticker
             BranchQuotesStrip(vm, chosen = priceInfo?.preferred)
             // promotions on it at the followed branches: where and how much (the gift on its tile)
@@ -332,16 +334,20 @@ fun ItemSheet(
 
             line?.note?.let { InfoLine("הערה", it) }
 
-            // the products that carry the item's name, in the page itself: to choose the one that is bought
-            HorizontalDivider()
-            SimilarProducts(
-                vm, itemId = itemId, title = line?.displayName ?: itemName,
-                info = priceInfo,
-                // in the shop: "this is the one I am buying now"
-                onBuyNow = if (mode == app.necessityq.domain.ListMode.SHOP && line != null && !inCart) {
-                    { vm.checkOff(line); pageWindow.close() }
-                } else null,
-            )
+            // the products that carry the item's name: in a sheet, opened from the price card (one tap)
+            if (pickerOpen) {
+                ModalBottomSheet(onDismissRequest = { pickerOpen = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+                    SimilarProducts(
+                        vm, itemId = itemId, title = line?.displayName ?: itemName,
+                        info = priceInfo,
+                        onChosen = { pickerOpen = false },
+                        // in the shop: "this is the one I am buying now"
+                        onBuyNow = if (mode == app.necessityq.domain.ListMode.SHOP && line != null && !inCart) {
+                            { pickerOpen = false; vm.checkOff(line); pageWindow.close() }
+                        } else null,
+                    )
+                }
+            }
 
             if (pastThreads.isNotEmpty()) {
                 HorizontalDivider()
@@ -824,13 +830,13 @@ private fun rememberItemPriceInfo(vm: AppViewModel, itemId: String, name: String
  * company chooser, are lower on the page ([SimilarProducts]).
  */
 @Composable
-private fun BranchPriceSection(vm: AppViewModel, itemId: String, info: app.necessityq.domain.ItemPriceInfo?) {
+private fun BranchPriceSection(vm: AppViewModel, itemId: String, info: app.necessityq.domain.ItemPriceInfo?, onPick: () -> Unit) {
     val primary by vm.primaryBranch.collectAsStateWithLifecycle()
     val loaded by vm.branchPrices.collectAsStateWithLifecycle()
     val branch = primary ?: return
     val unit = LocalWeightPriceUnit.current
 
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("מחיר ב${branch.title}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
         val basic = info?.let { app.necessityq.domain.UnitPrices.of(it, unit) }
         Text(
@@ -844,24 +850,33 @@ private fun BranchPriceSection(vm: AppViewModel, itemId: String, info: app.neces
             style = MaterialTheme.typography.bodyMedium,
         )
         if (info != null && info.candidates.isNotEmpty()) {
-            Text(
-                if (info.preferred != null) "המוצר שבחרתם מוצג ברשימה במקום הטווח. מוצרים אחרים: למטה, במוצרים דומים."
-                else "בחירת מוצר מדויק (לא חובה): למטה, במוצרים דומים.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            // the products themselves: one tap, in a sheet
+            Row(
+                Modifier.fillMaxWidth().clip(NqShapes.Panel).clickable(onClick = onPick)
+                    .background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (info.preferred != null) "החלפת המוצר שנבחר" else "בחירת מוצר מדויק",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.outline)
+            }
+            if (info.preferred != null) {
+                androidx.compose.material3.TextButton(onClick = { vm.setPreferredProduct(itemId, null) }) { Text("ביטול הבחירה — הצגת טווח בלבד") }
+            }
         }
-    }
-    if (info?.preferred != null) {
-        androidx.compose.material3.TextButton(onClick = { vm.setPreferredProduct(itemId, null) }) { Text("ביטול הבחירה — הצגת טווח בלבד") }
     }
 }
 
 /**
- * "מוצרים דומים": the branch's products that carry the item's name, in the product page itself. The company chooser
- * comes first — one line that scrolling sideways — (and the fat percentages, when they differ), under it the products
- * with their prices; choosing one is optional and it is then shown on the list instead of the range. In the shop
- * ([onBuyNow] given) the chosen product has a button: "this is the one I am buying now".
+ * "בחירת מוצר מדויק", the content of the sheet opened from the price card: the branch's products that carry the item's
+ * name. The company chooser comes first — one line that scrolling sideways — (and the fat percentages, when they
+ * differ), under it the products with their prices; choosing one is optional and it is then shown on the list instead
+ * of the range ([onChosen] closes the sheet). In the shop ([onBuyNow] given) the chosen product has a button: "this is
+ * the one I am buying now".
  */
 @Composable
 private fun SimilarProducts(
@@ -869,14 +884,18 @@ private fun SimilarProducts(
     itemId: String,
     title: String,
     info: app.necessityq.domain.ItemPriceInfo?,
+    onChosen: () -> Unit,
     onBuyNow: (() -> Unit)?,
 ) {
     val primary by vm.primaryBranch.collectAsStateWithLifecycle()
     var brand by remember(itemId) { mutableStateOf<String?>(null) }
     var pct by remember(itemId) { mutableStateOf<String?>(null) }
     var all by remember(itemId) { mutableStateOf(false) }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("מוצרים דומים", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+    Column(
+        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("בחירת מוצר מדויק", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         if (info == null || info.candidates.isEmpty()) {
             Text(
                 if (primary == null) "בחרו סניף בלשונית המחירים כדי לראות מוצרים ומחירים." else "לא נמצאו מוצרים בשם \"$title\" בסניף.",
@@ -916,7 +935,7 @@ private fun SimilarProducts(
         val ordered = filtered.sortedByDescending { it.code == info.preferred?.code }
         (if (all) ordered else ordered.take(FIRST_PRODUCTS)).forEach { c ->
             val chosen = info.preferred?.code == c.code
-            BranchProductRow(c, chosen, onChoose = { vm.setPreferredProduct(itemId, if (chosen) null else c.code) })
+            BranchProductRow(c, chosen, onChoose = { vm.setPreferredProduct(itemId, if (chosen) null else c.code); if (!chosen) onChosen() })
         }
         if (filtered.isEmpty()) Text("אין מוצרים לבחירה הזו", style = MaterialTheme.typography.bodySmall)
         if (!all && filtered.size > FIRST_PRODUCTS) {
@@ -925,9 +944,10 @@ private fun SimilarProducts(
         if (onBuyNow != null && info.preferred != null) {
             Button(onClick = onBuyNow, modifier = Modifier.fillMaxWidth()) { Text("קונים את ${info.preferred!!.name}") }
         }
+        // the one hint, in the sheet only
         Text(
             if (info.preferred != null) "המוצר שבחרתם מוצג ברשימה במקום הטווח. נגיעה בו שוב מבטלת את הבחירה."
-            else "בחירת מוצר מדויק היא לא חובה — המוצר שתבחרו יוצג ברשימה במקום הטווח.",
+            else "לא חובה — המוצר שתבחרו יוצג ברשימה במקום הטווח.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -946,12 +966,25 @@ private fun ItemPromotions(vm: AppViewModel, itemId: String) {
     val all by vm.priceBranches.collectAsStateWithLifecycle()
     val mine = offers.filter { it.itemId == itemId }
     if (mine.isEmpty()) return
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    // one line that says how many and from what price; opens in place. The same promotion at several branches is one.
+    val groups = promoGroups(mine)
+    var open by rememberSaveable(itemId) { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxWidth().clip(NqShapes.Panel).clickable { open = !open }.padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         PromoGift()
         androidx.compose.foundation.layout.Spacer(Modifier.width(8.dp))
-        Text("מבצעים על המוצר", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+        val count = if (groups.size == 1) "מבצע אחד" else "${groups.size} מבצעים"
+        Text(
+            "$count · מ-${app.necessityq.domain.PriceData.formatPrice(mine.minOf { it.promoUnit })}",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(if (open) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = if (open) "סגירה" else "פתיחה")
     }
-    PromoOfferList(mine, emptyList(), all, title = null)
+    if (open) ItemPromoOfferList(groups, all)
 }
 
 /**

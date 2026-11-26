@@ -347,6 +347,35 @@ fun PromoOfferList(offers: List<PromoOffer>, basket: List<Pair<String, Promotion
     }
 }
 
+/**
+ * An item's promotions, the same one at several branches as one: the offers with the same promotion, product and
+ * prices, the cheapest first.
+ */
+fun promoGroups(offers: List<PromoOffer>): List<List<PromoOffer>> =
+    offers.groupBy { listOf(it.promotion.shortLabel, it.product.code, it.promoUnit, it.regular, it.promotion.conditions) }
+        .values.sortedBy { it.first().promoUnit }
+
+/** The merged promotions of one item ([promoGroups]): what it is, where, and the price with it against the regular. */
+@Composable
+fun ItemPromoOfferList(groups: List<List<PromoOffer>>, all: List<PriceBranch>) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        groups.forEach { g ->
+            val o = g.first()
+            val where = g.map { branchName(it.branchId, all) }.distinct().joinToString(", ")
+            PromoRowFrame(
+                title = o.promotion.shortLabel,
+                details = listOfNotNull(
+                    "ב$where",
+                    o.product.name.takeIf { it.isNotBlank() },
+                    "${shekels(o.promoUnit)} במקום ${shekels(o.regular)}",
+                    o.promotion.conditions.takeIf { it.isNotEmpty() }?.joinToString(" · "),
+                ).joinToString(" · "),
+                warning = o.promotion.stockWarning,
+            )
+        }
+    }
+}
+
 /** A promotion on the whole basket: "על כל הסל: 10 ₪ הנחה · בקנייה מעל 300 ₪ · בקופון". */
 @Composable
 private fun BasketPromoRow(p: Promotion) {
