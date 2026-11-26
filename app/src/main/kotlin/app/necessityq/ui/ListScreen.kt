@@ -1802,7 +1802,8 @@ private fun GenerateSheet(vm: AppViewModel, onDismiss: () -> Unit) {
     // after adding: what was added, and the undo of exactly that
     var result by remember { mutableStateOf<List<GeneratedItem>?>(null) }
     var undoAdded by remember { mutableStateOf<(() -> Unit)?>(null) }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    // fully open at once (as every other sheet): in the half-open state a drag on the list moved the sheet, not the list
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         val added = result
         if (added != null) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {

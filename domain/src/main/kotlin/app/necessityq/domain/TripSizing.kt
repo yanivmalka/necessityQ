@@ -29,7 +29,7 @@ class TripSizer(stats: Collection<ItemStats>, val people: Double) {
         var q: Quantity? = usual
         if (usual != null) {
             if (people > 0.0 && then != null && then > 0.0 && abs(people / then - 1.0) >= SCALE_THRESHOLD) {
-                q = usual.times(people / then)
+                q = usual.times(HouseholdSize.scale(people, then))
                 computed = true
                 notes += "מותאם ל־${peopleText(people)}"
             }

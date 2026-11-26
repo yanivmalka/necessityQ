@@ -8,6 +8,19 @@ object HouseholdSize {
     /** Zero when no profiles were filled in: then nothing is scaled. */
     fun people(members: List<FamilyMember>, today: LocalDate): Double = members.sumOf { weight(it, today) }
 
+    /**
+     * How much a household of [people] portions buys, in "single-person" shopping units. Sub-linear: a big household
+     * shares (one tub of cottage serves several people, nobody has three of their own), a single person buys for one.
+     * 1 → 1, 2 → 1.8, 4 → 3.2, 8 → 5.8. Only for amounts computed from a table; what the household really buys
+     * is never reduced by it.
+     */
+    fun shared(people: Double): Double = if (people <= 1.0) people else Math.pow(people, SHARING)
+
+    /** Ratio of what a household of [now] buys to what one of [then] bought. */
+    fun scale(now: Double, then: Double): Double = shared(now) / shared(then)
+
+    private const val SHARING = 0.85
+
     /** A member with no known age counts as an adult. */
     fun weight(member: FamilyMember, today: LocalDate): Double {
         val months = member.ageMonths(today) ?: return 1.0
@@ -71,7 +84,7 @@ object SmartQuantities {
         if (people <= 0.0) return null
         val norm = perPerson[Catalog.lookup(name)?.name ?: return null] ?: return null
         val weeks = ((cadenceDays ?: 7.0) / 7.0).coerceIn(0.5, 4.0)
-        val raw = norm.perWeek * people * weeks * calibration
+        val raw = norm.perWeek * HouseholdSize.shared(people) * weeks * calibration
         val amount = (ceil(raw / norm.step) * norm.step).coerceAtLeast(norm.step)
         return Quantity(amount, norm.unit)
     }

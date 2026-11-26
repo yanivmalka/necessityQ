@@ -70,7 +70,7 @@ class TripSizingTest {
         val two = TripSizer(listOf(eggs), 2.0).size(eggs.identity, eggs)
         val five = TripSizer(listOf(eggs), 5.0).size(eggs.identity, eggs)
         assertEquals(Quantity.pieces(12), two.quantity)
-        assertEquals(Quantity.pieces(24), five.quantity)
+        assertEquals(Quantity.pieces(18), five.quantity)
         assertEquals("לפי 5 נפשות", five.note)
         val bread = stats(every("לחם", 7, 5, { null }), start.plusDays(28))
         assertEquals("הערכה לפי 3 נפשות", TripSizer(listOf(bread), 3.0).size(bread.identity, bread).note)
@@ -91,7 +91,7 @@ class TripSizingTest {
         val list = TripSizer(emptyList(), 4.0).starter(emptySet())
         assertTrue(list.size >= 5)
         val milk = list.first { it.identity.name == "חלב" }
-        assertEquals(Quantity(4.0, QuantityUnit.LITER), milk.quantity)
+        assertEquals(Quantity(3.0, QuantityUnit.LITER), milk.quantity)
         assertEquals(TripSizer.STARTER_REASON, milk.reason)
         assertTrue(TripSizer(emptyList(), 0.0).starter(emptySet()).isEmpty()) // size unknown: nothing to go by
     }
