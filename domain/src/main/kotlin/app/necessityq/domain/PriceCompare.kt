@@ -215,6 +215,45 @@ data class ProductAcross(
 
 object ProductSearch {
     /**
+     * The same search as [across], in steps, so the first hits can be shown at once: after each branch's quick pass
+     * (name, brand or barcode contain the words) the merged results so far, then, branch by branch, what the stem
+     * pass adds (singular/plural). Lazy: nothing is computed for a step the caller does not ask for, so a collector
+     * that stops (a new query) stops the work. The last element equals what [across] finds.
+     */
+    fun stages(
+        branches: List<Pair<String, ProductIndex>>,
+        codes: (String) -> Map<String, BranchProduct>,
+        query: String,
+        limit: Int = 100,
+    ): Sequence<List<ProductAcross>> = sequence {
+        val code = query.trim()
+        val found = LinkedHashMap<String, ProductAcross>()
+        fun add(branchId: String, hits: List<BranchProduct>): Boolean {
+            var added = false
+            for (p in hits) {
+                if (p.internalCode || p.code.isBlank()) {
+                    if ("$branchId:${p.code}" !in found) { found["$branchId:${p.code}"] = ProductAcross(p, mapOf(branchId to p)); added = true }
+                } else if (p.code !in found) {
+                    val at = branches.mapNotNull { (id, _) -> (codes(id)[p.code] ?: p.takeIf { id == branchId })?.let { id to it } }.toMap()
+                    found[p.code] = ProductAcross(p, at)
+                    added = true
+                }
+            }
+            return added
+        }
+        fun snapshot() = found.values
+            .sortedWith(compareBy<ProductAcross>({ if (it.product.code == code) 0 else 1 }, { -it.prices.size }, { it.product.name.length }, { it.cheapest }))
+            .take(limit)
+        for ((id, index) in branches) {
+            add(id, PriceData.searchIndexed(index, query, limit))
+            yield(snapshot())
+        }
+        for ((id, index) in branches) {
+            if (add(id, PriceData.searchIndexed(index, query, limit, stems = true))) yield(snapshot())
+        }
+    }
+
+    /**
      * Searches the products of several branches at once ([branches]: branch id → products, in display order) and
      * merges hits by barcode, so each product shows its price at every chosen branch that sells it ([codes]: branch
      * id → products by barcode, see [PriceComparisons.byCode]). Chain-internal codes stay per branch. Exact barcode
