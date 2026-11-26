@@ -14,6 +14,8 @@ data class ListSnapshot(
     val stats: Map<String, ItemStats>,
     val runningLow: List<Suggestion>,
     val frequent: List<Suggestion>,
+    /** The list for the next trip, built from the household's own rhythm (see [SuggestionEngine.forNextTrip]). */
+    val tripList: List<Suggestion> = emptyList(),
     /** Recycle bin: deleted lines and bought lines that were cleared, newest first. */
     val removed: List<ListLine> = emptyList(),
 )
@@ -49,6 +51,7 @@ class ShoppingService(
             stats = stats,
             runningLow = suggestions.runningLow,
             frequent = suggestions.frequent,
+            tripList = suggestionEngine.forNextTrip(stats.values, needed, suppressions, today),
             removed = lines.filter { it.status == LineStatus.REMOVED }.sortedByDescending { it.removedAtMillis ?: 0 },
         )
     }
@@ -130,6 +133,12 @@ class ShoppingService(
     suspend fun acceptSuggestion(householdId: String, userId: String, suggestion: Suggestion, current: List<ListLine>) {
         val source = if (suggestion.kind == SuggestionKind.RUNNING_LOW) LineSource.SUGGESTED else LineSource.QUICK_ADD
         add(householdId, userId, suggestion.identity, suggestion.quantity, source, current)
+    }
+
+    /** One tap: puts the whole trip list on the shopping list. Returns how many items were added. */
+    suspend fun addTripList(householdId: String, userId: String, items: List<Suggestion>, current: List<ListLine>): Int {
+        items.forEach { acceptSuggestion(householdId, userId, it, current) }
+        return items.size
     }
 
     suspend fun dismissSuggestion(householdId: String, suggestion: Suggestion, stats: ItemStats?) {

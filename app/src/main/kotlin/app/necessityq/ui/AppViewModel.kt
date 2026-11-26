@@ -153,6 +153,15 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         launchSafe { container.service.acceptSuggestion(hid, uid, suggestion, lines); _added.tryEmit(suggestion.itemId) }
     }
 
+    /** "בניית רשימה לשבוע": puts everything that runs out before the next trip on the list, in one tap. */
+    fun addTripList(items: List<Suggestion>) {
+        val (hid, uid, lines) = ctx() ?: return
+        launchSafe {
+            val n = container.service.addTripList(hid, uid, items, lines)
+            _messages.tryEmit(if (n == 1) "נוסף מוצר אחד לרשימה" else "נוספו $n מוצרים לרשימה")
+        }
+    }
+
     fun dismiss(suggestion: Suggestion) {
         val (hid, _, _) = ctx() ?: return
         launchSafe { container.service.dismissSuggestion(hid, suggestion, snapshot.value?.stats?.get(suggestion.itemId)) }

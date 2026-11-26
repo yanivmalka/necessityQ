@@ -129,6 +129,54 @@ class StatsAndSuggestionsTest {
         assertEquals("לחם", result.frequent.first().identity.name)
     }
 
+    // ---- the list for the next trip (0.5) ----
+
+    @Test fun `trip list holds what runs out before the next trip, from the real rhythm`() {
+        // milk every 5 days (last bought day 25, due day 30), flour every 40 days (last day 40, due day 80)
+        val purchases = every("חלב 3%", 5, 6) + every("קמח", 40, 3)
+        val today = start.plusDays(27)
+        val stats = engine.compute(purchases, today).values
+        val trip = SuggestionEngine().forNextTrip(stats, emptySet(), emptyList(), today)
+        assertEquals(listOf("חלב 3%"), trip.map { it.identity.displayName })
+        assertEquals(SuggestionKind.RUNNING_LOW, trip.single().kind)
+    }
+
+    @Test fun `a longer horizon brings in slower items`() {
+        val purchases = every("חלב 3%", 5, 6) + every("קמח", 10, 4)
+        val today = start.plusDays(30)
+        val stats = engine.compute(purchases, today).values
+        val week = SuggestionEngine().forNextTrip(stats, emptySet(), emptyList(), today, horizonDays = 3)
+        val fortnight = SuggestionEngine().forNextTrip(stats, emptySet(), emptyList(), today, horizonDays = 14)
+        assertTrue(fortnight.size >= week.size)
+        assertEquals(setOf("חלב 3%", "קמח"), fortnight.map { it.identity.displayName }.toSet())
+    }
+
+    @Test fun `trip list skips items on the list, dismissed items, one-offs and guesses`() {
+        val purchases = every("חלב 3%", 5, 6) + every("לחם", 3, 8) + purchase("דבש", start.plusDays(20)) +
+            every("חמאה", 9, 2) // one interval: a guess
+        val today = start.plusDays(29)
+        val stats = engine.compute(purchases, today).values
+        val milk = ItemIdentity.fromText("חלב 3%").id
+        val bread = ItemIdentity.fromText("לחם").id
+        val all = SuggestionEngine().forNextTrip(stats, emptySet(), emptyList(), today).map { it.itemId }
+        assertTrue(milk in all && bread in all)
+        assertTrue(ItemIdentity.fromText("דבש").id !in all)
+        assertTrue(ItemIdentity.fromText("חמאה").id !in all)
+        val onList = SuggestionEngine().forNextTrip(stats, setOf(milk), emptyList(), today).map { it.itemId }
+        assertTrue(milk !in onList && bread in onList)
+        val dismissed = SuggestionEngine().forNextTrip(stats, emptySet(), listOf(SuggestionSuppression(bread, today.toEpochDay() + 2)), today)
+        assertTrue(dismissed.none { it.itemId == bread } && dismissed.any { it.itemId == milk })
+    }
+
+    @Test fun `the most overdue item comes first and the quantity is the typical purchase`() {
+        val purchases = every("חלב 3%", 5, 6, Quantity.pieces(2)) + every("לחם", 3, 8)
+        val today = start.plusDays(40) // milk due day 30, bread due day 24+3=27... both overdue; bread by more cadences
+        val stats = engine.compute(purchases, today).values
+        val trip = SuggestionEngine().forNextTrip(stats, emptySet(), emptyList(), today)
+        assertEquals("לחם", trip.first().identity.displayName)
+        assertEquals(Quantity.pieces(2), trip.first { it.identity.displayName == "חלב 3%" }.quantity)
+    }
+
     @Test fun `adding an item already on the list merges the quantity`() {
         val line = ListLine(
             id = "l1", itemId = ItemIdentity.fromText("עגבניות").id, name = "עגבניות", variant = null,

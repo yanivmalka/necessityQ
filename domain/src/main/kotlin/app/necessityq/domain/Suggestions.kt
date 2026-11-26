@@ -80,6 +80,46 @@ class SuggestionEngine(
         return Result(runningLow, frequent)
     }
 
+    /**
+     * The list for the next trip, built from the household's real rhythm and not from defaults: every item with a
+     * measured cadence that will run out before the trip after this one (today + [horizonDays]), most urgent first.
+     * One-off items and items whose rhythm is still a guess ([minConfidence]) are left out, as are items already on
+     * the list or hidden by a dismissal. The quantity is the typical size of a purchase.
+     */
+    fun forNextTrip(
+        stats: Collection<ItemStats>,
+        neededItemIds: Set<String>,
+        suppressions: List<SuggestionSuppression>,
+        today: LocalDate,
+        horizonDays: Int = 7,
+        minConfidence: Double = 0.4,
+        limit: Int = 40,
+    ): List<Suggestion> {
+        val todayEpoch = today.toEpochDay()
+        val suppressed = suppressions.filter { it.untilEpochDay > todayEpoch }.map { it.itemId }.toSet()
+        val until = today.plusDays(horizonDays.toLong())
+        return stats
+            .filter { it.itemId !in neededItemIds && it.itemId !in suppressed }
+            .filter { it.classification != Classification.ONE_OFF && it.confidence >= minConfidence }
+            .mapNotNull { s ->
+                val cadence = s.cadenceDays ?: return@mapNotNull null
+                val due = s.nextDue ?: return@mapNotNull null
+                if (!due.isBefore(until)) return@mapNotNull null
+                val overdue = (today.toEpochDay() - due.toEpochDay()).toDouble() / cadence
+                Suggestion(
+                    itemId = s.itemId,
+                    identity = s.identity,
+                    kind = SuggestionKind.RUNNING_LOW,
+                    quantity = s.typicalQuantity,
+                    // overdue items first, then the ones due soonest; confidence breaks ties
+                    score = overdue.coerceIn(-1.0, 2.0) + s.confidence,
+                    reason = runningLowReason(cadence, s.daysSinceLast(today), s.lastPurchaseEstimated),
+                )
+            }
+            .sortedByDescending { it.score }
+            .take(limit)
+    }
+
     /** How long to hide a dismissed suggestion: half its cadence, at least two days. */
     fun dismissUntil(stats: ItemStats?, today: LocalDate): LocalDate {
         val days = max(2L, ((stats?.cadenceDays ?: 4.0) / 2.0).roundToLong())

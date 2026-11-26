@@ -697,6 +697,12 @@ fun ListScreen(
                 }
             }
 
+            if (showLow && snap.tripList.size >= 3) {
+                item(key = "trip") {
+                    TripListCard(snap.tripList.size, onBuild = { vm.addTripList(snap.tripList) })
+                }
+            }
+
             if (showLow && snap.runningLow.isNotEmpty()) {
                 item(key = "low") {
                     if (!lowExpanded) {
@@ -2304,6 +2310,33 @@ private fun RemindersCard(
                 }
             }
         }
+    }
+}
+
+/** One tap builds the week's list from the household's own rhythm: what will run out before the next trip. */
+@Composable
+private fun TripListCard(count: Int, onBuild: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clip(NqShapes.Panel)
+            .background(MaterialTheme.colorScheme.primaryContainer)
+            .clickable(role = Role.Button, onClickLabel = "הוספת כל המוצרים שיאזלו עד הקנייה הבאה", onClick = onBuild)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(
+            "בניית רשימה לשבוע ($count מוצרים לפי הקצב שלכם) · ",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        Text(
+            "הוספה ›",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+        )
     }
 }
 
