@@ -58,6 +58,9 @@ internal data class StateDto(
     val dismissals: Map<String, Int> = emptyMap(),
     /** Suggestions hidden because the household has them at home ("יש לי בבית"). */
     val atHome: Set<String> = emptySet(),
+    /** Per item: how many recent "יש לי בבית", and the day of the last one. */
+    val atHomeMarks: Map<String, Int> = emptyMap(),
+    val markedDay: Map<String, Long> = emptyMap(),
 )
 
 /**
@@ -102,6 +105,8 @@ class LocalStore(private val file: File) {
             suppressions = shopping.current.value.suppressions.mapValues { it.value.untilEpochDay },
             dismissals = shopping.current.value.suppressions.mapValues { it.value.dismissals },
             atHome = shopping.current.value.suppressions.filterValues { it.atHome }.keys,
+            atHomeMarks = shopping.current.value.suppressions.mapValues { it.value.atHomeMarks }.filterValues { it > 0 },
+            markedDay = shopping.current.value.suppressions.mapNotNull { (id, s) -> s.markedEpochDay?.let { id to it } }.toMap(),
         )
         writer.execute {
             val tmp = File(file.parentFile, file.name + ".tmp")
@@ -157,6 +162,9 @@ private fun StateDto.toDomain(): LocalState = LocalState(
         )
     },
     suppressions = suppressions.mapValues { (itemId, until) ->
-        SuggestionSuppression(itemId, until, dismissals[itemId] ?: 1, atHome = itemId in atHome)
+        SuggestionSuppression(
+            itemId, until, dismissals[itemId] ?: 1, atHome = itemId in atHome,
+            atHomeMarks = atHomeMarks[itemId] ?: 0, markedEpochDay = markedDay[itemId],
+        )
     },
 )

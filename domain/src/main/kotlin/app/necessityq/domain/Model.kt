@@ -138,6 +138,13 @@ data class SuggestionSuppression(
     val dismissals: Int = 1,
     /** "יש לי בבית": hidden because the household has it, not because the suggestion was wrong. */
     val atHome: Boolean = false,
+    /**
+     * How many times lately the household said it has the item at home when it was suggested, and the day of the
+     * last time ([markedEpochDay]). They make its cadence longer ([ConsumptionStatsEngine.atHomeStretch]); kept when
+     * the suggestion is later dismissed, forgotten two months after the last one.
+     */
+    val atHomeMarks: Int = 0,
+    val markedEpochDay: Long? = null,
 )
 
 data class Household(

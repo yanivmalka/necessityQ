@@ -160,6 +160,14 @@ class FirebaseShoppingRepository(
         purchasesRef(householdId).document(purchase.id).set(FirestoreMapping.purchaseToMap(purchase))
     }
 
+    override suspend fun setPurchasesPeople(householdId: String, purchaseIds: List<String>, people: Double) {
+        purchaseIds.chunked(400).forEach { chunk ->
+            val batch = db.batch()
+            chunk.forEach { batch.update(purchasesRef(householdId).document(it), "people", people) }
+            batch.commit()
+        }
+    }
+
     override suspend fun deletePurchase(householdId: String, purchaseId: String) {
         purchasesRef(householdId).document(purchaseId).delete()
     }
@@ -181,6 +189,11 @@ class FirebaseShoppingRepository(
 
     override suspend fun suppress(householdId: String, suppression: SuggestionSuppression) {
         suppressionsRef(householdId).document(suppression.itemId)
-            .set(mapOf("untilEpochDay" to suppression.untilEpochDay, "dismissals" to suppression.dismissals, "atHome" to suppression.atHome))
+            .set(
+                mapOf(
+                    "untilEpochDay" to suppression.untilEpochDay, "dismissals" to suppression.dismissals, "atHome" to suppression.atHome,
+                    "atHomeMarks" to suppression.atHomeMarks, "markedDay" to suppression.markedEpochDay,
+                ),
+            )
     }
 }

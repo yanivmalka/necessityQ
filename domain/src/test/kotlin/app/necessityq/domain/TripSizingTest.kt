@@ -209,4 +209,55 @@ class TripSizingTest {
         assertEquals(SuggestionAccuracy(bought = 1, rejected = 1, open = 0), SuggestionAccuracy.of(lines))
         assertEquals(mapOf("b" to 1), SuggestionAccuracy.rejectionsByItem(lines, 0))
     }
+
+    // ---------- purchases from before the household's size was recorded ----------
+
+    @Test fun `older purchases take the household's size once, so a new member changes amounts at once`() = runBlocking {
+        val repo = InMemoryShoppingRepository()
+        val today = start.plusDays(30)
+        val now = today.atTime(12, 0).toInstant(zone).toEpochMilli()
+        every("חלב", 7, 5, { Quantity(1.0, QuantityUnit.LITER) }).forEach { repo.addPurchase("h", it) } // no size on record
+        val service = service(repo) { now }
+
+        // the size becomes known: it is written on the older purchases, and the amounts stay as they were
+        service.setHouseholdPeople("h", 3.0)
+        assertEquals(5, service.backfillHouseholdPeople("h", 3.0))
+        assertTrue(repo.purchases("h").first().all { it.householdPeople == 3.0 })
+        assertEquals(Quantity(1.0, QuantityUnit.LITER), service.snapshot("h").first().tripList.single().quantity)
+        assertEquals(0, service.backfillHouseholdPeople("h", 6.0)) // once only: the recorded size is history now
+
+        // a member joins: the amount follows right away, with no new purchase
+        service.setHouseholdPeople("h", 6.0)
+        val milk = service.snapshot("h").first().tripList.single()
+        assertEquals(Quantity(2.0, QuantityUnit.LITER), milk.quantity)
+        assertEquals("מותאם ל־6 נפשות", milk.quantityNote)
+        assertEquals(0, service.backfillHouseholdPeople("h", 0.0)) // size unknown: nothing to write
+    }
+
+    // ---------- "יש לי בבית" again and again ----------
+
+    @Test fun `having it at home again and again makes the cadence longer`() = runBlocking {
+        val repo = InMemoryShoppingRepository()
+        var today = start.plusDays(30)
+        every("חלב", 7, 5, { Quantity(1.0, QuantityUnit.LITER) }).forEach { repo.addPurchase("h", it) }
+        val service = service(repo) { today.atTime(12, 0).toInstant(zone).toEpochMilli() }
+        fun cadence() = runBlocking { service.snapshot("h").first().stats.values.single().cadenceDays!! }
+        val s = Suggestion(ItemIdentity.fromText("חלב").id, ItemIdentity.fromText("חלב"), SuggestionKind.RUNNING_LOW, null, 1.0, "")
+        assertEquals(7.0, cadence(), 0.01)
+
+        service.haveAtHome("h", s, null)
+        assertEquals(7.0 * 1.25, cadence(), 0.01)
+        service.haveAtHome("h", s, null)
+        assertEquals(7.0 * 1.5, cadence(), 0.01)
+        // a dismissal later keeps what was learned
+        service.dismissSuggestion("h", s, null)
+        assertEquals(2, repo.suppressions("h").first().single().atHomeMarks)
+        assertEquals(7.0 * 1.5, cadence(), 0.01)
+        // never more than twice the measured cadence
+        repeat(6) { service.haveAtHome("h", s, null) }
+        assertEquals(14.0, cadence(), 0.01)
+        // forgotten two months after the last one: a changed habit can bring the rhythm back
+        today = today.plusDays(61)
+        assertEquals(7.0, cadence(), 0.01)
+    }
 }

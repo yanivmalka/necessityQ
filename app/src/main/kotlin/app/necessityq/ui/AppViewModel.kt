@@ -428,7 +428,12 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                 else loadedMeals.map { data ->
                     hid to (data?.let { app.necessityq.domain.HouseholdSize.people(it.members, java.time.LocalDate.now()) } ?: 0.0)
                 }
-            }.distinctUntilChanged().collect { (hid, people) -> container.service.setHouseholdPeople(hid, people) }
+            }.distinctUntilChanged().collect { (hid, people) ->
+                container.service.setHouseholdPeople(hid, people)
+                // purchases from before the size was recorded count as made at this size (once)
+                runCatching { container.service.backfillHouseholdPeople(hid, people) }
+                    .onFailure { app.necessityq.platform.CrashReport.record(it) }
+            }
         }
     }
 

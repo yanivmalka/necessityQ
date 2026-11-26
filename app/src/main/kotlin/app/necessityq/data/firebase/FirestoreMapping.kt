@@ -180,7 +180,10 @@ internal object FirestoreMapping {
 
     fun suppressionFrom(doc: DocumentSnapshot): SuggestionSuppression? {
         val until = doc.getLong("untilEpochDay") ?: return null
-        return SuggestionSuppression(doc.id, until, doc.getLong("dismissals")?.toInt() ?: 1, atHome = doc.getBoolean("atHome") == true)
+        return SuggestionSuppression(
+            doc.id, until, doc.getLong("dismissals")?.toInt() ?: 1, atHome = doc.getBoolean("atHome") == true,
+            atHomeMarks = doc.getLong("atHomeMarks")?.toInt() ?: 0, markedEpochDay = doc.getLong("markedDay"),
+        )
     }
 
     @Suppress("UNCHECKED_CAST")

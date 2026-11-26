@@ -4,6 +4,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import java.time.Instant
 import java.time.LocalDate
@@ -57,6 +58,27 @@ class ShoppingService(
 
     fun householdPeople(householdId: String): Double = people.value[householdId] ?: 0.0
 
+    /**
+     * Purchases recorded before the household's size was (older versions) count as made at the size it has now, the
+     * first time it is known: from then on, a household that grows or shrinks gets amounts that follow it at once,
+     * without waiting for new purchases. Nothing to do once every purchase has a size. Returns how many were updated.
+     */
+    suspend fun backfillHouseholdPeople(householdId: String, people: Double): Int {
+        if (people <= 0.0) return 0
+        val missing = repository.purchases(householdId).first().filter { it.householdPeople == null }.map { it.id }
+        if (missing.isNotEmpty()) repository.setPurchasesPeople(householdId, missing, people)
+        return missing.size
+    }
+
+    /** The "יש לי בבית" marks of an item that still count (the last one in the last two months), or 0. */
+    private fun atHomeMarks(s: SuggestionSuppression?, today: LocalDate): Int {
+        val marked = s?.markedEpochDay ?: return 0
+        return if (marked >= today.toEpochDay() - REJECTION_MEMORY_MILLIS / 86_400_000L) s.atHomeMarks else 0
+    }
+
+    private suspend fun suppressionOf(householdId: String, itemId: String): SuggestionSuppression? =
+        repository.suppressions(householdId).first().firstOrNull { it.itemId == itemId }
+
     fun snapshot(householdId: String): Flow<ListSnapshot> = combine(
         repository.lines(householdId),
         repository.purchases(householdId),
@@ -65,7 +87,9 @@ class ShoppingService(
     ) { lines, allPurchases, suppressions, people ->
         val today = today()
         val purchases = counted(allPurchases, lines)
-        val stats = statsEngine.compute(purchases, today)
+        val stretch = suppressions.associate { it.itemId to ConsumptionStatsEngine.atHomeStretch(atHomeMarks(it, today)) }
+            .filterValues { it > 1.0 }
+        val stats = statsEngine.compute(purchases, today, stretch)
         val needed = lines.filter { it.status == LineStatus.NEEDED }.map { it.itemId }.toSet()
         val rejections = rejections(lines, suppressions, today)
         val suggestions = suggestionEngine.suggest(stats.values, needed, suppressions, today, rejections)
@@ -188,15 +212,30 @@ class ShoppingService(
 
     /** "יש לי בבית": hides the suggestion for a whole cadence without counting as a rejection. */
     suspend fun haveAtHome(householdId: String, suggestion: Suggestion, stats: ItemStats?, priorRejections: Int = 0) {
-        val until = suggestionEngine.haveAtHomeUntil(stats, today())
-        repository.suppress(householdId, SuggestionSuppression(suggestion.itemId, until.toEpochDay(), priorRejections, atHome = true))
+        val today = today()
+        val until = suggestionEngine.haveAtHomeUntil(stats, today)
+        val marks = atHomeMarks(suppressionOf(householdId, suggestion.itemId), today) + 1
+        repository.suppress(
+            householdId,
+            SuggestionSuppression(
+                suggestion.itemId, until.toEpochDay(), priorRejections,
+                atHome = true, atHomeMarks = marks, markedEpochDay = today.toEpochDay(),
+            ),
+        )
     }
 
     suspend fun dismissSuggestion(
         householdId: String, suggestion: Suggestion, stats: ItemStats?, priorRejections: Int = 0,
     ) {
         val until = suggestionEngine.dismissUntil(stats, today(), priorRejections)
-        repository.suppress(householdId, SuggestionSuppression(suggestion.itemId, until.toEpochDay(), priorRejections + 1))
+        val before = suppressionOf(householdId, suggestion.itemId)
+        repository.suppress(
+            householdId,
+            SuggestionSuppression(
+                suggestion.itemId, until.toEpochDay(), priorRejections + 1,
+                atHomeMarks = before?.atHomeMarks ?: 0, markedEpochDay = before?.markedEpochDay,
+            ),
+        )
     }
 
     suspend fun changeQuantity(householdId: String, line: ListLine, quantity: Quantity?) =
@@ -327,7 +366,14 @@ class ShoppingService(
         items.distinctBy { it.identity.id }.forEach { item ->
             val prior = rejections[item.identity.id] ?: 0
             val until = suggestionEngine.dismissUntil(stats[item.identity.id], today(), prior)
-            repository.suppress(householdId, SuggestionSuppression(item.identity.id, until.toEpochDay(), prior + 1))
+            val before = suppressionOf(householdId, item.identity.id)
+            repository.suppress(
+                householdId,
+                SuggestionSuppression(
+                    item.identity.id, until.toEpochDay(), prior + 1,
+                    atHomeMarks = before?.atHomeMarks ?: 0, markedEpochDay = before?.markedEpochDay,
+                ),
+            )
         }
     }
 
