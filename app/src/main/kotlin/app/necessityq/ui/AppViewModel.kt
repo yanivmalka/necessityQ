@@ -1848,17 +1848,17 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     fun unreadCount(itemId: String, all: List<ItemMessage>): Int {
         val readAt = prefs.readAt(itemId)
-        return all.count { it.itemId == itemId && it.authorId != me && it.atMillis > readAt }
+        return all.count { it.itemId == itemId && app.necessityq.domain.MessageRules.isUnread(it, me, readAt) }
     }
 
     /** The messages on [itemId] from others that the user has not read yet, oldest first. */
     fun unreadMessages(itemId: String, all: List<ItemMessage>): List<ItemMessage> {
         val readAt = prefs.readAt(itemId)
-        return all.filter { it.itemId == itemId && it.authorId != me && it.atMillis > readAt }.sortedBy { it.atMillis }
+        return all.filter { it.itemId == itemId && app.necessityq.domain.MessageRules.isUnread(it, me, readAt) }.sortedBy { it.atMillis }
     }
 
     val unreadTotal: StateFlow<Int> = combine(itemMessages, readTick) { all, _ ->
-        all.filter { it.authorId != me && it.atMillis > prefs.readAt(it.itemId) }.size
+        all.count { app.necessityq.domain.MessageRules.isUnread(it, me, prefs.readAt(it.itemId)) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     fun markRead(itemId: String) {

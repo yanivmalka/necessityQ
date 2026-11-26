@@ -24,6 +24,16 @@ class ChatToolsTest {
         assertEquals(0, MessageRules.minutesLeft(m, 20 * min))
     }
 
+    /** Fixes #72: a deleted message has nothing to read, so it must not stay "unread". */
+    @Test fun `a deleted message is never unread`() {
+        val fromOther = msg("1", author = "other", at = 10)
+        assertTrue(MessageRules.isUnread(fromOther, "me", readAt = 5))
+        assertFalse(MessageRules.isUnread(fromOther.copy(deletedAtMillis = 20), "me", readAt = 5))
+        // read already, my own message, or older than the last reading: not unread either
+        assertFalse(MessageRules.isUnread(fromOther, "me", readAt = 10))
+        assertFalse(MessageRules.isUnread(msg("2", author = "me", at = 10), "me", readAt = 5))
+    }
+
     @Test fun `waveform is scaled to the loudest moment`() {
         val wave = Waveform.fromAmplitudes(listOf(0, 100, 8000, 32000, 500, 0, 16000, 200), bars = 4)
         assertEquals(4, wave.size)

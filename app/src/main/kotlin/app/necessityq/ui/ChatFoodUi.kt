@@ -186,8 +186,8 @@ internal fun ChatFoodThread(
     val members by vm.chatMembers.collectAsStateWithLifecycle()
     val slots = remember(thread) { ChatLayout.slots(thread, System.currentTimeMillis()) }
     val byId = remember(thread) { thread.associateBy { it.id } }
-    val firstUnread = remember(thread, unreadAfter) { thread.firstOrNull { it.authorId != vm.me && it.atMillis > unreadAfter } }
-    val unreadCount = remember(thread, unreadAfter) { thread.count { it.authorId != vm.me && it.atMillis > unreadAfter } }
+    val firstUnread = remember(thread, unreadAfter) { thread.firstOrNull { app.necessityq.domain.MessageRules.isUnread(it, vm.me, unreadAfter) } }
+    val unreadCount = remember(thread, unreadAfter) { thread.count { app.necessityq.domain.MessageRules.isUnread(it, vm.me, unreadAfter) } }
     val requesters = remember { HashMap<String, BringIntoViewRequester>() }
     val scope = rememberCoroutineScope()
     var flashId by remember { mutableStateOf<String?>(null) }
