@@ -250,7 +250,6 @@ private fun ListSettings(vm: AppViewModel) {
 
     SettingsCard("סדר הרשימה") {
         OptionRow("מוצרי קירור והקפאה בסוף הרשימה", current.chilledLast) { vm.setDisplay(current.copy(chilledLast = it)) }
-        OptionRow("בקנייה: מה שכבר נקנה בקנייה הזו בתחתית הרשימה (מחוק בקו)", current.showBought) { vm.setDisplay(current.copy(showBought = it)) }
     }
 
 }
@@ -295,7 +294,7 @@ private fun SwipeSettings(vm: AppViewModel, current: app.necessityq.platform.Dis
         }
         if (mode == ListMode.PLAN) {
             Text(
-                "בהכנת רשימה עוד לא קונים, ולכן החלקה רק מסירה פריט (או לא עושה כלום). סימון נקנה וחסר — בקנייה.",
+                "בהכנת רשימה עוד לא קונים: החלקה מסירה פריט, פותחת צ'אט פוד, או לא עושה כלום. סימון נקנה וחסר — בקנייה, ושם אי אפשר למחוק פריט.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),

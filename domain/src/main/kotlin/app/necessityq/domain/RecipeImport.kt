@@ -37,6 +37,9 @@ object RecipeImport {
         scriptRe.findAll(html).firstNotNullOfOrNull { m ->
             val element = runCatching { json.parseToJsonElement(m.groupValues[1].trim()) }.getOrNull()
             element?.let(::findRecipe)?.let { toRecipe(it, url) }
+        }?.let { r ->
+            // a page whose data lacks the yield often still shows it in its markup
+            if (r.servings == null) r.copy(servings = servingsInMarkup(html)) else r
         }
 
     /** Looks for the Recipe object: on its own, in an array, or in a "@graph". */
@@ -64,7 +67,7 @@ object RecipeImport {
             name = clean(name),
             ingredients = ingredients,
             instructions = steps.joinToString("\n"),
-            servings = servings(o["recipeYield"]),
+            servings = servings(o["recipeYield"]) ?: servings(o["yield"]) ?: servings(o["recipeServings"]),
             sourceUrl = url,
         )
     }
@@ -89,12 +92,29 @@ object RecipeImport {
         }
     }
 
-    /** recipeYield: "4", 4, "4 מנות", "6-8 servings", or a list of these; the first number. */
+    /**
+     * recipeYield: "4", 4, "4 מנות", "6-8 servings", "מספר מנות: 12", an object holding the value, or a list of
+     * these; the first number (the low end of a range). Null when there is none: the recipe does not say.
+     */
     private fun servings(e: JsonElement?): Int? = when (e) {
         is JsonArray -> e.firstNotNullOfOrNull(::servings)
-        is JsonPrimitive -> e.contentOrNull?.let { Regex("\\d+").find(it)?.value?.toIntOrNull() }?.takeIf { it in 1..100 }
+        is JsonObject -> servings(e["value"] ?: e["@value"] ?: e["name"] ?: e["text"])
+        is JsonPrimitive -> e.contentOrNull?.let { servingsIn(it) }
         else -> null
     }
+
+    /** The first number in a yield text; "בין 6 ל-8" is 6. Counts of 1..100 only. */
+    fun servingsIn(text: String): Int? =
+        Regex("\\d+").find(clean(text))?.value?.toIntOrNull()?.takeIf { it in 1..100 }
+
+    private val markupYield = listOf(
+        Regex("itemprop\\s*=\\s*[\"']recipeYield[\"'][^>]*>([^<]{1,40})<", RegexOption.IGNORE_CASE),
+        Regex("itemprop\\s*=\\s*[\"']recipeYield[\"'][^>]*content\\s*=\\s*[\"']([^\"']{1,40})[\"']", RegexOption.IGNORE_CASE),
+        Regex("wprm-recipe-servings[^>]*>\\s*([0-9]{1,3})\\s*<", RegexOption.IGNORE_CASE),
+    )
+
+    private fun servingsInMarkup(html: String): Int? =
+        markupYield.firstNotNullOfOrNull { re -> re.find(html)?.groupValues?.get(1)?.let(::servingsIn) }
 
     private fun strings(e: JsonElement?): List<String> = when (e) {
         is JsonArray -> e.flatMap(::strings)

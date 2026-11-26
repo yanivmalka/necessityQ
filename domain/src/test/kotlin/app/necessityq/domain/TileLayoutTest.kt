@@ -28,8 +28,8 @@ class TileLayoutTest {
     }
 
     @Test
-    fun `the default tile is simple - check, name, amount, price`() {
-        val expected = setOf(TileElement.CHECK, TileElement.QUANTITY, TileElement.PRICE)
+    fun `the default tile is simple - check, name, amount, price and the sign of a conversation`() {
+        val expected = setOf(TileElement.CHECK, TileElement.QUANTITY, TileElement.PRICE, TileElement.CHAT)
         // nothing is checked off while making the list
         assertEquals(expected - TileElement.CHECK, TileLayout.defaultFor(ListMode.PLAN).shown)
         assertEquals(expected, TileLayout.defaultFor(ListMode.SHOP).shown)

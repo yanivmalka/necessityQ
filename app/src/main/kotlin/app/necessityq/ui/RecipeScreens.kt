@@ -217,7 +217,15 @@ fun RecipeScreen(vm: AppViewModel, dishId: String, onBack: () -> Unit, onEdit: (
                 familySize = data.members.size,
                 onChange = { servings = it.coerceIn(1, 40) },
                 kit = dish.isKit,
+                yieldKnown = dish.servingsKnown,
             )
+            dish.sourceUrl?.let { url ->
+                val context = androidx.compose.ui.platform.LocalContext.current
+                val host = remember(url) { runCatching { android.net.Uri.parse(url).host?.removePrefix("www.") }.getOrNull() ?: url }
+                TextButton(onClick = {
+                    runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) }
+                }) { Text("המתכון המקורי ב-$host") }
+            }
 
             SegmentedTabs(
                 labels = listOf("מרכיבים · ${dish.ingredients.size}", "אופן הכנה · ${steps.size} שלבים"),
@@ -422,7 +430,7 @@ fun SegmentedTabs(labels: List<String>, selected: Int, onSelect: (Int) -> Unit) 
 /** "בשביל כמה?": − n + and quick choices (2, as written, the whole family, double). */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ServingsCard(servings: Int, recipeYield: Int, familySize: Int, onChange: (Int) -> Unit, kit: Boolean = false) {
+private fun ServingsCard(servings: Int, recipeYield: Int, familySize: Int, onChange: (Int) -> Unit, kit: Boolean = false, yieldKnown: Boolean = true) {
     val presets = buildList {
         add(2); add(recipeYield)
         if (familySize > 0) add(familySize)
@@ -435,6 +443,7 @@ private fun ServingsCard(servings: Int, recipeYield: Int, familySize: Int, onCha
                 val k = servings.toDouble() / recipeYield.coerceAtLeast(1)
                 Text(
                     if (kit) "הכמויות כפול מספר הערכות"
+                    else if (!yieldKnown) "המתכון לא מציין לכמה מנות הוא — הכמויות לפי $recipeYield מנות. אפשר לשנות כאן"
                     else if (servings == recipeYield) "המתכון המקורי הוא ל-$recipeYield מנות"
                     else "המתכון המקורי ל-$recipeYield · הכמויות ×" + app.necessityq.domain.Quantity.formatNumber(k),
                     style = MaterialTheme.typography.bodySmall,
@@ -446,7 +455,7 @@ private fun ServingsCard(servings: Int, recipeYield: Int, familySize: Int, onCha
         if (!kit) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             presets.forEach { n ->
                 val label = when (n) {
-                    recipeYield -> "$n · המקורי"
+                    recipeYield -> if (yieldKnown) "$n · המקורי" else "$n"
                     familySize -> "$n · כל המשפחה"
                     recipeYield * 2 -> "$n · כפול"
                     else -> "$n"
@@ -884,6 +893,7 @@ fun RecipeEditScreen(vm: AppViewModel, dishId: String?, onBack: () -> Unit, onSa
             name = name.trim(),
             kind = kind,
             servings = if (kind == DishKind.KIT) 1 else servings,
+            servingsKnown = existing == null || existing.servingsKnown || servings != existing.servings,
             cookServings = if (kind == DishKind.KIT) 1 else existing?.cookServings ?: servings,
             flavor = if (kind == DishKind.KIT) null else flavor,
             instructions = instructions.trim(),

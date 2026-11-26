@@ -56,4 +56,15 @@ class RecipeImportTest {
         assertEquals("https://www.10dakot.co.il/recipe/x/", RecipeImport.urlIn("מתכון מעולה: https://www.10dakot.co.il/recipe/x/."))
         assertNull(RecipeImport.urlIn("אין כאן קישור"))
     }
+
+    @Test fun `yield comes from a range, an object, or the markup when the data lacks it`() {
+        assertEquals(24, RecipeImport.fromHtml(page("""{"@type":"Recipe","name":"עוגיות","recipeYield":"24-30 עוגיות"}"""))!!.servings)
+        assertEquals(6, RecipeImport.fromHtml(page("""{"@type":"Recipe","name":"מרק","recipeYield":{"@type":"QuantitativeValue","value":"6"}}"""))!!.servings)
+        assertEquals(8, RecipeImport.fromHtml(page("""{"@type":"Recipe","name":"פשטידה"}""").replace("</body>", "<span itemprop=\"recipeYield\">8 מנות</span></body>"))!!.servings)
+        assertNull(RecipeImport.fromHtml(page("""{"@type":"Recipe","name":"סלט"}"""))!!.servings)
+    }
+
+    @Test fun `a tzameret dish does not claim a yield`() {
+        assertEquals(false, Dish("d", "x", emptyList(), servingsKnown = false).servingsKnown)
+    }
 }

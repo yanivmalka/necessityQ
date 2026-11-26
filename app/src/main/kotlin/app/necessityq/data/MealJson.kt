@@ -50,6 +50,9 @@ object MealJson {
         val skipped: List<String> = emptyList(),
         /** "MEAL" (default) or "KIT"; older versions ignore it and show a kit as a recipe. */
         val kind: String? = null,
+        /** True when the recipe did not say how many servings it makes (older data: false). */
+        val servingsUnknown: Boolean = false,
+        val sourceUrl: String? = null,
     )
     @Serializable private data class P(val day: Int, val slot: String, val dishId: String, val audience: List<String> = emptyList(), val servings: Int? = null)
     @Serializable private data class O(val epochDay: Long, val slot: String, val dishId: String? = null, val audience: List<String> = emptyList(), val servings: Int? = null)
@@ -91,7 +94,7 @@ object MealJson {
             dishes = data.dishes.map {
                 D(it.id, it.name, it.ingredients, it.nutritionCode, it.servings, it.cookServings, it.instructions, it.flavor?.name, it.listServings, it.listSkip.toList(),
                     it.listMemory != null, it.listMemory?.variants.orEmpty(), it.listMemory?.known?.toList().orEmpty(), it.listMemory?.skipped?.toList().orEmpty(),
-                    it.kind.takeIf { k -> k != DishKind.MEAL }?.name)
+                    it.kind.takeIf { k -> k != DishKind.MEAL }?.name, !it.servingsKnown, it.sourceUrl)
             },
             tastes = data.ratings.mapValues { (_, m) -> m.mapValues { starsToLegacy(it.value) } },
             ratings = data.ratings,
@@ -125,6 +128,8 @@ object MealJson {
                     it.instructions, enumOrNull<Flavor>(it.flavor), it.listServings, it.listSkip.toSet(),
                     if (it.hasMemory) ListMemory(it.variants, it.known.toSet(), it.skipped.toSet()) else null,
                     kind = enumOrNull<DishKind>(it.kind) ?: DishKind.MEAL,
+                    servingsKnown = !it.servingsUnknown,
+                    sourceUrl = it.sourceUrl,
                 )
             },
             ratings = ratings,

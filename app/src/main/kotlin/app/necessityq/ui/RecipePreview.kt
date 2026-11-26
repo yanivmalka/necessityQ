@@ -79,7 +79,8 @@ fun RecipePreviewSheet(
     val tzameretDish = remember(index, food) { food?.let { f -> index?.dishFrom(f, "preview") } }
     val name = recipe?.name?.takeIf { food == null && it.isNotBlank() } ?: tzameretDish?.name ?: recipe?.name.orEmpty()
     val ingredients = recipe?.ingredients?.takeIf { it.isNotEmpty() } ?: tzameretDish?.ingredients.orEmpty()
-    val servings = recipe?.servings ?: tzameretDish?.servings
+    // only a number the page gave: a Tzameret dish has no yield, and a made-up 4 would look like a fact
+    val servings = recipe?.servings
     val steps = remember(recipe) { Recipes.steps(recipe?.instructions.orEmpty()) }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
@@ -302,9 +303,12 @@ fun ImportMethodSheet(vm: AppViewModel, dish: app.necessityq.domain.Dish, onDism
                         vm.editDish(dish.id) { d ->
                             if (replaceIngredients && r.ingredients.isNotEmpty()) {
                                 val servings = r.servings ?: d.servings
-                                d.copy(instructions = r.instructions.ifBlank { d.instructions }, ingredients = r.ingredients, servings = servings, cookServings = servings)
+                                d.copy(
+                                    instructions = r.instructions.ifBlank { d.instructions }, ingredients = r.ingredients, servings = servings, cookServings = servings,
+                                    servingsKnown = r.servings != null || d.servingsKnown, sourceUrl = r.sourceUrl ?: d.sourceUrl,
+                                )
                             } else {
-                                d.copy(instructions = r.instructions.ifBlank { d.instructions })
+                                d.copy(instructions = r.instructions.ifBlank { d.instructions }, sourceUrl = r.sourceUrl ?: d.sourceUrl)
                             }
                         }
                         onDismiss()

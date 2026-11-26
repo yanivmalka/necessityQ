@@ -88,6 +88,10 @@ data class Dish(
     val listMemory: ListMemory? = null,
     /** [DishKind.KIT]: no flavour, no family ratings, no "cooked" wording; it is a bundle of products. */
     val kind: DishKind = DishKind.MEAL,
+    /** False when nobody said how many servings the recipe makes ([servings] is then only the default, not a fact). */
+    val servingsKnown: Boolean = true,
+    /** The web page the recipe was imported from. */
+    val sourceUrl: String? = null,
 ) {
     val isKit: Boolean get() = kind == DishKind.KIT
 
