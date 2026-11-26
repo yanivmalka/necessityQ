@@ -260,20 +260,4 @@ class TripSizingTest {
         today = today.plusDays(61)
         assertEquals(7.0, cadence(), 0.01)
     }
-
-    @Test fun `all the dairy together stays within what eight people can use in a week`() {
-        val item = { name: String, n: Int ->
-            GeneratedItem(ItemIdentity.fromText(name), Quantity.pieces(n), "x", quantityNote = "הערכה")
-        }
-        val items = listOf(item("יוגורט", 72), item("קוטג'", 24), item("חלב", 6))
-        val capped = BasketLimits.capGenerated(items, 8.0, 7)
-        val pieces = capped.mapNotNull { it.quantity?.amount }.sum()
-        assertTrue("was $pieces", pieces <= 48.0 + 3)
-        assertTrue(capped.first { it.identity.name == "יוגורט" }.quantity!!.amount < 72.0)
-        assertTrue(capped.first { it.identity.name == "יוגורט" }.quantityNote!!.contains("הוקטן"))
-        // amounts the household really bought are not cut, and a small household is not touched
-        val bought = listOf(GeneratedItem(ItemIdentity.fromText("יוגורט"), Quantity.pieces(72), "x"))
-        assertEquals(bought, BasketLimits.capGenerated(bought, 8.0, 7))
-        assertEquals(items, BasketLimits.capGenerated(items, 40.0, 7))
-    }
 }

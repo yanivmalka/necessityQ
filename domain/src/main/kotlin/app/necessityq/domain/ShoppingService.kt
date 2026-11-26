@@ -96,12 +96,9 @@ class ShoppingService(
         val active = suppressions.filter { it.untilEpochDay > today.toEpochDay() }
         val sizer = TripSizer(stats.values, people)
         // a household with no history yet: a first list from its size
-        val tripList = BasketLimits.capSuggestions(
-            if (stats.isEmpty()) sizer.starter(needed + active.map { it.itemId })
-            else suggestionEngine.forNextTrip(stats.values, needed, suppressions, today, TRIP_DAYS, rejections = rejections)
-                .map { sizer.size(it, TRIP_DAYS) },
-            people, TRIP_DAYS,
-        )
+        val tripList = if (stats.isEmpty()) sizer.starter(needed + active.map { it.itemId })
+        else suggestionEngine.forNextTrip(stats.values, needed, suppressions, today, TRIP_DAYS, rejections = rejections)
+            .map { sizer.size(it, TRIP_DAYS) }
         ListSnapshot(
             lines = lines,
             grouped = ListRules.grouped(lines),
