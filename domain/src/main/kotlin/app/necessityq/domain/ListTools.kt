@@ -121,7 +121,7 @@ object ListGenerator {
                     .map { p -> GeneratedItem(p.identity, p.quantity?.let(TripSizer::wholeCount), "נקנה בקנייה הקודמת") }
             }
         }
-        return proposed
+        val sized = proposed
             .filter { it.identity.id !in onList }
             .distinctBy { it.identity.id }
             .map { item ->
@@ -139,6 +139,8 @@ object ListGenerator {
                 }
             }
             .sortedWith(compareBy({ it.identity.category.order }, { it.identity.displayName }))
+        // the shopping as a whole: all the dairy together stays within what the household can use
+        return if (mode == GenerateMode.LAST_TRIP) sized else BasketLimits.capGenerated(sized, people, if (mode == GenerateMode.DUE) horizon else null)
     }
 }
 
