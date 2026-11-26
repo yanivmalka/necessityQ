@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import app.necessityq.ui.icons.Icons
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
@@ -143,10 +144,11 @@ fun AccountScreen(vm: AppViewModel, account: Account, modifier: Modifier = Modif
 @Composable
 private fun SampleDataCard(vm: AppViewModel) {
     var confirmSample by remember { mutableStateOf(false) }
+    var confirmReset by remember { mutableStateOf(false) }
     val meals by vm.meals.collectAsStateWithLifecycle()
     SettingsCard(
         "נתוני דוגמה",
-        "למלא את הבית בנתונים לדוגמה כדי לראות איך האפליקציה נראית כשהיא כבר מכירה את הבית. טעינה חוזרת לא יוצרת כפילויות.",
+        "למלא את הבית בנתונים לדוגמה כדי לראות איך האפליקציה נראית כשהיא כבר מכירה את הבית. טעינה חוזרת לא יוצרת כפילויות. \"איפוס היסטוריה\" מוחק את כל מה שהאפליקציה למדה, והבית מתחיל מאפס.",
     ) {
         OutlinedButton(onClick = { confirmSample = true }, modifier = Modifier.padding(horizontal = 4.dp)) { Text("טעינת קניות לדוגמה") }
         if (meals.dishes.isEmpty()) {
@@ -155,6 +157,32 @@ private fun SampleDataCard(vm: AppViewModel) {
                 modifier = Modifier.padding(horizontal = 4.dp),
             ) { Text("טעינת מתכונים לדוגמה") }
         }
+        OutlinedButton(
+            onClick = { confirmReset = true },
+            modifier = Modifier.padding(horizontal = 4.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+        ) { Text("איפוס היסטוריה") }
+    }
+    // wiping the memory cannot be undone: a warning, and a second tap on a button that says what it does
+    if (confirmReset) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmReset = false },
+            title = { Text("לאפס את ההיסטוריה?") },
+            text = {
+                Text(
+                    "אזהרה: הפעולה מוחקת לצמיתות את כל היסטוריית הקניות של הבית, לכל בני הבית, וגם את מה שדחיתם ואת \"יש לי בבית\" " +
+                        "ואת סל המחזור. האפליקציה תשכח את קצב הקנייה, את הכמויות הרגילות ואת ההצעות, ותתחיל מאפס. " +
+                        "הרשימה הנוכחית, בני המשפחה, המתכונים וההגדרות לא ייפגעו. אי אפשר לבטל.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { confirmReset = false; vm.resetHistory() },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                ) { Text("מחיקת ההיסטוריה") }
+            },
+            dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("ביטול") } },
+        )
     }
     // sample data changes the household's history for good, so it is explained before anything is loaded
     if (confirmSample) {

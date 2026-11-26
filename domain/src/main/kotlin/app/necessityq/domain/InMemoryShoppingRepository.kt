@@ -142,4 +142,7 @@ open class InMemoryShoppingRepository(
 
     override suspend fun suppress(householdId: String, suppression: SuggestionSuppression) =
         mutate { it.copy(suppressions = it.suppressions + (suppression.itemId to suppression)) }
+
+    override suspend fun clearHistory(householdId: String, purchaseIds: List<String>, suppressedItemIds: List<String>) =
+        mutate { it.copy(purchases = it.purchases - purchaseIds.toSet(), suppressions = it.suppressions - suppressedItemIds.toSet()) }
 }

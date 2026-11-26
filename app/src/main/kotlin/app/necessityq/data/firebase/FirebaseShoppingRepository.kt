@@ -196,4 +196,14 @@ class FirebaseShoppingRepository(
                 ),
             )
     }
+
+    override suspend fun clearHistory(householdId: String, purchaseIds: List<String>, suppressedItemIds: List<String>) {
+        val refs = purchaseIds.map { purchasesRef(householdId).document(it) } + suppressedItemIds.map { suppressionsRef(householdId).document(it) }
+        // a batch holds at most 500 writes
+        refs.chunked(400).forEach { chunk ->
+            val batch = db.batch()
+            chunk.forEach { batch.delete(it) }
+            batch.commit()
+        }
+    }
 }
