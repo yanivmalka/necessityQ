@@ -148,6 +148,36 @@ class SuggestionEngine(
     }
 }
 
+/**
+ * How well the suggestions work: of the lines that came from a suggestion ("כנראה נגמר", "קונים בדרך כלל", the
+ * week's list), how many were bought, how many the household threw away, and how many are still waiting.
+ * Read from the lines themselves, so it needs no storage of its own. A line the household cleared after buying it
+ * (removed from BOUGHT) counts as bought; one deleted before it was bought counts as rejected.
+ */
+data class SuggestionAccuracy(val bought: Int, val rejected: Int, val open: Int) {
+    val decided: Int get() = bought + rejected
+    val total: Int get() = decided + open
+
+    /** Share of decided suggestions that were bought (0..1), or null until at least [minDecided] were decided. */
+    fun rate(minDecided: Int = 5): Double? = if (decided < minDecided) null else bought.toDouble() / decided
+
+    companion object {
+        fun of(lines: Collection<ListLine>): SuggestionAccuracy {
+            var bought = 0; var rejected = 0; var open = 0
+            for (l in lines) {
+                if (l.source != LineSource.SUGGESTED && l.source != LineSource.QUICK_ADD) continue
+                if (l.recipe != null) continue // older versions tagged menu lines as suggestions
+                when (l.status) {
+                    LineStatus.BOUGHT -> bought++
+                    LineStatus.NEEDED -> open++
+                    LineStatus.REMOVED -> if (l.removedFrom == LineStatus.BOUGHT) bought++ else rejected++
+                }
+            }
+            return SuggestionAccuracy(bought, rejected, open)
+        }
+    }
+}
+
 /** Rules for adding to the list: the same item is consolidated instead of duplicated. */
 object ListRules {
     sealed interface AddDecision {

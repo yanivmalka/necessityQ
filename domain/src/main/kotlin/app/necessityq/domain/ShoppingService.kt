@@ -16,6 +16,8 @@ data class ListSnapshot(
     val frequent: List<Suggestion>,
     /** The list for the next trip, built from the household's own rhythm (see [SuggestionEngine.forNextTrip]). */
     val tripList: List<Suggestion> = emptyList(),
+    /** How many of the suggested lines were bought or thrown away. */
+    val accuracy: SuggestionAccuracy = SuggestionAccuracy(0, 0, 0),
     /** Recycle bin: deleted lines and bought lines that were cleared, newest first. */
     val removed: List<ListLine> = emptyList(),
 )
@@ -52,6 +54,7 @@ class ShoppingService(
             runningLow = suggestions.runningLow,
             frequent = suggestions.frequent,
             tripList = suggestionEngine.forNextTrip(stats.values, needed, suppressions, today),
+            accuracy = SuggestionAccuracy.of(lines),
             removed = lines.filter { it.status == LineStatus.REMOVED }.sortedByDescending { it.removedAtMillis ?: 0 },
         )
     }

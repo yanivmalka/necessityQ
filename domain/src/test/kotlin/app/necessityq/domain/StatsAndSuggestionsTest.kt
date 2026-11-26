@@ -177,6 +177,27 @@ class StatsAndSuggestionsTest {
         assertEquals(Quantity.pieces(2), trip.first { it.identity.displayName == "חלב 3%" }.quantity)
     }
 
+    private fun line(id: String, source: LineSource, status: LineStatus, removedFrom: LineStatus? = null, recipe: String? = null) = ListLine(
+        id = id, itemId = id, name = id, variant = null, category = Category.PRODUCE, quantity = null, note = null,
+        status = status, source = source, addedBy = "u1", addedAtMillis = 0, updatedAtMillis = 0,
+        recipe = recipe, removedFrom = removedFrom,
+    )
+
+    @Test fun `accuracy counts bought, thrown away and waiting suggestions`() {
+        val lines = listOf(
+            line("a", LineSource.SUGGESTED, LineStatus.BOUGHT),
+            line("b", LineSource.QUICK_ADD, LineStatus.REMOVED, removedFrom = LineStatus.BOUGHT), // cleared after buying
+            line("c", LineSource.SUGGESTED, LineStatus.REMOVED, removedFrom = LineStatus.NEEDED), // deleted
+            line("d", LineSource.SUGGESTED, LineStatus.NEEDED),
+            line("e", LineSource.MANUAL, LineStatus.BOUGHT), // typed by a person: not a suggestion
+            line("f", LineSource.SUGGESTED, LineStatus.BOUGHT, recipe = "שקשוקה"), // old menu line
+        )
+        val acc = SuggestionAccuracy.of(lines)
+        assertEquals(SuggestionAccuracy(bought = 2, rejected = 1, open = 1), acc)
+        assertNull(acc.rate()) // too few decided to say
+        assertEquals(2.0 / 3.0, acc.rate(minDecided = 3)!!, 0.001)
+    }
+
     @Test fun `adding an item already on the list merges the quantity`() {
         val line = ListLine(
             id = "l1", itemId = ItemIdentity.fromText("עגבניות").id, name = "עגבניות", variant = null,

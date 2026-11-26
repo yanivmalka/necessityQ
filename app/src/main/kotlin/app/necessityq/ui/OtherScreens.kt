@@ -276,6 +276,26 @@ fun HistoryScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
                     )
                 }
             }
+            snapshot?.accuracy?.takeIf { it.total > 0 }?.let { acc ->
+                item(key = "accuracy") {
+                    Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text("דיוק ההצעות", fontWeight = FontWeight.SemiBold)
+                            val rate = acc.rate()
+                            Text(
+                                if (rate == null) "עוד מוקדם לדעת: ${acc.decided} הצעות הוכרעו (נקנו או נמחקו)."
+                                else "${(rate * 100).roundToInt()}% מההצעות שהוספתם נקנו בפועל",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                "נקנו ${acc.bought} · נמחקו ${acc.rejected} · ממתינות ברשימה ${acc.open}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
             items(stats, key = { it.itemId }) { s ->
                 Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
                     Column(Modifier.padding(12.dp)) {
