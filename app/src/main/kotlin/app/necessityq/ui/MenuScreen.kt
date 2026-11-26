@@ -228,7 +228,7 @@ private fun MenuHome(vm: AppViewModel, modifier: Modifier, onOpen: (MenuPage) ->
                         meal = meal,
                         dish = slotDish,
                         members = data.members,
-                        onList = slotDish != null && app.necessityq.domain.RecipeListSync.onList(listLines, slotDish).isNotEmpty(),
+                        onList = slotDish != null && app.necessityq.domain.RecipeListSync.onListAny(listLines, slotDish),
                         onAddToList = {
                             if (slotDish != null && meal != null) {
                                 val n = meal.servings ?: slotDish.plannedServings
@@ -241,6 +241,15 @@ private fun MenuHome(vm: AppViewModel, modifier: Modifier, onOpen: (MenuPage) ->
                         onToggleCooked = { cooked -> vm.updateMeals { MealPlanner.setCooked(it, selected, slot, cooked) } },
                     )
                     HorizontalDivider()
+                }
+                // a snack, or a kit, besides the three meals: one tap adds the slot for this day
+                val missingExtras = MealPlanner.extraSlots.filter { it !in slots }
+                if (missingExtras.isNotEmpty()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        missingExtras.forEach { slot ->
+                            TextButton(onClick = { picking = selected to slot }) { Text("+ ${slot.label}") }
+                        }
+                    }
                 }
                 val planned = (todayDay until todayDay + horizon).sumOf { d -> MealPlanner.mealsOn(data, d).count { !it.cooked } }
                 Button(onClick = { vm.addMenuToList(todayDay, horizon) }, modifier = Modifier.fillMaxWidth(), enabled = planned > 0) {
@@ -441,7 +450,7 @@ private fun SlotRow(
                 )
                 val who = if (meal.audience.isEmpty()) "כולם" else members.filter { it.id in meal.audience }.joinToString { it.name }
                 Text(
-                    listOfNotNull("${meal.servings ?: dish.plannedServings} מנות", who, if (meal.dated) "רק בתאריך הזה" else null).joinToString(" · "),
+                    listOfNotNull(if (dish.isKit) "ערכה" else "${meal.servings ?: dish.plannedServings} מנות", who, if (meal.dated) "רק בתאריך הזה" else null).joinToString(" · "),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -469,7 +478,11 @@ private fun SlotRow(
             IconButton(onClick = { onToggleCooked(!meal.cooked) }) {
                 Icon(
                     if (meal.cooked) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                    contentDescription = if (meal.cooked) "בושל — ביטול" else "סימון שבושל",
+                    contentDescription = when {
+                        dish.isKit -> if (meal.cooked) "בוצע — ביטול" else "סימון שבוצע"
+                        meal.cooked -> "בושל — ביטול"
+                        else -> "סימון שבושל"
+                    },
                     tint = if (meal.cooked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
                 )
             }
@@ -496,12 +509,12 @@ private fun RecipeRow(dish: Dish, data: MealData, checked: Boolean? = null, onLo
         Column(Modifier.weight(1f)) {
             Text(dish.name, fontWeight = FontWeight.Bold)
             Text(
-                "${dish.plannedServings} מנות · ${dish.ingredients.size} מרכיבים",
+                (if (dish.isKit) "ערכה" else "${dish.plannedServings} מנות") + " · ${dish.ingredients.size} מרכיבים",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        val stars = data.members.mapNotNull { data.rating(it.id, dish.id) }.filter { it > 0 }
+        val stars = if (dish.isKit) emptyList() else data.members.mapNotNull { data.rating(it.id, dish.id) }.filter { it > 0 }
         if (stars.isNotEmpty()) {
             Icon(Icons.Default.Star, null, tint = androidx.compose.ui.graphics.Color(0xFFF5A623), modifier = Modifier.size(16.dp))
             Text(String.format(java.util.Locale.US, "%.1f", stars.average()), style = MaterialTheme.typography.labelMedium)
