@@ -333,9 +333,9 @@ fun ListScreen(
             if (all == 0) null else RecipeOnList(d, all, menuOnly = own == 0)
         }.sortedBy { it.dish.name }
     }
-    // a couple of recipes show in full; more fold into one line so the products stay on screen (a tap keeps the choice)
+    // like "כנראה נגמר בקרוב": one folded line ("5 מתכונים ברשימה · הצגה ›") so the products stay on screen; once tapped, the choice holds
     var recipesExpandedChoice by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<Boolean?>(null) }
-    val recipesExpanded = recipesExpandedChoice ?: (recipesOnList.size <= 2)
+    val recipesExpanded = recipesExpandedChoice ?: false
 
     // "משכו שמאלה…" is shown the first three times the list opens with items, then it is learned
     val showSwipeHint = remember { vm.swipeHintDue() }
@@ -2493,18 +2493,19 @@ private fun RecipesOnListCard(
     if (!expanded) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clip(NqShapes.Panel)
-                .background(MaterialTheme.colorScheme.surface).border(1.dp, NqTheme.colors.hairline, NqShapes.Panel)
+                .background(MaterialTheme.colorScheme.primaryContainer)
                 .clickable(role = Role.Button, onClickLabel = "הצגת המתכונים שברשימה", onClick = onToggle)
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Default.Restaurant, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+            Icon(Icons.Default.Restaurant, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text(
                 (if (recipes.size == 1) "מתכון אחד ברשימה" else "${recipes.size} מתכונים ברשימה") + " · ",
                 style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
-            Text("הצגה ›", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+            Text("הצגה ›", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
         }
         return
     }
