@@ -28,17 +28,25 @@ object HouseholdSize {
 object SmartQuantities {
     private class PerPerson(val perWeek: Double, val unit: QuantityUnit, val step: Double)
 
-    /** Keyed by the catalogue's canonical name ([Catalog.lookup]). */
+    /**
+     * Keyed by the catalogue's canonical name ([Catalog.lookup]). Only items with a published per-capita figure are
+     * listed; the rest get no amount rather than a guess. The figures are annual supply per person (which includes
+     * waste), divided by 52, as reported by the Dairy Board / Ministry of Agriculture and quoted in the press:
+     *  - חלב: about 46 L of drinking milk and milk drinks a year in 2025, 48 L in 2022 → 0.9 L a week
+     *    (https://www.ice.co.il/consumerism/news/article/1113292)
+     *  - ביצים: about 250 a year (236 in 2003, 254 in a later press report) → 4.8 a week
+     *    (https://www.kikar.co.il/335/81534)
+     *  - קוטג': white cheeses about 11 kg a year in 2025 → 0.21 kg a week, about 0.8 of a 250 g tub (an assumption
+     *    on the tub size; the figure covers all white cheeses, not cottage alone)
+     *  - תפוחים: about 13.6–14.1 kg a year → 0.27 kg a week
+     * Not listed, for lack of a per-product figure: bread, yoghurt, tomatoes, cucumbers, bananas (the Ministry of
+     * Agriculture gives only about 211 kg of all fresh fruit and vegetables per person for 2024).
+     */
     private val perPerson: Map<String, PerPerson> = mapOf(
-        "חלב" to PerPerson(1.5, QuantityUnit.LITER, 1.0),
-        "לחם" to PerPerson(1.5, QuantityUnit.PIECE, 1.0),
-        "ביצים" to PerPerson(4.0, QuantityUnit.PIECE, 2.0),
-        "יוגורט" to PerPerson(3.0, QuantityUnit.PIECE, 1.0),
-        "קוטג'" to PerPerson(1.0, QuantityUnit.PIECE, 1.0),
-        "עגבניות" to PerPerson(0.7, QuantityUnit.KILOGRAM, 0.5),
-        "מלפפונים" to PerPerson(0.7, QuantityUnit.KILOGRAM, 0.5),
-        "בננות" to PerPerson(0.6, QuantityUnit.KILOGRAM, 0.5),
-        "תפוחים" to PerPerson(0.6, QuantityUnit.KILOGRAM, 0.5),
+        "חלב" to PerPerson(0.9, QuantityUnit.LITER, 1.0),
+        "ביצים" to PerPerson(4.8, QuantityUnit.PIECE, 2.0),
+        "קוטג'" to PerPerson(0.8, QuantityUnit.PIECE, 1.0),
+        "תפוחים" to PerPerson(0.27, QuantityUnit.KILOGRAM, 0.5),
     )
 
     /**
