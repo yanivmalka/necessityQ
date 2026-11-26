@@ -124,4 +124,18 @@ class PackSizesTest {
         assertEquals(grams(800.0), PackSizes.toBuy("ירקות קפואים", grams(500.0)))
         assertEquals(liters(1.0), PackSizes.toBuy("גלידה", ml(600.0)))
     }
+
+    @Test fun `hummus, tea, tortillas and pitas`() {
+        assertEquals(grams(250.0), PackSizes.toBuy("חומוס", grams(200.0)))
+        assertEquals(grams(400.0), PackSizes.toBuy("חומוס", grams(300.0)))
+        assertEquals(grams(500.0), PackSizes.toBuy("חומוס", grams(450.0)))
+        assertEquals(Quantity.pieces(25), PackSizes.toBuy("תה", Quantity.pieces(10)))
+        assertEquals(Quantity.pieces(50), PackSizes.toBuy("תה", Quantity.pieces(30)))
+        assertEquals(Quantity.pieces(6), PackSizes.toBuy("טורטיות", Quantity.pieces(4)))
+        assertEquals(Quantity.pieces(8), PackSizes.toBuy("טורטיות", Quantity.pieces(7)))
+        assertEquals(Quantity.pieces(10), PackSizes.toBuy("טורטיות", Quantity.pieces(9)))
+        assertEquals(Quantity.pieces(6), PackSizes.toBuy("פיתות", Quantity.pieces(4)))
+        assertEquals(Quantity.pieces(10), PackSizes.toBuy("פיתה", Quantity.pieces(8)))
+        assertEquals(Quantity.pieces(12), PackSizes.toBuy("פיתות", Quantity.pieces(11)))
+    }
 }
