@@ -88,9 +88,11 @@ object ListGenerator {
         people: Double = 0.0,
         /** The first-list survey's answers ([FirstListSurvey]), when it was filled in. */
         baseline: HouseholdBaseline? = null,
+        /** The packs the household buys ([HouseholdPacks]): computed amounts are whole packs of them, as on the list. */
+        chosen: PackChoices = PackChoices(),
     ): List<GeneratedItem> {
         val onList = current.filter { it.status == LineStatus.NEEDED }.map { it.itemId }.toSet()
-        val sizer = TripSizer(stats, people, baseline)
+        val sizer = TripSizer(stats, people, baseline, chosen)
         val horizon = horizonDays.toInt()
         val proposed = when (mode) {
             GenerateMode.DUE -> {
