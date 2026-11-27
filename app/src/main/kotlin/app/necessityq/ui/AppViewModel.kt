@@ -556,22 +556,38 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
      */
     suspend fun estimateSurvey(
         makeup: app.necessityq.domain.HouseholdMakeup,
-    ): Pair<Map<String, app.necessityq.domain.SurveyEstimate>, Boolean> {
+    ): SurveyEstimateResult {
         val hid = ctx()?.first
         val stats = snapshot.value?.stats?.values.orEmpty()
         val items = app.necessityq.domain.FirstListSurvey.itemsFor(makeup)
         val estimator = container.estimator
-        val model = if (hid == null || estimator == null || makeup.isEmpty) null
-        else try {
-            estimator.estimate(hid, makeup.ages, items)
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            null
+        var failure: app.necessityq.domain.EstimateFailure? = null
+        val model = when {
+            makeup.isEmpty -> null
+            hid == null || estimator == null -> { failure = app.necessityq.domain.EstimateFailure.UNAVAILABLE; null }
+            else -> try {
+                estimator.estimate(hid, makeup.ages, items)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: app.necessityq.domain.EstimateException) {
+                failure = e.failure; null
+            } catch (e: Exception) {
+                failure = app.necessityq.domain.EstimateFailure.ERROR; null
+            }
         }
         val estimates = app.necessityq.domain.FirstListSurvey.estimates(makeup, model, stats)
-        return estimates to estimates.values.any { it.source == app.necessityq.domain.SurveyEstimate.Source.MODEL }
+        val fromModel = estimates.values.any { it.source == app.necessityq.domain.SurveyEstimate.Source.MODEL }
+        // an answer that held none of the survey's items is as unusable as no answer
+        if (model != null && !fromModel && failure == null) failure = app.necessityq.domain.EstimateFailure.BAD_REPLY
+        return SurveyEstimateResult(estimates, fromModel, failure)
     }
+
+    /** The survey's amounts, whether the AI gave them, and if it did not, why. */
+    data class SurveyEstimateResult(
+        val estimates: Map<String, app.necessityq.domain.SurveyEstimate>,
+        val fromModel: Boolean,
+        val failure: app.necessityq.domain.EstimateFailure?,
+    )
 
     /** Keeps the survey's answers (or that it was skipped): from now on they size the first list and new items. */
     fun saveSurvey(baseline: app.necessityq.domain.HouseholdBaseline) {

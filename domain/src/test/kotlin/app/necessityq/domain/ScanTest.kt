@@ -30,6 +30,17 @@ class ScanTest {
 
     private val cottage5 = product("7290004127329", "קוטג' 5% 250 גרם", 6.2, brand = "תנובה")
 
+    @Test fun `the check digit tells a good read from a bad one`() {
+        assertTrue(Barcodes.hasValidCheckDigit("7290004127329"))
+        assertTrue(Barcodes.hasValidCheckDigit("4006381333931"))
+        assertTrue(Barcodes.hasValidCheckDigit("036000291452"))
+        assertTrue(Barcodes.hasValidCheckDigit("96385074"))
+        assertFalse(Barcodes.hasValidCheckDigit("7290004127328"))
+        assertFalse(Barcodes.hasValidCheckDigit("036000291453"))
+        assertFalse(Barcodes.hasValidCheckDigit("96385075"))
+        assertTrue(Barcodes.hasValidCheckDigit("12345")) // other lengths cannot be checked
+    }
+
     @Test
     fun normalizeKeepsDigitsAndDropsLeadingZeros() {
         assertEquals("7290004127329", Barcodes.normalize(" 7290004127329 "))

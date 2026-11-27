@@ -140,6 +140,14 @@ private fun ScanContent(vm: AppViewModel, r: ScanResult) {
     val p = r.product
     if (p == null) {
         Text("המוצר לא נמצא", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        // the camera often reads before it has focused, and a misread code finds nothing: ask for a steady, clear aim
+        val misread = !app.necessityq.domain.Barcodes.hasValidCheckDigit(r.code)
+        Text(
+            (if (misread) "נראה שהברקוד נקרא לא נכון. " else "אם הברקוד לא נקרא טוב, ") +
+                "כוונו את המצלמה ישר אל הברקוד, במרחק שבו הוא חד וברור, המתינו שהתמונה תתמקד, ונסו שוב.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (misread) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Text(
             if (selected.isEmpty()) "עוד לא נבחרו סופרים בלשונית \"מחירים\", ולכן אין מחירים לחפש בהם."
             else "הברקוד לא מופיע בקבצי המחירים של הסופרים שאתם עוקבים אחריהם.",
