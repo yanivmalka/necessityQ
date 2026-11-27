@@ -96,6 +96,27 @@ class TripSizingTest {
         assertTrue(TripSizer(emptyList(), 0.0).starter(emptySet()).isEmpty()) // size unknown: nothing to go by
     }
 
+    @Test fun `a survey filled in before staples were added still gets them, from the table`() {
+        // an older survey asked only about milk and coffee (coffee: "לא קונים")
+        val old = FirstListSurvey.baseline(mapOf("חלב" to 3.0, "קפה" to 0.0), null, 1L)
+        val list = TripSizer(emptyList(), 4.0, old).starter(emptySet())
+        val milk = list.first { it.identity.name == "חלב" }
+        assertEquals(TripSizer.SURVEY_STARTER_REASON, milk.reason)
+        val eggs = list.first { it.identity.name == "ביצים" }
+        assertEquals(TripSizer.STARTER_REASON, eggs.reason)
+        assertTrue(list.none { it.identity.name == "קפה" }) // said it does not buy it
+        assertEquals(list.size, list.map { it.itemId }.distinct().size)
+        assertTrue(list.size > 2)
+    }
+
+    @Test fun `building a list uses the household's packs, as the list does`() {
+        val eggs = ItemIdentity.fromText("ביצים")
+        val chosen = PackChoices(products = mapOf(eggs.id to Pack(12)))
+        val list = ListGenerator.propose(GenerateMode.DUE, emptyList(), emptyList(), emptyList(), LocalDate.of(2026, 1, 1), people = 4.0, chosen = chosen)
+        val q = list.first { it.identity.id == eggs.id }.quantity!!
+        assertEquals(0.0, q.amount % 12, 0.0)
+    }
+
     // ---------- wired through the service ----------
 
     private fun service(repo: InMemoryShoppingRepository, now: () -> Long): ShoppingService {

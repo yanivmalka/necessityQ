@@ -320,6 +320,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             mode, snap.stats.values, purchases.value, snap.lines, java.time.LocalDate.now(),
             suppressed = snap.suppressed, atHome = snap.atHome, rejections = snap.rejections, people = people,
             baseline = baseline,
+            // the same packs as the list, the suggestions and the +/− (HouseholdPacks)
+            chosen = app.necessityq.domain.PackChoices(snap.packs, meals.value.packs),
         )
     }
 
