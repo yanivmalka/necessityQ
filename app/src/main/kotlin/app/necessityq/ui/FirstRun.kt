@@ -39,6 +39,10 @@ import androidx.compose.ui.window.DialogProperties
 import app.necessityq.domain.FirstRunAnswers
 import app.necessityq.domain.FirstRunQuestion
 import app.necessityq.domain.Features
+import app.necessityq.domain.TripCadence
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material3.RadioButton
+import androidx.compose.ui.semantics.Role
 
 /**
  * The first run, after the household is made: a few cards, one question each, about the household's habits — not
@@ -46,12 +50,18 @@ import app.necessityq.domain.Features
  * The last card sums up what was turned on, and that everything can change at any time while the app keeps
  * learning in the background. "דילוג" takes the recommended choice at once.
  *
- * [onDone]: the features chosen, and whether to go straight on to inviting the household.
+ * After the yes/no questions, one more: how often the household goes shopping ([TripCadence]); every trip's amounts
+ * follow it. It can be changed later in the settings.
+ *
+ * [onDone]: the features chosen, whether to go straight on to inviting the household, and how often it shops.
  */
 @Composable
-fun FirstRunQuestions(onDone: (Features, Boolean) -> Unit) {
+fun FirstRunQuestions(onDone: (Features, Boolean, TripCadence) -> Unit) {
     val questions = FirstRunQuestion.entries
+    // the yes/no questions, then how often the household shops, then the summary
+    val total = questions.size + 1
     var step by rememberSaveable { mutableIntStateOf(0) }
+    var cadence by rememberSaveable { mutableStateOf(TripCadence.DEFAULT) }
     // the answers, as the names of the questions answered "yes"
     var yes by rememberSaveable { mutableStateOf(FirstRunAnswers.DEFAULT.yes.map { it.name }.toSet()) }
     val answers = FirstRunAnswers(questions.filter { it.name in yes }.toSet())
@@ -64,17 +74,17 @@ fun FirstRunQuestions(onDone: (Features, Boolean) -> Unit) {
             Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        if (step < questions.size) "שאלה ${step + 1} מתוך ${questions.size}" else "מוכנים",
+                        if (step < total) "שאלה ${step + 1} מתוך $total" else "מוכנים",
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
                     )
-                    if (step < questions.size) {
-                        TextButton(onClick = { onDone(Features.RECOMMENDED, false) }) { Text("דילוג (הגדרות מומלצות)") }
+                    if (step < total) {
+                        TextButton(onClick = { onDone(Features.RECOMMENDED, false, cadence) }) { Text("דילוג (הגדרות מומלצות)") }
                     }
                 }
                 LinearProgressIndicator(
-                    progress = { (step.toFloat() / questions.size).coerceAtMost(1f) },
+                    progress = { (step.toFloat() / total).coerceAtMost(1f) },
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                 )
                 AnimatedContent(targetState = step, label = "firstRun", modifier = Modifier.weight(1f)) { shown ->
@@ -82,10 +92,10 @@ fun FirstRunQuestions(onDone: (Features, Boolean) -> Unit) {
                         Modifier.fillMaxSize().fadingVerticalScroll(rememberScrollState()).padding(top = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
-                        if (shown < questions.size) {
-                            QuestionCard(questions[shown])
-                        } else {
-                            Summary(answers)
+                        when {
+                            shown < questions.size -> QuestionCard(questions[shown])
+                            shown == questions.size -> CadenceCard(cadence) { cadence = it }
+                            else -> Summary(answers, cadence)
                         }
                     }
                 }
@@ -104,9 +114,12 @@ fun FirstRunQuestions(onDone: (Features, Boolean) -> Unit) {
                     if (step > 0) {
                         TextButton(onClick = { step-- }, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("חזרה לשאלה הקודמת") }
                     }
+                } else if (step == questions.size) {
+                    Button(onClick = { step++ }, modifier = Modifier.fillMaxWidth().height(52.dp).padding(top = 12.dp)) { Text("המשך") }
+                    TextButton(onClick = { step-- }, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("חזרה לשאלה הקודמת") }
                 } else {
                     Button(
-                        onClick = { onDone(answers.features(), FirstRunQuestion.SHARED in answers.yes) },
+                        onClick = { onDone(answers.features(), FirstRunQuestion.SHARED in answers.yes, cadence) },
                         modifier = Modifier.fillMaxWidth().height(52.dp).padding(top = 4.dp),
                     ) {
                         Text(if (FirstRunQuestion.SHARED in answers.yes) "להתחיל ולהזמין את בני הבית" else "להתחיל")
@@ -135,6 +148,32 @@ private fun QuestionCard(q: FirstRunQuestion) {
     InfoBlock("אם לא", q.loss, NqTheme.colors.hairline)
 }
 
+/** How often the household goes shopping: one of three, the amounts of every trip follow it. */
+@Composable
+private fun CadenceCard(selected: TripCadence, onSelect: (TripCadence) -> Unit) {
+    Text("כל כמה זמן אתם עושים קנייה גדולה?", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+    Text(
+        "הכמויות ברשימה יחושבו עד הקנייה הבאה. מוצר שנגמר לאט יותר, כמו אבקת כביסה, יוצע ביחידה אחת ורק כשהגיע זמנו.",
+        style = MaterialTheme.typography.bodyMedium,
+    )
+    TripCadence.entries.forEach { c ->
+        val on = c == selected
+        Row(
+            Modifier.fillMaxWidth().clip(NqShapes.Tile)
+                .background(if (on) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)
+                .border(1.dp, if (on) MaterialTheme.colorScheme.primary else NqTheme.colors.hairline, NqShapes.Tile)
+                .selectable(selected = on, role = Role.RadioButton, onClick = { onSelect(c) })
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RadioButton(selected = on, onClick = null)
+            Spacer(Modifier.width(10.dp))
+            Text(c.label, style = MaterialTheme.typography.titleMedium)
+        }
+    }
+    Text("אפשר לשנות בכל זמן בהגדרות, בלשונית הרשימה.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
 @Composable
 private fun InfoBlock(title: String, text: String, accent: androidx.compose.ui.graphics.Color) {
     Column(
@@ -148,8 +187,9 @@ private fun InfoBlock(title: String, text: String, accent: androidx.compose.ui.g
 }
 
 @Composable
-private fun Summary(answers: FirstRunAnswers) {
+private fun Summary(answers: FirstRunAnswers, cadence: TripCadence) {
     Text("זה מה שהדלקנו", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+    Text("קנייה ${cadence.label}: הכמויות עד הקנייה הבאה.", style = MaterialTheme.typography.bodyLarge)
     val on = answers.features()
     if (on.plan.isEmpty()) {
         Text("רשימת קניות משותפת בלבד, בלי הצעות ובלי מחירים.", style = MaterialTheme.typography.bodyLarge)

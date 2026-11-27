@@ -826,9 +826,12 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     /** The first-run questions answered: their features, and — for a shared household — straight on to inviting. */
-    fun finishFirstRun(value: app.necessityq.domain.Features, invite: Boolean) {
+    fun finishFirstRun(value: app.necessityq.domain.Features, invite: Boolean, cadence: app.necessityq.domain.TripCadence) {
+        // the replay shows the questions again without changing the household's data
+        val replay = firstRunReplay.value != null
         endFirstRunReplay(restore = false)
         setFeatures(value)
+        if (!replay) setCadence(cadence)
         if (invite && isShared) openInvite.value = true
     }
 

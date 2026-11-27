@@ -1816,8 +1816,8 @@ private fun GenerateSheet(vm: AppViewModel, onDismiss: () -> Unit) {
     // the survey's answers just given (the saved ones come back a moment later)
     var answered by remember { mutableStateOf<app.necessityq.domain.HouseholdBaseline?>(null) }
     var mode by remember { mutableStateOf(GenerateMode.DUE) }
-    // how often the household shops: chosen here, the amounts follow it at once (the saved one comes back later)
-    var cadence by remember { mutableStateOf(vm.meals.value.cadence) }
+    // how often the household shops (first run, settings): the amounts are until the next trip
+    val cadence = vm.meals.value.cadence
     val proposal = remember(mode, answered, surveyOpen, cadence) {
         if (surveyOpen) emptyList() else vm.proposeList(mode, answered ?: vm.meals.value.baseline, cadence)
     }
@@ -1874,18 +1874,8 @@ private fun GenerateSheet(vm: AppViewModel, onDismiss: () -> Unit) {
                 GenerateMode.entries.forEach { m -> FilterChip(selected = mode == m, onClick = { mode = m }, label = { Text(m.label) }) }
             }
             Text(mode.hint, style = MaterialTheme.typography.bodySmall)
-            Text("קונים", style = MaterialTheme.typography.labelLarge)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                app.necessityq.domain.TripCadence.entries.forEach { c ->
-                    FilterChip(
-                        selected = cadence == c,
-                        onClick = { if (cadence != c) { cadence = c; vm.setCadence(c) } },
-                        label = { Text(c.label) },
-                    )
-                }
-            }
             Text(
-                "הכמויות מחושבות עד הקנייה הבאה. מה שנגמר לאט יותר מוצע ביחידה אחת, רק כשהגיע זמנו.",
+                "קנייה ${cadence.label}: הכמויות עד הקנייה הבאה (אפשר לשנות בהגדרות).",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

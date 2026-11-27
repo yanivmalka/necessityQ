@@ -156,14 +156,7 @@ class SuggestionEngine(
 
         /** [estimated]: the last purchase is inferred, because later trips were not documented. */
         fun runningLowReason(cadenceDays: Double, daysSince: Long, estimated: Boolean = false): String {
-            val every = cadenceDays.roundToInt().coerceAtLeast(1)
-            val cadenceText = when (every) {
-                1 -> "כל יום"
-                2 -> "כל יומיים"
-                7 -> "כל שבוע"
-                14 -> "כל שבועיים"
-                else -> "כל $every ימים"
-            }
+            val cadenceText = Rhythm.text(cadenceDays)
             val sinceText = when (daysSince) {
                 0L -> "נקנה היום"
                 1L -> "נקנה אתמול"

@@ -303,7 +303,7 @@ fun HistoryScreen(vm: AppViewModel, modifier: Modifier = Modifier) {
                             Text(s.identity.displayName, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                             Text(
                                 when (s.classification) {
-                                    Classification.ROUTINE -> "קבוע"
+                                    Classification.ROUTINE -> s.cadenceDays?.let(app.necessityq.domain.Rhythm::text) ?: "בקצב קבוע"
                                     Classification.OCCASIONAL -> "מזדמן"
                                     Classification.ONE_OFF -> "חד-פעמי"
                                 },
