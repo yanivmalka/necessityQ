@@ -37,6 +37,8 @@ class AppContainer(context: Context) {
     val chatPush: app.necessityq.data.firebase.ChatPush?
     /** Reads quick-add text the app did not understand (Gemini, through a cloud function); null in single-device mode. */
     val interpreter: app.necessityq.domain.ItemInterpreter?
+    /** Estimates the first-list survey's amounts from the ages at home (Gemini, through a cloud function); null in single-device mode. */
+    val estimator: app.necessityq.domain.BaselineEstimator?
 
     init {
         val firebase = if (BuildConfig.FIREBASE_CONFIGURED) FirebaseApp.initializeApp(context) else null
@@ -50,6 +52,9 @@ class AppContainer(context: Context) {
             household = FirebaseHouseholdRepository(FirebaseAuth.getInstance(firebase), db)
             chatPush = app.necessityq.data.firebase.ChatPush(db, com.google.firebase.functions.FirebaseFunctions.getInstance(firebase, "me-west1"))
             interpreter = app.necessityq.data.firebase.FirebaseItemInterpreter(
+                com.google.firebase.functions.FirebaseFunctions.getInstance(firebase, "me-west1"),
+            )
+            estimator = app.necessityq.data.firebase.FirebaseBaselineEstimator(
                 com.google.firebase.functions.FirebaseFunctions.getInstance(firebase, "me-west1"),
             )
             shopping = FirebaseShoppingRepository(db)
@@ -76,6 +81,7 @@ class AppContainer(context: Context) {
             nutrition = app.necessityq.domain.NoNutritionRepository()
             chatPush = null
             interpreter = null
+            estimator = null
         }
     }
 

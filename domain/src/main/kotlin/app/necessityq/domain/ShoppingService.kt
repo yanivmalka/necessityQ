@@ -58,6 +58,14 @@ class ShoppingService(
 
     fun householdPeople(householdId: String): Double = people.value[householdId] ?: 0.0
 
+    /** Per household, the first-list survey's answers ([FirstListSurvey]); kept by the app. */
+    private val baselines = MutableStateFlow<Map<String, HouseholdBaseline?>>(emptyMap())
+
+    /** What [householdId] said it buys in the first-list survey: amounts of items it has not bought yet follow it. */
+    fun setHouseholdBaseline(householdId: String, baseline: HouseholdBaseline?) {
+        baselines.value = baselines.value + (householdId to baseline)
+    }
+
     /**
      * Purchases recorded before the household's size was (older versions) count as made at the size it has now, the
      * first time it is known: from then on, a household that grows or shrinks gets amounts that follow it at once,
@@ -83,8 +91,11 @@ class ShoppingService(
         repository.lines(householdId),
         repository.purchases(householdId),
         repository.suppressions(householdId),
-        people.map { it[householdId] ?: 0.0 }.distinctUntilChanged(),
-    ) { lines, allPurchases, suppressions, people ->
+        combine(
+            people.map { it[householdId] ?: 0.0 }.distinctUntilChanged(),
+            baselines.map { it[householdId] }.distinctUntilChanged(),
+        ) { p, b -> p to b },
+    ) { lines, allPurchases, suppressions, (people, baseline) ->
         val today = today()
         val purchases = counted(allPurchases, lines)
         val stretch = suppressions.associate { it.itemId to ConsumptionStatsEngine.atHomeStretch(atHomeMarks(it, today)) }
@@ -94,8 +105,8 @@ class ShoppingService(
         val rejections = rejections(lines, suppressions, today)
         val suggestions = suggestionEngine.suggest(stats.values, needed, suppressions, today, rejections)
         val active = suppressions.filter { it.untilEpochDay > today.toEpochDay() }
-        val sizer = TripSizer(stats.values, people)
-        // a household with no history yet: a first list from its size
+        val sizer = TripSizer(stats.values, people, baseline)
+        // a household with no history yet: a first list from the survey's answers or its size
         val tripList = if (stats.isEmpty()) sizer.starter(needed + active.map { it.itemId })
         else suggestionEngine.forNextTrip(stats.values, needed, suppressions, today, TRIP_DAYS, rejections = rejections)
             .map { sizer.size(it, TRIP_DAYS) }

@@ -319,13 +319,22 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     // ---------- list from past purchases, reset ----------
 
-    fun proposeList(mode: app.necessityq.domain.GenerateMode): List<app.necessityq.domain.GeneratedItem> {
+    /** [baseline]: the survey's answers when they were just given (the saved ones may not have come back yet). */
+    fun proposeList(
+        mode: app.necessityq.domain.GenerateMode,
+        baseline: app.necessityq.domain.HouseholdBaseline? = meals.value.baseline,
+    ): List<app.necessityq.domain.GeneratedItem> {
         val snap = snapshot.value ?: return emptyList()
+        val people = baseline?.makeup?.takeIf { meals.value.members.isEmpty() }?.people ?: snap.people
         return app.necessityq.domain.ListGenerator.propose(
             mode, snap.stats.values, purchases.value, snap.lines, java.time.LocalDate.now(),
-            suppressed = snap.suppressed, atHome = snap.atHome, rejections = snap.rejections, people = snap.people,
+            suppressed = snap.suppressed, atHome = snap.atHome, rejections = snap.rejections, people = people,
+            baseline = baseline,
         )
     }
+
+    /** True until the first-list survey was filled in or skipped (and the family data has been read). */
+    fun shouldAskSurvey(): Boolean = loadedMeals.value?.let(app.necessityq.domain.FirstListSurvey::shouldAsk) == true
 
     /**
      * Adds the reviewed proposal. [rejected]: preselected items the household took off, which the app remembers
@@ -504,7 +513,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             householdId.flatMapLatest { hid ->
                 if (hid == null) emptyFlow<Pair<String, Double>>()
                 else loadedMeals.map { data ->
-                    hid to (data?.let { app.necessityq.domain.HouseholdSize.people(it.members, java.time.LocalDate.now()) } ?: 0.0)
+                    hid to (data?.let { app.necessityq.domain.FirstListSurvey.people(it, java.time.LocalDate.now()) } ?: 0.0)
                 }
             }.distinctUntilChanged().collect { (hid, people) ->
                 container.service.setHouseholdPeople(hid, people)
@@ -513,6 +522,53 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                     .onFailure { app.necessityq.platform.CrashReport.record(it) }
             }
         }
+    }
+
+    init {
+        // the first-list survey's answers size the items the household has not bought yet
+        viewModelScope.launch {
+            householdId.flatMapLatest { hid ->
+                if (hid == null) emptyFlow<Pair<String, app.necessityq.domain.HouseholdBaseline?>>()
+                else loadedMeals.map { hid to it?.baseline }
+            }.distinctUntilChanged().collect { (hid, baseline) -> container.service.setHouseholdBaseline(hid, baseline) }
+        }
+    }
+
+    // ---------- first-list survey ----------
+
+    /** Who lives at home, for the survey: the family profiles, or what was told in the survey. */
+    fun surveyMakeup(): app.necessityq.domain.HouseholdMakeup =
+        app.necessityq.domain.FirstListSurvey.makeup(meals.value, java.time.LocalDate.now())
+
+    /**
+     * The survey's proposed amounts for [makeup]: the household's own purchases, the model's estimate from the ages
+     * at home (only the ages are sent), or the local table; and whether the model answered. Never throws: offline,
+     * the daily limit or no set-up just leave the table's amounts.
+     */
+    suspend fun estimateSurvey(
+        makeup: app.necessityq.domain.HouseholdMakeup,
+    ): Pair<Map<String, app.necessityq.domain.SurveyEstimate>, Boolean> {
+        val hid = ctx()?.first
+        val stats = snapshot.value?.stats?.values.orEmpty()
+        val items = app.necessityq.domain.FirstListSurvey.itemsFor(makeup)
+        val estimator = container.estimator
+        val model = if (hid == null || estimator == null || makeup.isEmpty) null
+        else try {
+            estimator.estimate(hid, makeup.ages, items)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+        val estimates = app.necessityq.domain.FirstListSurvey.estimates(makeup, model, stats)
+        return estimates to estimates.values.any { it.source == app.necessityq.domain.SurveyEstimate.Source.MODEL }
+    }
+
+    /** Keeps the survey's answers (or that it was skipped): from now on they size the first list and new items. */
+    fun saveSurvey(baseline: app.necessityq.domain.HouseholdBaseline) {
+        val (hid, _, _) = ctx() ?: return
+        container.service.setHouseholdBaseline(hid, baseline)
+        updateMeals { it.copy(baseline = baseline) }
     }
 
     fun updateMeals(change: (MealData) -> MealData) {

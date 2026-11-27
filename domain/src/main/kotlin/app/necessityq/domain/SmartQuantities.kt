@@ -22,8 +22,11 @@ object HouseholdSize {
     private const val SHARING = 0.85
 
     /** A member with no known age counts as an adult. */
-    fun weight(member: FamilyMember, today: LocalDate): Double {
-        val months = member.ageMonths(today) ?: return 1.0
+    fun weight(member: FamilyMember, today: LocalDate): Double = weightForMonths(member.ageMonths(today))
+
+    /** The weight of a person [months] old; unknown age counts as an adult. */
+    fun weightForMonths(months: Int?): Double {
+        months ?: return 1.0
         return when {
             months < 24 -> 0.25
             months < 72 -> 0.5
