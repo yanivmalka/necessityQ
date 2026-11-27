@@ -583,6 +583,44 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         return SurveyEstimateResult(estimates, fromModel, failure, asked = items.size, answered = model?.size ?: 0, accepted = fromModelCount)
     }
 
+    /**
+     * רשימה עם AI: the AI chooses the products and amounts for [makeup] (ages only are sent), for the time until the
+     * next trip, from the app's catalogue, leaving out what is already on the list. Never throws.
+     */
+    suspend fun suggestAiList(makeup: app.necessityq.domain.HouseholdMakeup): AiListResult {
+        val hid = ctx()?.first
+        val suggester = container.suggester
+        if (hid == null || suggester == null) return AiListResult(failure = app.necessityq.domain.EstimateFailure.UNAVAILABLE)
+        val open = snapshot.value?.lines.orEmpty().filter { it.status == LineStatus.NEEDED }
+        val days = meals.value.cadence.days.coerceIn(1, 31)
+        return try {
+            val answer = suggester.suggest(hid, makeup.ages, days, app.necessityq.domain.Catalog.items, open.map { it.name }.distinct().take(300))
+            val items = app.necessityq.domain.AiList.toProposal(answer.lines, open.map { it.itemId }.toSet())
+            AiListResult(
+                items = items,
+                failure = if (items.isEmpty()) app.necessityq.domain.EstimateFailure.BAD_REPLY else null,
+                cached = answer.cached,
+                model = answer.model,
+                answered = answer.lines.size,
+            )
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: app.necessityq.domain.EstimateException) {
+            AiListResult(failure = e.failure)
+        } catch (e: Exception) {
+            AiListResult(failure = app.necessityq.domain.EstimateFailure.ERROR)
+        }
+    }
+
+    /** The AI's list for review; [failure] says why there is none. [answered]: lines the AI returned. */
+    data class AiListResult(
+        val items: List<app.necessityq.domain.GeneratedItem> = emptyList(),
+        val failure: app.necessityq.domain.EstimateFailure? = null,
+        val cached: Boolean = false,
+        val model: String? = null,
+        val answered: Int = 0,
+    )
+
     /** The survey's amounts, whether the AI gave them, and if it did not, why. */
     data class SurveyEstimateResult(
         val estimates: Map<String, app.necessityq.domain.SurveyEstimate>,

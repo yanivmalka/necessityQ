@@ -39,6 +39,8 @@ class AppContainer(context: Context) {
     val interpreter: app.necessityq.domain.ItemInterpreter?
     /** Estimates the first-list survey's amounts from the ages at home (Gemini, through a cloud function); null in single-device mode. */
     val estimator: app.necessityq.domain.BaselineEstimator?
+    /** Builds a whole list (products and amounts) by AI from the ages at home; null in single-device mode. */
+    val suggester: app.necessityq.domain.ListSuggester?
 
     init {
         val firebase = if (BuildConfig.FIREBASE_CONFIGURED) FirebaseApp.initializeApp(context) else null
@@ -55,6 +57,9 @@ class AppContainer(context: Context) {
                 com.google.firebase.functions.FirebaseFunctions.getInstance(firebase, "me-west1"),
             )
             estimator = app.necessityq.data.firebase.FirebaseBaselineEstimator(
+                com.google.firebase.functions.FirebaseFunctions.getInstance(firebase, "me-west1"),
+            )
+            suggester = app.necessityq.data.firebase.FirebaseListSuggester(
                 com.google.firebase.functions.FirebaseFunctions.getInstance(firebase, "me-west1"),
             )
             shopping = FirebaseShoppingRepository(db)
@@ -82,6 +87,7 @@ class AppContainer(context: Context) {
             chatPush = null
             interpreter = null
             estimator = null
+            suggester = null
         }
     }
 
