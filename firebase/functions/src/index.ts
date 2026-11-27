@@ -7,7 +7,6 @@ import { setGlobalOptions } from "firebase-functions/v2";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onMessagePublished } from "firebase-functions/v2/pubsub";
-import { defineString } from "firebase-functions/params";
 import { GoogleGenAI } from "@google/genai";
 import { GoogleAuth } from "google-auth-library";
 import { guardConfig, parseNotification, shouldCut } from "./budget";
@@ -318,12 +317,12 @@ async function sendAlerts(householdId: string, messageId: string, m: ChatMessage
 }
 
 /**
- * The Gemini API key (Google AI Studio). Kept as the GitHub secret GEMINI_API_KEY; the deploy workflow writes it to
- * functions/.env, so no command line is needed. Empty = not set up yet: the app then adds text as typed.
+ * The Gemini API key (Google AI Studio) and model, read from the environment (functions/.env, which the deploy
+ * workflow writes from the GitHub secret GEMINI_API_KEY). Plain environment, not deploy parameters: a parameter
+ * without a value stops a non-interactive deploy of every function. No key = not set up: the app adds text as typed.
  */
-const geminiKey = defineString("GEMINI_API_KEY", { default: "" });
-/** Which Gemini model reads (GEMINI_MODEL in functions/.env to change it without code). */
-const geminiModel = defineString("GEMINI_MODEL", { default: DEFAULT_MODEL });
+const geminiKey = (): string => process.env.GEMINI_API_KEY ?? "";
+const geminiModel = (): string => process.env.GEMINI_MODEL || DEFAULT_MODEL;
 
 /**
  * הבנת כוונה בהוספה לרשימה: reads free text the app did not understand ("משהו לכריכים לילדים") as grocery
@@ -333,7 +332,7 @@ export const interpretItems = onCall(
   { memory: "256MiB", timeoutSeconds: 60, invoker: "public" },
   async (req) => {
     if (!req.auth) throw new HttpsError("unauthenticated", "sign in first");
-    if (!geminiKey.value()) throw new HttpsError("failed-precondition", "GEMINI_API_KEY is not set");
+    if (!geminiKey()) throw new HttpsError("failed-precondition", "GEMINI_API_KEY is not set");
     const request = validateRequest(req.data);
     if (typeof request === "string") throw new HttpsError("invalid-argument", request);
     const { text, people, householdId } = request;
@@ -355,8 +354,8 @@ export const interpretItems = onCall(
     });
     if (!allowed) throw new HttpsError("resource-exhausted", "daily limit reached");
 
-    const ai = new GoogleGenAI({ apiKey: geminiKey.value() });
-    const model = geminiModel.value();
+    const ai = new GoogleGenAI({ apiKey: geminiKey() });
+    const model = geminiModel();
     let items;
     try {
       items = await readWithGemini(ai, model, text, people);
