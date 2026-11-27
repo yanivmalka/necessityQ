@@ -771,6 +771,7 @@ fun ListScreen(
                                 RunningLowCard(
                                     s,
                                     info = recommendationInfo(s, snap.stats[s.itemId], favorites, display, today),
+                                    pack = snap.packs[s.itemId],
                                     onAdd = { vm.accept(s) },
                                     onDismiss = { vm.dismiss(s) },
                                     onHaveAtHome = { vm.haveAtHome(s) },
@@ -917,6 +918,7 @@ fun ListScreen(
                                 onSetQuantity = { q, approved -> vm.changeQuantity(line, q, approved) },
                                 quantityCheck = { vm.quantityCheck(line, it) },
                                 packs = mealData.packs,
+                                pack = snap.packs[line.itemId],
                                 onOpen = { openItem = line },
                             )
                         }
@@ -1465,6 +1467,8 @@ private fun ProductTile(
     quantityCheck: (Quantity) -> app.necessityq.domain.QuantityCheck? = { null },
     /** The pack size the household buys per item ([app.necessityq.domain.MealData.packs]), for "לקנות". */
     packs: Map<String, Long> = emptyMap(),
+    /** The pack the household buys of this item ([app.necessityq.domain.HouseholdPacks]): the amount is shown in it. */
+    pack: app.necessityq.domain.Pack? = null,
     /** Opens the item's page: on a tap or a double tap, as chosen in the settings. */
     onOpen: () -> Unit,
 ) {
@@ -1546,7 +1550,7 @@ private fun ProductTile(
                                     if (showQuantityText) {
                                         Spacer(Modifier.width(8.dp))
                                         Text(
-                                            app.necessityq.domain.PackSizes.describe(line.name, line.variant, line.quantity!!) + (weight?.let { "  " + app.necessityq.domain.PieceWeights.label(it) } ?: ""),
+                                            app.necessityq.domain.describeAmount(line.name, line.variant, line.quantity!!, pack) + (weight?.let { "  " + app.necessityq.domain.PieceWeights.label(it) } ?: ""),
                                             fontWeight = FontWeight.SemiBold,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.clip(NqShapes.Pill)
@@ -1890,16 +1894,17 @@ private fun GenerateSheet(vm: AppViewModel, onDismiss: () -> Unit) {
                         Spacer(Modifier.width(8.dp))
                         Column(Modifier.weight(1f)) {
                             Text(item.identity.displayName, fontWeight = FontWeight.Bold)
+                            val packText = vm.packOf(item.identity.id)?.let { p -> quantity?.let { q -> p.describe(q).takeIf { it != q.format() } } }
                             Text(
-                                listOfNotNull(item.reason, item.quantityNote.takeIf { item.identity.id !in quantities }).joinToString(" · "),
+                                listOfNotNull(item.reason, packText, item.quantityNote.takeIf { item.identity.id !in quantities }).joinToString(" · "),
                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         // the amount is editable here; changing it also selects the item
                         QuantityStepper(
                             quantity,
-                            onMinus = { quantities = quantities + (item.identity.id to QuantitySteps.step(quantity, -1)) },
-                            onPlus = { quantities = quantities + (item.identity.id to QuantitySteps.step(quantity, +1)); chosen = chosen + item.identity.id },
+                            onMinus = { quantities = quantities + (item.identity.id to stepIn(vm.packOf(item.identity.id), quantity, -1)) },
+                            onPlus = { quantities = quantities + (item.identity.id to stepIn(vm.packOf(item.identity.id), quantity, +1)); chosen = chosen + item.identity.id },
                         )
                     }
                 }
@@ -2547,7 +2552,10 @@ private fun SuggestionHeader(
  * and ✕ as its own full-size target so dismissing never adds by mistake.
  */
 @Composable
-private fun RunningLowCard(s: Suggestion, info: String, onAdd: () -> Unit, onDismiss: () -> Unit, onHaveAtHome: () -> Unit) {
+private fun RunningLowCard(
+    s: Suggestion, info: String, onAdd: () -> Unit, onDismiss: () -> Unit, onHaveAtHome: () -> Unit,
+    pack: app.necessityq.domain.Pack? = null,
+) {
     val name = s.identity.displayName
     Column(
         Modifier.width(196.dp).clip(NqShapes.Tile).background(MaterialTheme.colorScheme.surface)
@@ -2559,7 +2567,7 @@ private fun RunningLowCard(s: Suggestion, info: String, onAdd: () -> Unit, onDis
             Column(Modifier.weight(1f).padding(top = 10.dp)) {
                 Text(name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 // the amount, and where it came from when it is not just the usual purchase ("לפי 4 נפשות")
-                listOfNotNull(s.quantity?.let { app.necessityq.domain.PackSizes.describe(s.identity.name, s.identity.variant, it) }, s.quantityNote).joinToString(" · ").ifEmpty { null }?.let {
+                listOfNotNull(s.quantity?.let { app.necessityq.domain.describeAmount(s.identity.name, s.identity.variant, it, pack) }, s.quantityNote).joinToString(" · ").ifEmpty { null }?.let {
                     Text(
                         it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2, overflow = TextOverflow.Ellipsis,
@@ -2917,3 +2925,6 @@ private fun ReadingDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("ביטול") } },
     )
 }
+
+/** One pack more or less of what the household buys ([pack]), else one unit ([QuantitySteps.step]). */
+private fun stepIn(pack: app.necessityq.domain.Pack?, q: Quantity?, delta: Int): Quantity? = pack?.step(q, delta) ?: QuantitySteps.step(q, delta)

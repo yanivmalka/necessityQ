@@ -29,13 +29,18 @@ object QuickChecks {
      * what a shop sells: no half piece or half pack ("1.5 בקבוקים"), packs of pieces in whole packs ("30 יח'" of
      * eggs is one tray, "6 חב'" of pittas is six bags), and no amount that is far beyond a home's purchase.
      */
-    fun amounts(suggestions: List<Suggestion>): List<AmountCheck> = suggestions.distinctBy { it.itemId }.mapNotNull { s ->
+    fun amounts(suggestions: List<Suggestion>, packs: Map<String, Pack> = emptyMap()): List<AmountCheck> = suggestions.distinctBy { it.itemId }.mapNotNull { s ->
         val q = s.quantity ?: return@mapNotNull null
         val name = s.identity.name
-        val shown = PackSizes.describe(name, s.identity.variant, q)
+        val pack = packs[s.itemId]
+        val shown = describeAmount(name, s.identity.variant, q, pack)
         val whole = abs(q.amount - Math.round(q.amount)) < 1e-9
+        val packs = pack?.packsIn(q)
         val problem = when {
             q.dimension == Dimension.COUNT && !whole -> "חצי יחידה או חצי אריזה"
+            packs != null && abs(packs - Math.round(packs)) > 1e-6 -> "לא מארזים שלמים של ${pack.label()}"
+            QuantityNorms.check(s.identity, q)?.level == QuantityLevel.ABSURD -> "כמות חריגה מאוד"
+            pack != null -> null
             q.unit == QuantityUnit.PIECE && PackSizes.piecesPerPack(name, s.identity.variant, q.amount) != null &&
                 PackSizes.toBuy(name, q, s.identity.variant) != q -> "לא מארזים שלמים"
             q.dimension != Dimension.COUNT && PackSizes.sizesFor(name, s.identity.variant).any { it.dimension == q.dimension } &&

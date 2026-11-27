@@ -59,12 +59,12 @@ class QuantityNormsTest {
         val service = ShoppingService(repo, object : Clock { override fun nowMillis() = 1L }, object : IdGenerator { override fun newId() = "id${++n}" })
         service.addFromText("h", "u", "10 גבינה צהובה", emptyList())
         service.addFromText("h", "u", "30 מלפפונים", emptyList())
-        service.addFromText("h", "u", "750 גבינה לבנה", emptyList())
+        service.addFromText("h", "u", "300 קוטג'", emptyList())
         val lines = service.snapshot("h").first().lines.associateBy { it.name }
         assertEquals(Quantity.pieces(10), lines.getValue("גבינה צהובה").quantity)
         assertTrue(ItemTags.of(lines.getValue("גבינה צהובה"), null, false).any { it.kind == TagKind.LARGE_AMOUNT })
         assertTrue(ItemTags.of(lines.getValue("מלפפונים"), null, false).none { it.kind == TagKind.LARGE_AMOUNT })
-        assertEquals(Quantity.pieces(1), lines.getValue("גבינה לבנה").quantity)
+        assertEquals(Quantity.pieces(1), lines.getValue("קוטג'").quantity)
 
         service.changeQuantityApproved("h", lines.getValue("גבינה צהובה"), Quantity.pieces(10))
         val after = service.snapshot("h").first().lines.first { it.name == "גבינה צהובה" }

@@ -232,6 +232,15 @@ fun ItemSheet(
                     )
                     UnitChooser(line.quantity?.unit, app.necessityq.domain.QuantitySteps.choicesFor(line.name, line.category, line.quantity?.unit), Modifier.weight(1f)) { vm.setQuantityUnit(line, it) }
                 }
+                // the pack the household buys: +/- step by it, and the amount reads in it ("30 יח' · מארז 30")
+                vm.packOf(line.itemId)?.let { pack ->
+                    Text(
+                        "גודל הקנייה: ${pack.label()}" + (line.quantity?.let { " · " + pack.describe(it) } ?: ""),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
+                    )
+                }
             }
             if (scrolled) HorizontalDivider()
         }
@@ -884,7 +893,13 @@ private fun SimilarProducts(
     val primary by vm.primaryBranch.collectAsStateWithLifecycle()
     var brand by remember(itemId) { mutableStateOf<String?>(null) }
     var pct by remember(itemId) { mutableStateOf<String?>(null) }
+    var size by remember(itemId) { mutableStateOf<String?>(null) }
     var all by remember(itemId) { mutableStateOf(false) }
+    // the size the household buys (its chosen product, or what it always buys), else the amount on the list:
+    // the products in that size first, each with its size, so it is clear which is which
+    val snap by vm.snapshot.collectAsStateWithLifecycle()
+    val pack = snap?.packs?.get(itemId)
+    val wanted = snap?.lines?.firstOrNull { it.itemId == itemId && it.status == app.necessityq.domain.LineStatus.NEEDED }?.quantity
     Column(
         Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -922,14 +937,31 @@ private fun SimilarProducts(
                 percents.forEach { p -> FilterChip(selected = pct == p, onClick = { pct = if (pct == p) null else p }, label = { Text(p) }) }
             }
         }
-        val filtered = info.candidates.filter { c ->
-            (brand == null || c.brand.trim() == brand) && (pct == null || app.necessityq.domain.ItemPrices.hasPercent(c, pct!!))
+        val offers = remember(info, pack, wanted) { app.necessityq.domain.HouseholdPacks.offers(info.candidates, pack, wanted) }
+        val sizes = remember(offers) { offers.mapNotNull { it.pack?.label() }.distinct() }
+        if (sizes.size > 1) {
+            Row(Modifier.fillMaxWidth().fadingHorizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilterChip(selected = size == null, onClick = { size = null }, label = { Text("כל הגדלים") })
+                sizes.forEach { s -> FilterChip(selected = size == s, onClick = { size = if (size == s) null else s }, label = { Text(s) }) }
+            }
         }
-        // the chosen one is always shown, then the cheapest; the rest on request
-        val ordered = filtered.sortedByDescending { it.code == info.preferred?.code }
-        (if (all) ordered else ordered.take(FIRST_PRODUCTS)).forEach { c ->
+        val filtered = offers.filter { o ->
+            val c = o.product
+            (brand == null || c.brand.trim() == brand) && (pct == null || app.necessityq.domain.ItemPrices.hasPercent(c, pct!!)) &&
+                (size == null || o.pack?.label() == size)
+        }
+        // the chosen one is always shown, then the household's size, then the rest (cheapest first); more on request
+        val ordered = filtered.sortedByDescending { it.product.code == info.preferred?.code }
+        val anyFits = ordered.any { it.fits }
+        var otherShown = false
+        (if (all) ordered else ordered.take(FIRST_PRODUCTS)).forEach { o ->
+            val c = o.product
+            if (anyFits && !o.fits && !otherShown && info.preferred?.code != c.code) {
+                otherShown = true
+                Text("בגודל אחר", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+            }
             val chosen = info.preferred?.code == c.code
-            BranchProductRow(c, chosen, onChoose = { vm.setPreferredProduct(itemId, if (chosen) null else c.code); if (!chosen) onChosen() })
+            BranchProductRow(c, chosen, size = o.pack?.label(), onChoose = { vm.setPreferredProduct(itemId, if (chosen) null else c.code); if (!chosen) onChosen() })
         }
         if (filtered.isEmpty()) Text("אין מוצרים לבחירה הזו", style = MaterialTheme.typography.bodySmall)
         if (!all && filtered.size > FIRST_PRODUCTS) {
@@ -1144,7 +1176,7 @@ private fun BranchQuotesStrip(vm: AppViewModel, chosen: app.necessityq.domain.Br
 
 /** One product of the branch: name, brand (and past range), price; choosable when [onChoose] is given. */
 @Composable
-private fun BranchProductRow(c: app.necessityq.domain.BranchProduct, chosen: Boolean, onChoose: (() -> Unit)?) {
+private fun BranchProductRow(c: app.necessityq.domain.BranchProduct, chosen: Boolean, onChoose: (() -> Unit)?, size: String? = null) {
     Row(
         Modifier.fillMaxWidth().then(if (onChoose != null) Modifier.clickable(onClick = onChoose) else Modifier).padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1154,7 +1186,7 @@ private fun BranchProductRow(c: app.necessityq.domain.BranchProduct, chosen: Boo
             Text(c.name, fontWeight = if (chosen) FontWeight.Bold else FontWeight.Normal, maxLines = if (onChoose == null) 1 else Int.MAX_VALUE)
             val unit = LocalWeightPriceUnit.current
             val range = if (c.high > c.low) " · היה ${shownProductPrice(c, c.low, unit)}–${shownProductPrice(c, c.high, unit)}" else ""
-            Text(listOf(c.brand, range.removePrefix(" · ")).filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
+            Text(listOfNotNull(size, c.brand, range.removePrefix(" · ")).filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
         }
         Text(shownProductPrice(c, c.price, LocalWeightPriceUnit.current), fontWeight = FontWeight.Bold)
     }

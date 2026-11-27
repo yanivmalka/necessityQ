@@ -491,7 +491,17 @@ object ListCost {
      * Produce sold by weight but counted in pieces ("7 לימונים") uses the typical weight of a piece
      * ([gramsPerPiece], see [PieceWeights]); null when that is not known, so no number is made up.
      */
-    fun packages(quantity: Quantity?, weighted: Boolean, gramsPerPiece: Double? = null, piecesPerPack: Double? = null): Double? = when (quantity?.unit) {
+    fun packages(
+        quantity: Quantity?, weighted: Boolean, gramsPerPiece: Double? = null, piecesPerPack: Double? = null, pack: Pack? = null,
+    ): Double? = when {
+        // the product's pack: 30 eggs are one tray of 30, 4 L of milk two cartons of 2 L
+        quantity != null && !weighted && pack != null && quantity.unit != QuantityUnit.PACKAGE ->
+            pack.packsIn(quantity)?.let { kotlin.math.ceil(it - 1e-9).coerceAtLeast(1.0) }
+                ?: packages(quantity, weighted, gramsPerPiece, piecesPerPack)
+        else -> packagesByUnit(quantity, weighted, gramsPerPiece, piecesPerPack)
+    }
+
+    private fun packagesByUnit(quantity: Quantity?, weighted: Boolean, gramsPerPiece: Double?, piecesPerPack: Double?): Double? = when (quantity?.unit) {
         null -> 1.0
         QuantityUnit.PIECE, QuantityUnit.PACKAGE -> when {
             weighted && quantity.unit == QuantityUnit.PIECE -> gramsPerPiece?.let { quantity.amount * it / 1000.0 }
@@ -527,7 +537,7 @@ object ListCost {
                 own != null -> (own * PriceEstimate.units(line.quantity)).let { low += it; high += it }
                 info?.preferred != null -> {
                     val p = info.preferred
-                    val n = packages(line.quantity, p.soldByWeight, grams, piecesPerPack(line, p)) ?: continue
+                    val n = packages(line.quantity, p.soldByWeight, grams, piecesPerPack(line, p), ProductPacks.of(p)) ?: continue
                     // a weight on the list is priced per kilo; unknown unit of the price → not priced
                     val each = if (p.soldByWeight && line.quantity != null) p.pricePerKilo ?: continue else p.price
                     (each * n).let { low += it; high += it }

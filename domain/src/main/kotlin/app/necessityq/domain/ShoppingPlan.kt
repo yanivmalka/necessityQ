@@ -81,7 +81,7 @@ object ShoppingPlanner {
         val quantity = line.quantity
         val preferred = info.preferred
         val regular: Double = if (preferred != null) {
-            val n = ListCost.packages(quantity, preferred.soldByWeight, grams, ListCost.piecesPerPack(line, preferred)) ?: return null
+            val n = ListCost.packages(quantity, preferred.soldByWeight, grams, ListCost.piecesPerPack(line, preferred), ProductPacks.of(preferred)) ?: return null
             val each = if (preferred.soldByWeight && quantity != null) preferred.pricePerKilo ?: return null else preferred.price
             each * n
         } else {
@@ -104,7 +104,7 @@ object ShoppingPlanner {
                 // a rate on a weighed product: the same share off the weight's price
                 regular * (unit / product.price)
             } else {
-                val n = ListCost.packages(quantity, false, piecesPerPack = ListCost.piecesPerPack(line, product)) ?: 1.0
+                val n = ListCost.packages(quantity, false, piecesPerPack = ListCost.piecesPerPack(line, product), pack = ProductPacks.of(product)) ?: 1.0
                 if (n + 1e-9 < promo.minQty) null
                 else {
                     val sets = kotlin.math.floor(n / maxOf(promo.minQty, 1.0) + 1e-9) * maxOf(promo.minQty, 1.0)

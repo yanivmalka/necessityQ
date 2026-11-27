@@ -881,7 +881,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     /** Test 13: every amount proposed now, checked against what a shop sells. */
     fun quickCheckAmounts(): List<app.necessityq.domain.QuickChecks.AmountCheck> {
         val snap = snapshot.value ?: return emptyList()
-        return app.necessityq.domain.QuickChecks.amounts(snap.runningLow + snap.tripList + snap.frequent)
+        return app.necessityq.domain.QuickChecks.amounts(snap.runningLow + snap.tripList + snap.frequent, snap.packs)
     }
 
     /** Only the accounts in [app.necessityq.domain.FirstRunDemo] may replay the first run. */
@@ -1243,6 +1243,25 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun setPreferredProduct(itemId: String, code: String?) {
         val hid = ctx()?.first ?: return
         launchSafe { container.prices.setPreferredProduct(hid, itemId, code) }
+    }
+
+    init {
+        // what the household chose (the product at the branch, the pack size of an item) is the pack it buys:
+        // every amount proposed, shown, stepped and priced goes by it (HouseholdPacks)
+        viewModelScope.launch {
+            householdId.flatMapLatest { hid ->
+                if (hid == null) emptyFlow<Pair<String, app.necessityq.domain.PackChoices>>()
+                else combine(preferredProducts, branchPrices, loadedMeals) { preferred, loaded, meals ->
+                    val byCode = HashMap<String, app.necessityq.domain.BranchProduct>()
+                    loaded.values.forEach { p -> p.products.forEach { byCode.putIfAbsent(it.code, it) } }
+                    val products = preferred.mapNotNull { (itemId, code) ->
+                        byCode[code]?.let { app.necessityq.domain.ProductPacks.of(it) }?.let { itemId to it }
+                    }.toMap()
+                    hid to app.necessityq.domain.PackChoices(products, meals?.packs.orEmpty())
+                }
+            }.distinctUntilChanged().flowOn(kotlinx.coroutines.Dispatchers.Default)
+                .collect { (hid, chosen) -> container.service.setHouseholdPacks(hid, chosen) }
+        }
     }
 
     /**
@@ -1762,10 +1781,14 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         launchSafe { container.collab.setFavorite(hid, itemId, !now) }
     }
 
+    /** +/-: by a whole pack of what the household buys (a tray of 30, a 2 L carton), else by one unit. */
     fun adjustQuantity(line: ListLine, delta: Int) {
         val (hid, _, _) = ctx() ?: return
-        launchSafe { container.service.adjustQuantity(hid, line, delta) }
+        launchSafe { container.service.adjustQuantity(hid, line, delta, packOf(line.itemId)) }
     }
+
+    /** The pack the household buys of an item ([app.necessityq.domain.HouseholdPacks]), or null when nothing says. */
+    fun packOf(itemId: String): app.necessityq.domain.Pack? = snapshot.value?.packs?.get(itemId)
 
     fun moveLine(line: ListLine, category: app.necessityq.domain.Category, previous: ListLine?, next: ListLine?) {
         val (hid, _, _) = ctx() ?: return

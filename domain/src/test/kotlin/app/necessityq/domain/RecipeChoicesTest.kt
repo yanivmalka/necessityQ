@@ -67,12 +67,12 @@ class RecipeChoicesTest {
     }
 
     @Test fun `the pack size the household buys decides how much to buy`() {
-        // milk comes by the liter and the liter and a half; this household only buys liters
+        // milk comes by the liter, the liter and a half and two liters; this household only buys liters
         assertEquals(Quantity(1.5, QuantityUnit.LITER), PackSizes.toBuy("חלב", Quantity(1.1, QuantityUnit.LITER)))
         assertEquals(Quantity(2.0, QuantityUnit.LITER), PackSizes.toBuy("חלב", Quantity(1.1, QuantityUnit.LITER), preferred = 1000))
         // a size the item is not sold in is ignored
         assertEquals(Quantity(1.5, QuantityUnit.LITER), PackSizes.toBuy("חלב", Quantity(1.1, QuantityUnit.LITER), preferred = 777))
-        assertEquals(listOf(1.0, 1.5), PackSizes.sizesFor("חלב").map { it.amount })
+        assertEquals(listOf(1.0, 1.5, 2.0), PackSizes.sizesFor("חלב").map { it.amount })
         assertEquals("חלב", PackSizes.keyFor("חלב", "3%"))
         assertEquals("סוכר חום", PackSizes.keyFor("סוכר", "חום"))
     }

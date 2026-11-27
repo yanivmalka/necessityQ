@@ -23,8 +23,17 @@ class TripSizer(
     val people: Double,
     /** The first-list survey's answers, when it was filled in. */
     private val baseline: HouseholdBaseline? = null,
+    /** The packs the household chose ([HouseholdPacks]); the rest are learned from what it usually buys. */
+    private val chosen: PackChoices = PackChoices(),
 ) {
     private val byId = stats.associateBy { it.itemId }
+
+    /** The pack the household buys of [identity], or null when nothing says ([HouseholdPacks.resolve]). */
+    fun packFor(identity: ItemIdentity): Pack? = chosen.products[identity.id] ?: HouseholdPacks.resolve(
+        identity.name, identity.variant, null,
+        PackSizes.keyFor(identity.name, identity.variant)?.let { chosen.sizes[it] },
+        byId[identity.id]?.typicalQuantity,
+    )
     private val calibration = SmartQuantities.calibration(stats, people)
 
     fun size(identity: ItemIdentity, stats: ItemStats?, horizonDays: Int? = null): SizedQuantity {
@@ -62,7 +71,9 @@ class TripSizer(
             computed = true
             notes += (if (horizonDays == 7) "לשבוע" else "ל־$horizonDays ימים") + ": " + timesText(times)
         }
-        val result = q?.let { if (computed) purchasable(identity.name, identity.variant, it) else wholeCount(it) }
+        val pack = packFor(identity)
+        // a computed amount is whole packs of what the household buys (19 yoghurts in packs of 8 are 16)
+        val result = q?.let { if (computed) pack?.nearest(it) ?: purchasable(identity.name, identity.variant, it) else wholeCount(it) }
         return SizedQuantity(result, notes.joinToString(" · ").ifEmpty { null })
     }
 
