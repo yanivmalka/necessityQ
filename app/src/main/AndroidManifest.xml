@@ -24,7 +24,7 @@
             android:exported="true"
             android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize">
-            <!-- joining a household by link: necessityq://join?code=… (the shared web page opens it) -->
+            <!-- joining a household by link: necessityq://join?invite=… (the shared web page opens it) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

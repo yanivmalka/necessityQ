@@ -12,7 +12,6 @@
   .card { background: var(--card); border-radius: 20px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
   h1 { font-size: 22px; margin: 0 0 8px; }
   p { color: var(--muted); margin: 8px 0; }
-  .code { font-size: 32px; font-weight: 700; letter-spacing: 4px; color: var(--ink); direction: ltr; text-align: center; margin: 16px 0; }
   a.button { display: block; text-align: center; background: var(--accent); color: #fff; text-decoration: none;
              font-weight: 600; padding: 14px; border-radius: 14px; margin-top: 16px; }
   a.link { color: var(--accent); }
@@ -23,28 +22,27 @@
   <div class="card">
     <h1>הוזמנתם לרשימת קניות משותפת</h1>
     <p>נגיעה בכפתור פותחת את necessityQ ומצטרפת לבית.</p>
-    <div class="code" id="code">——</div>
+    <p id="status"></p>
     <a class="button" id="open" href="#">פתיחה באפליקציה</a>
-    <p>לא נפתח? פתחו את האפליקציה ובחרו "הצטרפות לבית" עם הקוד שלמעלה.</p>
+    <p>הקישור חד-פעמי: הוא מתבטל אחרי שמישהו מצטרף בעזרתו. אם נפתח שוב ולא עובד, בקשו מהבית קישור חדש.</p>
     <p>אין עדיין את האפליקציה? <a class="link" href="https://github.com/yanivmalka/necessityQ/releases/latest">להורדה</a>.</p>
   </div>
 </main>
 <script>
-  // only a plain code is passed on (letters and digits), and it is shown as text
-  var raw = new URLSearchParams(location.search).get("code") || "";
-  var code = /^[A-Za-z0-9]{4,12}$/.test(raw) ? raw.toUpperCase() : "";
+  // only a plain token is passed on (letters and digits)
+  var raw = new URLSearchParams(location.search).get("invite") || "";
+  var token = /^[A-Za-z0-9]{16,64}$/.test(raw) ? raw : "";
   var open = document.getElementById("open");
-  if (code) {
-    document.getElementById("code").textContent = code;
+  if (token) {
     var fallback = encodeURIComponent("https://github.com/yanivmalka/necessityQ/releases/latest");
     var target = /Android/i.test(navigator.userAgent)
-      ? "intent://join?code=" + code + "#Intent;scheme=necessityq;S.browser_fallback_url=" + fallback + ";end"
-      : "necessityq://join?code=" + code;
+      ? "intent://join?invite=" + token + "#Intent;scheme=necessityq;S.browser_fallback_url=" + fallback + ";end"
+      : "necessityq://join?invite=" + token;
     open.href = target;
     // try once by itself; the button stays for browsers that wait for a tap
     setTimeout(function () { location.href = target; }, 300);
   } else {
-    document.getElementById("code").textContent = "הקוד חסר בקישור";
+    document.getElementById("status").textContent = "ההזמנה חסרה בקישור";
     open.style.display = "none";
   }
 </script>

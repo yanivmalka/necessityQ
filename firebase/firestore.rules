@@ -18,13 +18,39 @@ service cloud.firestore {
       allow read, write: if signedIn() && uid() == userId;
     }
 
-    // Join codes: anyone signed in may look up a code (6 random chars); members create, the owner rotates.
-    match /joinCodes/{code} {
+    // One-time invitations. The token (24 random characters) is the key, so a signed-in user may get one by its
+    // token but never list them. Any member creates one (valid up to 7 days); whoever joins uses it up by setting
+    // usedBy to themselves, once; the creator or the owner may revoke it. The old 6-character join codes are gone.
+    match /invites/{token} {
       allow get: if signedIn();
       allow list: if false;
-      allow create: if isMember(request.resource.data.householdId);
-      allow update: if false;
-      allow delete: if isOwner(resource.data.householdId);
+      allow create: if signedIn()
+        && isMember(request.resource.data.householdId)
+        && request.resource.data.createdBy == uid()
+        && request.resource.data.keys().hasOnly(['householdId', 'createdBy', 'createdAt', 'expiresAt'])
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.expiresAt > request.time
+        && request.resource.data.expiresAt <= request.time + duration.value(7, 'd') + duration.value(1, 'h');
+      allow update: if signedIn()
+        && !('usedBy' in resource.data)
+        && resource.data.expiresAt > request.time
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usedBy', 'usedAt'])
+        && request.resource.data.usedBy == uid()
+        && request.resource.data.usedAt == request.time;
+      allow delete: if signedIn() && (resource.data.createdBy == uid() || isOwner(resource.data.householdId));
+    }
+
+    // Joining a household: the batch must also mark an unused, unexpired invitation to this household as used by
+    // the joiner. The invitation is named by the user's own `joinToken`, written in the same batch.
+    function joinsByInvite(hid) {
+      let t = getAfter(/databases/$(database)/documents/users/$(uid())).data.get('joinToken', '');
+      let before = get(/databases/$(database)/documents/invites/$(t)).data;
+      let after = getAfter(/databases/$(database)/documents/invites/$(t)).data;
+      return t != ''
+        && before.householdId == hid
+        && !('usedBy' in before)
+        && before.expiresAt > request.time
+        && after.usedBy == uid();
     }
 
     match /households/{hid} {
@@ -33,15 +59,16 @@ service cloud.firestore {
       allow create: if signedIn() && request.resource.data.members == [uid()]
         && request.resource.data.ownerId == uid();
       allow update:
-        // owner: rename, remove participants, rotate code, hand over ownership
+        // owner: rename, remove participants, hand over ownership
         if isOwner(hid)
         // any member may remove only themselves; ownerId must stay untouched (an owner who leaves
         // hands ownership over through the isOwner clause above)
         || (isMember(hid)
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members'])
             && request.resource.data.members.toSet() == resource.data.members.toSet().difference([uid()].toSet()))
-        // anyone signed in may add only themselves (join by code)
+        // anyone signed in may add only themselves, and only by using up a one-time invitation
         || (signedIn()
+            && joinsByInvite(hid)
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members'])
             && request.resource.data.members.toSet().difference(resource.data.members.toSet()) == [uid()].toSet()
             && resource.data.members.toSet().difference(request.resource.data.members.toSet()).size() == 0);

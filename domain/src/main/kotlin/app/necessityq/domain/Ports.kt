@@ -23,7 +23,8 @@ interface HouseholdRepository {
     /** True when data is shared across devices (Firebase is configured). */
     val isShared: Boolean
     suspend fun createHousehold(name: String): Household
-    suspend fun joinHousehold(code: String): Household
+    /** Joins through a one-time invitation ([inviteToken] from a join link); the invitation is used up by joining. */
+    suspend fun joinHousehold(inviteToken: String): Household
     suspend fun leaveHousehold()
 
     /** True when real accounts (Google) and member management are available. */
@@ -42,8 +43,8 @@ interface HouseholdRepository {
     suspend fun renameHousehold(name: String): Unit = throw UnsupportedOperationException("דורש חיבור Firebase")
     /** Owner only. */
     suspend fun removeMember(userId: String): Unit = throw UnsupportedOperationException("דורש חיבור Firebase")
-    /** Owner only: invalidates the old code and issues a new one. */
-    suspend fun regenerateJoinCode(): String = throw UnsupportedOperationException("דורש חיבור Firebase")
+    /** Any member: issues a new one-time invitation and returns its token (for [JoinLinks.link]). Valid for [JoinLinks.VALID_DAYS] days, until someone joins with it. */
+    suspend fun createInvite(): String = throw UnsupportedOperationException("דורש חיבור Firebase")
 }
 
 /**

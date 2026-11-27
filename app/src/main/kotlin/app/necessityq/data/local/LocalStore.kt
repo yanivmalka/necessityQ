@@ -79,16 +79,16 @@ class LocalStore(private val file: File) {
     val household: HouseholdRepository = object : HouseholdRepository {
         override val isShared = false
         override val session: Flow<Session> = householdName.map { name ->
-            Session.SignedIn(LOCAL_USER, name?.let { Household(LOCAL_HOUSEHOLD, it, "", listOf(LOCAL_USER)) })
+            Session.SignedIn(LOCAL_USER, name?.let { Household(LOCAL_HOUSEHOLD, it, listOf(LOCAL_USER)) })
         }
 
         override suspend fun createHousehold(name: String): Household {
             householdName.value = name.trim().ifBlank { "הבית שלנו" }
             persist()
-            return Household(LOCAL_HOUSEHOLD, householdName.value!!, "", listOf(LOCAL_USER))
+            return Household(LOCAL_HOUSEHOLD, householdName.value!!, listOf(LOCAL_USER))
         }
 
-        override suspend fun joinHousehold(code: String): Household =
+        override suspend fun joinHousehold(inviteToken: String): Household =
             error("הצטרפות לבית משותף דורשת חיבור לשרת (Firebase). ראו README.")
 
         override suspend fun leaveHousehold() {

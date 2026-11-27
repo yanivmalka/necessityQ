@@ -2622,9 +2622,10 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         container.household.removeMember(userId)
         _messages.tryEmit("המשתתף הוסר מהבית")
     }
-    fun regenerateJoinCode() = launchSafe {
-        container.household.regenerateJoinCode()
-        _messages.tryEmit("נוצר קוד הצטרפות חדש; הקוד הישן אינו תקף עוד")
+    /** A new one-time invitation; [onReady] gets the text to share (the link) once it is created. */
+    fun createInvite(householdName: String, onReady: (String) -> Unit) = launchSafe {
+        val token = container.household.createInvite()
+        onReady(app.necessityq.domain.JoinLinks.shareText(householdName, token))
     }
     fun reportError(message: String) { _messages.tryEmit(message) }
 
@@ -2781,11 +2782,11 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun createHousehold(name: String) = launchSafe { container.household.createHousehold(name) }
-    fun joinHousehold(code: String) = launchSafe { container.household.joinHousehold(code) }
+    fun joinHousehold(inviteToken: String) = launchSafe { container.household.joinHousehold(inviteToken) }
 
-    /** A household code from a join link, waiting for the user's one tap (or for the explanation, when already in one). */
+    /** The invitation token from a join link, waiting for the user's one tap (or for the explanation, when already in a household). */
     val pendingJoin = MutableStateFlow<String?>(null)
-    fun requestJoin(code: String) { pendingJoin.value = code }
+    fun requestJoin(token: String) { pendingJoin.value = token }
     fun consumeJoin() { pendingJoin.value = null }
     fun leaveHousehold() = launchSafe { container.household.leaveHousehold() }
 
