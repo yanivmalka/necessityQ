@@ -89,35 +89,31 @@ class TripSizer(
 
     /**
      * A first list for a household with no history yet: what it said it buys in the first-list survey (the weekly
-     * items for a week, the monthly ones for a month), or, without the survey, the staples the per-person table
-     * knows, for a week, for the size of the household. Empty when neither is known.
+     * items for a week, the monthly ones for a month), and the staples the per-person table knows that the survey
+     * did not ask about (all of them without the survey), for a week, for the size of the household. Empty when
+     * neither is known.
      */
     fun starter(skip: Set<String>): List<Suggestion> {
-        val told = baseline?.amounts?.filterValues { it.amount > 0.0 }.orEmpty()
-        if (told.isNotEmpty()) {
-            val order = FirstListSurvey.items.map { it.name }
-            return told.keys.sortedBy { order.indexOf(it).let { i -> if (i < 0) Int.MAX_VALUE else i } }.mapNotNull { name ->
-                val def = Catalog.lookup(name)
-                val identity = ItemIdentity(def?.name ?: name, null, def?.category ?: Category.OTHER)
-                if (identity.id in skip) return@mapNotNull null
-                val sized = size(identity, null, 7)
-                Suggestion(
-                    itemId = identity.id, identity = identity, kind = SuggestionKind.RUNNING_LOW,
-                    quantity = sized.quantity, score = 1.0, reason = SURVEY_STARTER_REASON, quantityNote = sized.note,
-                )
-            }
-        }
-        if (people <= 0.0) return emptyList()
-        return SmartQuantities.items.mapNotNull { name ->
-            val def = Catalog.lookup(name) ?: return@mapNotNull null
-            val identity = ItemIdentity(def.name, null, def.category)
+        // answered in the survey (0 = "לא קונים": left out), by the survey's order
+        val answered = baseline?.amounts.orEmpty()
+        val order = FirstListSurvey.items.map { it.name }
+        val told = answered.filterValues { it.amount > 0.0 }.keys
+            .sortedBy { order.indexOf(it).let { i -> if (i < 0) Int.MAX_VALUE else i } }
+            .map { it to SURVEY_STARTER_REASON }
+        // the staples the survey did not ask about (it was filled in before they were added), by the table
+        val table = if (people <= 0.0) emptyList()
+        else SmartQuantities.items.filter { name -> baseline?.amountFor(name) == null }.map { it to STARTER_REASON }
+        return (told + table).mapNotNull { (name, reason) ->
+            val def = Catalog.lookup(name)
+            if (reason == STARTER_REASON && def == null) return@mapNotNull null
+            val identity = ItemIdentity(def?.name ?: name, null, def?.category ?: Category.OTHER)
             if (identity.id in skip) return@mapNotNull null
             val sized = size(identity, null, 7)
             Suggestion(
                 itemId = identity.id, identity = identity, kind = SuggestionKind.RUNNING_LOW,
-                quantity = sized.quantity, score = 1.0, reason = STARTER_REASON, quantityNote = sized.note,
+                quantity = sized.quantity, score = 1.0, reason = reason, quantityNote = sized.note,
             )
-        }
+        }.distinctBy { it.itemId }
     }
 
     companion object {
