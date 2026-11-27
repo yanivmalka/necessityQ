@@ -1,17 +1,17 @@
 /**
  * הבנת כוונה בהוספה לרשימה: free text the app could not read as an item ("משהו לכריכים לילדים",
- * "מה שצריך לשקשוקה", "חלב סויה") becomes generic grocery items, read by Claude.
+ * "מה שצריך לשקשוקה", "חלב סויה") becomes generic grocery items, read by Gemini (Gemini Developer API).
  *
  * The app sends only what its own matching did not understand (see QuickAddIntent in the domain module),
  * so most typing never reaches here. Answers are cached by the normalised text (and household size), so a
  * phrase is read once for everyone; a household may ask a limited number of times a day.
  */
 import { createHash } from "crypto";
-import Anthropic from "@anthropic-ai/sdk";
-import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
+import type { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 
-export const MODEL = "claude-opus-5-5";
+/** The model when none is configured (the GEMINI_MODEL parameter): Google's alias for its current Flash model. */
+export const DEFAULT_MODEL = "gemini-flash-latest";
 /** Bump when the prompt or schema changes, so cached answers of the old prompt are not served. */
 export const PROMPT_VERSION = 1;
 export const MAX_TEXT = 200;
@@ -27,27 +27,82 @@ export const CATEGORIES = [
 /** Units the app's Quantity understands. */
 export const UNITS = ["piece", "package", "kilogram", "gram", "liter", "milliliter"] as const;
 
-const ItemSchema = z.object({
+/** An item as the app receives it: null where the text said nothing. */
+export interface InterpretedItem {
+  name: string;
+  variant: string | null;
+  amount: number | null;
+  unit: (typeof UNITS)[number] | null;
+  category: (typeof CATEGORIES)[number];
+}
+
+/**
+ * The JSON schema the model must answer in. No nulls (how a model treats null types differs): an empty
+ * variant, amount 0 and unit "none" mean the text said nothing.
+ */
+export const READING_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          variant: { type: "string" },
+          amount: { type: "number" },
+          unit: { type: "string", enum: [...UNITS, "none"] },
+          category: { type: "string", enum: [...CATEGORIES] },
+        },
+        required: ["name", "variant", "amount", "unit", "category"],
+      },
+    },
+  },
+  required: ["items"],
+};
+
+/** What came back, checked: anything that is not this shape is dropped rather than trusted. */
+const ModelItem = z.object({
   name: z.string(),
-  variant: z.string().nullable(),
-  amount: z.number().nullable(),
-  unit: z.enum(UNITS).nullable(),
-  category: z.enum(CATEGORIES),
+  variant: z.string().optional().default(""),
+  amount: z.number().optional().default(0),
+  unit: z.string().optional().default("none"),
+  category: z.string().optional().default("OTHER"),
 });
 
-export const ReadingSchema = z.object({
-  items: z.array(ItemSchema),
-});
-
-export type InterpretedItem = z.infer<typeof ItemSchema>;
+/** The model's answer (JSON text) as items; [] when it is not the expected JSON. */
+export function parseReading(json: string | undefined): InterpretedItem[] {
+  if (!json) return [];
+  let data: unknown;
+  try {
+    data = JSON.parse(json);
+  } catch {
+    return [];
+  }
+  const items = (data as { items?: unknown })?.items;
+  if (!Array.isArray(items)) return [];
+  return items.flatMap((raw) => {
+    const r = ModelItem.safeParse(raw);
+    if (!r.success) return [];
+    const unit = (UNITS as readonly string[]).includes(r.data.unit) ? (r.data.unit as InterpretedItem["unit"]) : null;
+    const category = (CATEGORIES as readonly string[]).includes(r.data.category) ? (r.data.category as InterpretedItem["category"]) : "OTHER";
+    return [{
+      name: r.data.name,
+      variant: r.data.variant.trim() || null,
+      amount: r.data.amount > 0 ? r.data.amount : null,
+      unit,
+      category,
+    }];
+  });
+}
 
 export const SYSTEM_PROMPT = `You turn what an Israeli household typed into its shared shopping list into the grocery items they mean.
 The text is Hebrew, typed quickly on a phone: it may be one product, a misspelling, a description ("פלפלים בכל מיני צבעים"), a purpose ("משהו לכריכים לילדים", "מה שצריך לשקשוקה"), or several products in one line.
 
 Return the items to put on the list:
 - name: the generic product in Hebrew, as Israelis write it on a shopping list, without brand or package size ("גבינה צהובה", "חזה עוף", "פלפל"). Fix misspellings. Plural or singular as people usually write it on a list.
-- variant: only a kind that matters when buying ("5%", "ללא לקטוז", "אדום", "פרוס"), otherwise null.
-- amount and unit: only when the text gives an amount, or the purpose clearly implies one (a household of N people, "לשבוע"); otherwise null. Units: piece, package, kilogram, gram, liter, milliliter.
+- variant: only a kind that matters when buying ("5%", "ללא לקטוז", "אדום", "פרוס"), otherwise an empty string.
+- amount and unit: only when the text gives an amount, or the purpose clearly implies one (a household of N people, "לשבוע"); otherwise amount 0 and unit "none". Units: piece, package, kilogram, gram, liter, milliliter.
 - category: the supermarket section.
 
 Rules:
@@ -116,21 +171,19 @@ export function userMessage(text: string, people: number | null): string {
   return `${household}What they typed:\n<typed>${text}</typed>`;
 }
 
-/** Asks Claude. Throws on API errors; returns [] when the model declined or returned nothing usable. */
-export async function readWithClaude(client: Anthropic, text: string, people: number | null): Promise<InterpretedItem[]> {
-  const response = await client.beta.messages.parse({
-    model: MODEL,
-    max_tokens: 4000,
-    // a quick reading, not a hard problem: low effort keeps it fast
-    output_config: { effort: "low", format: betaZodOutputFormat(ReadingSchema) },
-    // if a safety classifier declines, the API answers with its default fallback model instead
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
-    system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
-    messages: [{ role: "user", content: userMessage(text, people) }],
+/** Asks Gemini. Throws on API errors; returns [] when nothing usable came back (or the model declined). */
+export async function readWithGemini(ai: GoogleGenAI, model: string, text: string, people: number | null): Promise<InterpretedItem[]> {
+  const response = await ai.models.generateContent({
+    model,
+    contents: userMessage(text, people),
+    config: {
+      systemInstruction: SYSTEM_PROMPT,
+      responseMimeType: "application/json",
+      responseJsonSchema: READING_JSON_SCHEMA,
+      temperature: 0,
+    },
   });
-  if (response.stop_reason === "refusal" || !response.parsed_output) return [];
-  return cleanItems(response.parsed_output.items);
+  return cleanItems(parseReading(response.text));
 }
 
 /** Day key for the per-household limit (UTC days are close enough). */

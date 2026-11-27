@@ -35,7 +35,7 @@ class AppContainer(context: Context) {
     val nutrition: app.necessityq.domain.NutritionRepository
     /** צ'אט פוד push to tagged / quoted members; null in single-device mode. */
     val chatPush: app.necessityq.data.firebase.ChatPush?
-    /** Reads quick-add text the app did not understand (Claude, through a cloud function); null in single-device mode. */
+    /** Reads quick-add text the app did not understand (Gemini, through a cloud function); null in single-device mode. */
     val interpreter: app.necessityq.domain.ItemInterpreter?
 
     init {

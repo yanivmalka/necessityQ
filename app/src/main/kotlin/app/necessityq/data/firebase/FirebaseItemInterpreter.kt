@@ -7,7 +7,7 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * Reads quick-add text the app did not understand through the `interpretItems` cloud function (Claude, see
+ * Reads quick-add text the app did not understand through the `interpretItems` cloud function (Gemini, see
  * firebase/functions/src/interpret.ts). Null when it could not ask: offline, too slow, or the daily limit.
  */
 class FirebaseItemInterpreter(private val functions: FirebaseFunctions) : ItemInterpreter {

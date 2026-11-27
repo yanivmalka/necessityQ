@@ -7,8 +7,8 @@ import { setGlobalOptions } from "firebase-functions/v2";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onMessagePublished } from "firebase-functions/v2/pubsub";
-import { defineSecret } from "firebase-functions/params";
-import Anthropic from "@anthropic-ai/sdk";
+import { defineSecret, defineString } from "firebase-functions/params";
+import { GoogleGenAI } from "@google/genai";
 import { GoogleAuth } from "google-auth-library";
 import { guardConfig, parseNotification, shouldCut } from "./budget";
 import { AlertTarget, ChatMessage, alertTargets, alertText, isDeadToken } from "./chat";
@@ -28,7 +28,7 @@ import {
 } from "./ingest";
 import { Branch, Snapshot } from "./model";
 import { downloadTzameret, snapshotStats } from "./nutrition";
-import { DAILY_LIMIT, MODEL, cacheKey, dayKey, readWithClaude, validateRequest } from "./interpret";
+import { DAILY_LIMIT, DEFAULT_MODEL, cacheKey, dayKey, readWithGemini, validateRequest } from "./interpret";
 
 // Israeli region: several retailer portals refuse requests from abroad.
 setGlobalOptions({ region: "me-west1", maxInstances: 2 });
@@ -317,15 +317,17 @@ async function sendAlerts(householdId: string, messageId: string, m: ChatMessage
   return result.successCount;
 }
 
-/** The Claude API key, set once with `firebase functions:secrets:set ANTHROPIC_API_KEY`. */
-const anthropicKey = defineSecret("ANTHROPIC_API_KEY");
+/** The Gemini API key (Google AI Studio), set once with `firebase functions:secrets:set GEMINI_API_KEY`. */
+const geminiKey = defineSecret("GEMINI_API_KEY");
+/** Which Gemini model reads (GEMINI_MODEL in functions/.env to change it without code). */
+const geminiModel = defineString("GEMINI_MODEL", { default: DEFAULT_MODEL });
 
 /**
  * הבנת כוונה בהוספה לרשימה: reads free text the app did not understand ("משהו לכריכים לילדים") as grocery
  * items (see interpret.ts). Members of the household only; cached by text; a daily limit per household.
  */
 export const interpretItems = onCall(
-  { memory: "256MiB", timeoutSeconds: 60, invoker: "public", secrets: [anthropicKey] },
+  { memory: "256MiB", timeoutSeconds: 60, invoker: "public", secrets: [geminiKey] },
   async (req) => {
     if (!req.auth) throw new HttpsError("unauthenticated", "sign in first");
     const request = validateRequest(req.data);
@@ -349,16 +351,17 @@ export const interpretItems = onCall(
     });
     if (!allowed) throw new HttpsError("resource-exhausted", "daily limit reached");
 
-    const client = new Anthropic({ apiKey: anthropicKey.value(), maxRetries: 1, timeout: 45_000 });
+    const ai = new GoogleGenAI({ apiKey: geminiKey.value() });
+    const model = geminiModel.value();
     let items;
     try {
-      items = await readWithClaude(client, text, people);
+      items = await readWithGemini(ai, model, text, people);
     } catch (e) {
       logger.error("interpret failed", { householdId, error: e instanceof Error ? e.message : String(e) });
       throw new HttpsError("unavailable", "could not read the text right now");
     }
     // no household or user in the cache: only the words typed and the reading
-    await cached.set({ text, people: people ?? null, items, model: MODEL, at: FieldValue.serverTimestamp() });
+    await cached.set({ text, people: people ?? null, items, model, at: FieldValue.serverTimestamp() });
     logger.info("interpret", { householdId, items: items.length });
     return { items, cached: false };
   },

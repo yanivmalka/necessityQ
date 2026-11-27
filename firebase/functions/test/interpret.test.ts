@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import Anthropic from "@anthropic-ai/sdk";
-import { MAX_ITEMS, MAX_TEXT, cacheKey, cleanItems, dayKey, normalizeText, readWithClaude, userMessage, validateRequest } from "../src/interpret";
+import type { GoogleGenAI } from "@google/genai";
+import { MAX_ITEMS, MAX_TEXT, cacheKey, cleanItems, dayKey, normalizeText, parseReading, readWithGemini, userMessage, validateRequest } from "../src/interpret";
 
 describe("quick-add reading: requests", () => {
   it("accepts a member's text and a sane household size", () => {
@@ -58,15 +58,43 @@ describe("quick-add reading: answers", () => {
     expect(cleanItems(Array.from({ length: 30 }, (_, i) => item(`פריט ${i}`)))).toHaveLength(MAX_ITEMS);
   });
 
-  it("a declined request reads as nothing, not as an error", async () => {
-    const fake = { beta: { messages: { parse: async () => ({ stop_reason: "refusal", parsed_output: null }) } } } as unknown as Anthropic;
-    expect(await readWithClaude(fake, "x", null)).toEqual([]);
+  it("the model's no-null answer becomes items with nulls", () => {
+    const json = JSON.stringify({
+      items: [
+        { name: "עגבניות", variant: "", amount: 0, unit: "none", category: "PRODUCE" },
+        { name: "מים", variant: " ", amount: 6, unit: "liter", category: "DRINKS" },
+        { name: "משהו", variant: "", amount: 0, unit: "spoon", category: "NOT_A_SECTION" },
+        { variant: "חסר שם" },
+      ],
+    });
+    expect(parseReading(json)).toEqual([
+      item("עגבניות"),
+      item("מים", { amount: 6, unit: "liter", category: "DRINKS" }),
+      item("משהו", { category: "OTHER" }),
+    ]);
   });
 
-  it("the parsed reading is cleaned", async () => {
-    const fake = {
-      beta: { messages: { parse: async () => ({ stop_reason: "end_turn", parsed_output: { items: [item("פלפל", { variant: "אדום" }), item("פלפל", { variant: "אדום" })] } }) } },
-    } as unknown as Anthropic;
-    expect(await readWithClaude(fake, "פלפלים בכל מיני צבעים", null)).toEqual([item("פלפל", { variant: "אדום" })]);
+  it("anything that is not the expected JSON reads as nothing", () => {
+    expect(parseReading(undefined)).toEqual([]);
+    expect(parseReading("not json")).toEqual([]);
+    expect(parseReading('{"things": []}')).toEqual([]);
+  });
+
+  const fakeAi = (text: string | undefined, seen: unknown[] = []) =>
+    ({ models: { generateContent: async (req: unknown) => { seen.push(req); return { text }; } } }) as unknown as GoogleGenAI;
+
+  it("asks for JSON in the schema, with the text fenced as data", async () => {
+    const seen: unknown[] = [];
+    const json = JSON.stringify({ items: [{ name: "פלפל", variant: "אדום", amount: 0, unit: "none", category: "PRODUCE" }, { name: "פלפל", variant: "אדום", amount: 0, unit: "none", category: "PRODUCE" }] });
+    expect(await readWithGemini(fakeAi(json, seen), "gemini-x", "פלפלים בכל מיני צבעים", null)).toEqual([item("פלפל", { variant: "אדום" })]);
+    const req = seen[0] as { model: string; contents: string; config: { responseMimeType: string; responseJsonSchema: unknown } };
+    expect(req.model).toBe("gemini-x");
+    expect(req.contents).toContain("<typed>פלפלים בכל מיני צבעים</typed>");
+    expect(req.config.responseMimeType).toBe("application/json");
+    expect(req.config.responseJsonSchema).toBeTruthy();
+  });
+
+  it("an empty answer (a declined request) reads as nothing, not as an error", async () => {
+    expect(await readWithGemini(fakeAi(undefined), "gemini-x", "x", null)).toEqual([]);
   });
 });

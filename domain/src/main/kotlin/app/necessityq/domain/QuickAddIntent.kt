@@ -17,7 +17,7 @@ data class InterpretedItem(
 /** An item proposed for the list from a reading, as the household will see it before adding. */
 data class ProposedItem(val identity: ItemIdentity, val quantity: Quantity?)
 
-/** Port: reads free text as the grocery items meant (Claude, through a cloud function). Null = could not ask. */
+/** Port: reads free text as the grocery items meant (Gemini, through a cloud function). Null = could not ask. */
 interface ItemInterpreter {
     suspend fun interpret(householdId: String, text: String, people: Double): List<InterpretedItem>?
 }
