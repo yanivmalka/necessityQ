@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -462,11 +463,14 @@ fun ListScreen(
                 // preparing only: filling the list · where it pays to shop · the recycle bin · clearing the list.
                 // None of these is on the shop's menu: the trip does not build, empty or restore the list
                 if (!shopping) {
-                    DropdownMenuItem(
-                        text = { Text("יצירת רשימה מקניות עבר") },
-                        leadingIcon = { Icon(Icons.Default.AutoAwesome, null) },
-                        onClick = { showGenerate = true; showMore = false },
-                    )
+                    // only when there are past purchases to build from (the first list has its own entry, in the empty list)
+                    if (snapshot?.stats?.isNotEmpty() == true) {
+                        DropdownMenuItem(
+                            text = { Text("יצירת רשימה מקניות עבר") },
+                            leadingIcon = { Icon(Icons.Default.AutoAwesome, null) },
+                            onClick = { showGenerate = true; showMore = false },
+                        )
+                    }
                     if (tripPlanOn && followedBranches.size >= 2) {
                         DropdownMenuItem(
                             text = { Text("איפה הכי משתלם לקנות?") },
@@ -819,14 +823,16 @@ fun ListScreen(
                                 searchText.isNotBlank() && !filter.isActive -> "\"$searchText\" לא ברשימה. ➤ או Enter יוסיפו אותו."
                                 filter.isActive -> "אין פריטים שמתאימים לסינון."
                                 shopping -> "אין מה לקנות — הרשימה ריקה."
-                                else -> "הרשימה ריקה. הוסיפו מוצרים בשורה למעלה, בהקשה על אחת ההצעות, או צרו רשימה מקניות עבר."
+                                else -> if (snap.stats.isNotEmpty()) "הרשימה ריקה. הוסיפו מוצרים בשורה למעלה, בהקשה על אחת ההצעות, או צרו רשימה מקניות עבר."
+                                else "הרשימה ריקה. הוסיפו מוצרים בשורה למעלה, או בקשו רשימה ראשונה."
                             },
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         if (filter.isActive) {
                             TextButton(onClick = { vm.setFilter(ListFilter()) }) { Text("ניקוי הסינון") }
-                        } else if (!shopping) {
-                            // a new household builds its first list here: the one-time survey, then the list
+                        } else if (!shopping && !(showLow && snap.tripList.size >= 3)) {
+                            // a new household builds its first list here: the one-time survey, then the list.
+                            // When the week's-list card above already offers it, it is not offered a second time
                             FilledTonalButton(onClick = { showGenerate = true }) {
                                 Icon(Icons.Default.AutoAwesome, null, Modifier.size(18.dp))
                                 Spacer(Modifier.width(6.dp))
@@ -986,7 +992,7 @@ fun ListScreen(
             onMoreSettings = { showTileEditor = false; onOpenDisplaySettings() },
         )
     }
-    if (showGenerate) GenerateSheet(vm, onDismiss = { showGenerate = false })
+    if (showGenerate) GeneratePage(vm, onDismiss = { showGenerate = false })
     if (showTrip) TripPlanSheet(vm, onDismiss = { showTrip = false })
     if (showFinish) {
         val summary = app.necessityq.domain.TripSummary.of(snapshot?.lines.orEmpty())
@@ -1810,7 +1816,7 @@ private fun FilterSection(title: String, content: @Composable () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun GenerateSheet(vm: AppViewModel, onDismiss: () -> Unit) {
+private fun GeneratePage(vm: AppViewModel, onDismiss: () -> Unit) {
     // the first time a list is built: the one-time survey of how much the household buys, before the proposal
     var surveyOpen by remember { mutableStateOf(vm.shouldAskSurvey()) }
     // the survey's answers just given (the saved ones come back a moment later)
@@ -1826,15 +1832,20 @@ private fun GenerateSheet(vm: AppViewModel, onDismiss: () -> Unit) {
     // after adding: what was added, and the undo of exactly that
     var result by remember { mutableStateOf<List<GeneratedItem>?>(null) }
     var undoAdded by remember { mutableStateOf<(() -> Unit)?>(null) }
-    // fully open at once (as every other sheet): in the half-open state a drag on the list moved the sheet, not the list
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    // a full page (not a sheet): scrolling the proposal never closes it; it closes with the back arrow or the system back
+    val pageWindow = rememberSlidingPage(onClosed = onDismiss)
+    SlidingPageDialog(pageWindow) {
+      ItemPageWindow()
+      Column(
+        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)
+            .windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.safeDrawing),
+      ) {
+        IconButton(onClick = pageWindow::close) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "חזרה") }
+        val added = result
         if (surveyOpen) {
             val done = { b: app.necessityq.domain.HouseholdBaseline -> vm.saveSurvey(b); answered = b; surveyOpen = false }
             FirstListSurveyContent(vm, saved = answered ?: vm.meals.value.baseline, onSave = done, onSkip = done)
-            return@ModalBottomSheet
-        }
-        val added = result
-        if (added != null) {
+        } else if (added != null) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(if (added.size == 1) "נוסף פריט אחד" else "נוספו ${added.size} פריטים", style = MaterialTheme.typography.titleLarge)
                 Text(
@@ -1851,13 +1862,11 @@ private fun GenerateSheet(vm: AppViewModel, onDismiss: () -> Unit) {
                     }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { undoAdded?.invoke(); onDismiss() }, Modifier.weight(1f), enabled = undoAdded != null) { Text("ביטול ההוספה") }
-                    Button(onClick = onDismiss, Modifier.weight(1f)) { Text("סגירה") }
+                    OutlinedButton(onClick = { undoAdded?.invoke(); pageWindow.close() }, Modifier.weight(1f), enabled = undoAdded != null) { Text("ביטול ההוספה") }
+                    Button(onClick = pageWindow::close, Modifier.weight(1f)) { Text("סגירה") }
                 }
             }
-            return@ModalBottomSheet
-        }
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        } else Column(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("רשימה מקניות עבר", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                 TextButton(onClick = { surveyOpen = true }) { Text("שאלון הכמויות") }
@@ -1923,6 +1932,7 @@ private fun GenerateSheet(vm: AppViewModel, onDismiss: () -> Unit) {
                 modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
             ) { Text("הוספת ${chosen.size} פריטים לרשימה") }
         }
+      }
     }
 }
 
