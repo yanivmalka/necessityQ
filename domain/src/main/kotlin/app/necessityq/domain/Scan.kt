@@ -14,6 +14,21 @@ object Barcodes {
         return digits.replace(Regex("^0+(?=\\d{8,})"), "")
     }
 
+    /**
+     * Is the check digit of a retail code right (EAN-8, UPC-A, EAN-13: the last digit completes the weighted sum to
+     * a multiple of 10). A camera that read before it focused usually yields a code that fails this. Codes of other
+     * lengths cannot be checked and count as fine.
+     */
+    fun hasValidCheckDigit(raw: String): Boolean {
+        val digits = raw.trim()
+        if (digits.isEmpty() || !digits.all { it in '0'..'9' }) return false
+        if (digits.length != 8 && digits.length != 12 && digits.length != 13) return true
+        val body = digits.dropLast(1)
+        // weights 3,1,3,1… counted from the digit next to the check digit
+        val sum = body.reversed().mapIndexed { i, c -> (c - '0') * if (i % 2 == 0) 3 else 1 }.sum()
+        return (10 - sum % 10) % 10 == digits.last() - '0'
+    }
+
     /** Same product code, ignoring leading zeros. */
     fun same(a: String, b: String): Boolean = a.trimStart('0') == b.trimStart('0')
 }

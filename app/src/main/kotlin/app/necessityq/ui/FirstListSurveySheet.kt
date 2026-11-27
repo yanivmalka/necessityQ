@@ -70,17 +70,22 @@ internal fun FirstListSurveyContent(
     val makeup = if (profiles) remember { vm.surveyMakeup() } else HouseholdMakeup.ofGroups(groups)
     var estimates by remember { mutableStateOf<Map<String, SurveyEstimate>>(emptyMap()) }
     var fromModel by remember { mutableStateOf(false) }
+    var failure by remember { mutableStateOf<app.necessityq.domain.EstimateFailure?>(null) }
+    // "נסו שוב" asks the AI again
+    var attempt by remember { mutableStateOf(0) }
     var loading by remember { mutableStateOf(true) }
     // the household's own answers win over any estimate; earlier answers count as its own
     val previous = saved?.takeIf { !it.skipped }?.amounts?.mapValues { it.value.amount }.orEmpty()
     var answers by remember { mutableStateOf(previous) }
 
-    LaunchedEffect(makeup) {
+    LaunchedEffect(makeup, attempt) {
         loading = true
+        failure = null
         if (!profiles) delay(600) // the group counts settle before asking
-        val (e, model) = vm.estimateSurvey(makeup)
-        estimates = e
-        fromModel = model
+        val r = vm.estimateSurvey(makeup)
+        estimates = r.estimates
+        fromModel = r.fromModel
+        failure = r.failure
         loading = false
     }
 
@@ -127,14 +132,19 @@ internal fun FirstListSurveyContent(
             }
             Text(
                 when {
-                    loading -> "מחשבים כמויות מקובלות לבית שלכם…"
+                    loading -> "ה-AI מנתח את הבית שלכם ומחשב כמויות… (עד כחצי דקה)"
                     fromModel -> "הכמויות הוצעו על ידי AI לפי מספר בני הבית והגילים (נשלחים רק הגילים, בלי שמות). תקנו לפי מה שאתם קונים באמת."
+                    failure != null -> failureText(failure!!)
                     else -> "הכמויות לפי הערכה כללית לבית בגודל שלכם. תקנו לפי מה שאתם קונים באמת."
                 },
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (failure != null && !loading) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        // a failure that may pass (no signal, too slow, an error) can be tried again; the daily limit and a missing set-up cannot
+        val canRetry = !loading && failure != null && failure != app.necessityq.domain.EstimateFailure.LIMIT &&
+            failure != app.necessityq.domain.EstimateFailure.UNAVAILABLE
+        if (canRetry) TextButton(onClick = { attempt++ }) { Text("נסו שוב עם AI") }
 
         val listState = rememberLazyListState()
         LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).fadingEdges(listState, horizontal = false), state = listState) {
@@ -185,6 +195,17 @@ internal fun FirstListSurveyContent(
             ) { Text("שמירה והמשך") }
         }
     }
+}
+
+/** What went wrong with the AI, in plain words, and what the user sees instead. */
+private fun failureText(f: app.necessityq.domain.EstimateFailure): String = when (f) {
+    app.necessityq.domain.EstimateFailure.OFFLINE -> "אין חיבור לאינטרנט, ולכן ה-AI לא ענה. מוצגות כמויות כלליות; אפשר לנסות שוב כשיש חיבור."
+    app.necessityq.domain.EstimateFailure.TIMEOUT -> "ה-AI לא הספיק לענות בזמן. מוצגות כמויות כלליות; אפשר לנסות שוב."
+    app.necessityq.domain.EstimateFailure.LIMIT -> "הגעתם למכסה היומית של ה-AI. מוצגות כמויות כלליות; מחר אפשר לנסות שוב."
+    app.necessityq.domain.EstimateFailure.SIGNED_OUT -> "צריך להתחבר לחשבון כדי להשתמש ב-AI. מוצגות כמויות כלליות."
+    app.necessityq.domain.EstimateFailure.BAD_REPLY -> "ה-AI החזיר תשובה שלא הצלחנו לקרוא. מוצגות כמויות כלליות; אפשר לנסות שוב."
+    app.necessityq.domain.EstimateFailure.UNAVAILABLE -> "ה-AI לא זמין כאן (בלי בית משותף בענן). מוצגות כמויות כלליות."
+    app.necessityq.domain.EstimateFailure.ERROR -> "אירעה שגיאה בפנייה ל-AI. מוצגות כמויות כלליות; אפשר לנסות שוב."
 }
 
 /** − amount + : the amount in the middle, never below zero. */

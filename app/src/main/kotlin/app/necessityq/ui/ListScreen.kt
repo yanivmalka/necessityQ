@@ -242,7 +242,8 @@ fun ListScreen(
     var showSortMenu by remember { mutableStateOf(false) }
     var showMore by remember { mutableStateOf(false) }
     var showFilter by remember { mutableStateOf(false) }
-    var showGenerate by remember { mutableStateOf(false) }
+    // the two ways to a first list, kept apart: from the household's past purchases (computed by the app), or by the AI
+    var generateKind by remember { mutableStateOf<GenerateKind?>(null) }
     var showReset by remember { mutableStateOf(false) }
     var showFinish by remember { mutableStateOf(false) }
     var showBin by remember { mutableStateOf(false) }
@@ -469,7 +470,7 @@ fun ListScreen(
                         DropdownMenuItem(
                             text = { Text("יצירת רשימה מקניות עבר") },
                             leadingIcon = { Icon(Icons.Default.AutoAwesome, null) },
-                            onClick = { showGenerate = true; showMore = false },
+                            onClick = { generateKind = GenerateKind.PAST; showMore = false },
                         )
                     }
                     if (tripPlanOn && followedBranches.size >= 2) {
@@ -610,7 +611,7 @@ fun ListScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    householdName,
+                    "רשימת קניות",
                     Modifier.weight(1f),
                     style = MaterialTheme.typography.titleLarge,
                     maxLines = 1,
@@ -678,7 +679,8 @@ fun ListScreen(
 
         // list toolbar while preparing: sort (with direction), filter, collapse/expand all ("תצוגה" is in the ⋮ menu).
         // While shopping the same controls sit in the top row, so the head of the list is one line
-        if (!shopping) {
+        // with nothing on the list there is nothing to sort or filter: the controls come with the second product
+        if (!shopping && (filter.isActive || (snapshot?.lines?.size ?: 0) >= 2)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f)) { sortFilterChips() }
                 collapseButton()
@@ -746,7 +748,7 @@ fun ListScreen(
                     TripListCard(
                         snap.tripList.size,
                         starter = snap.tripList.all { app.necessityq.domain.TripSizer.isStarter(it.reason) },
-                        onBuild = { showGenerate = true },
+                        onBuild = { generateKind = if (snap.stats.isNotEmpty()) GenerateKind.PAST else GenerateKind.AI },
                     )
                 }
             }
@@ -825,7 +827,7 @@ fun ListScreen(
                                 filter.isActive -> "אין פריטים שמתאימים לסינון."
                                 shopping -> "אין מה לקנות — הרשימה ריקה."
                                 else -> if (snap.stats.isNotEmpty()) "הרשימה ריקה. הוסיפו מוצרים בשורה למעלה, בהקשה על אחת ההצעות, או צרו רשימה מקניות עבר."
-                                else "הרשימה ריקה. הוסיפו מוצרים בשורה למעלה, או בקשו רשימה ראשונה."
+                                else "הרשימה ריקה. הוסיפו מוצרים בשורה למעלה, או תנו ל-AI להציע רשימה לפי הבית שלכם."
                             },
                             style = MaterialTheme.typography.bodyMedium,
                         )
@@ -834,10 +836,10 @@ fun ListScreen(
                         } else if (!shopping && !(showLow && snap.tripList.size >= 3)) {
                             // a new household builds its first list here: the one-time survey, then the list.
                             // When the week's-list card above already offers it, it is not offered a second time
-                            FilledTonalButton(onClick = { showGenerate = true }) {
+                            FilledTonalButton(onClick = { generateKind = if (snap.stats.isNotEmpty()) GenerateKind.PAST else GenerateKind.AI }) {
                                 Icon(Icons.Default.AutoAwesome, null, Modifier.size(18.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text(if (snap.stats.isNotEmpty()) "יצירת רשימה מקניות עבר" else "בניית רשימה ראשונה")
+                                Text(if (snap.stats.isNotEmpty()) "יצירת רשימה מקניות עבר" else "יצירת רשימה עם AI")
                             }
                         }
                     }
@@ -993,7 +995,7 @@ fun ListScreen(
             onMoreSettings = { showTileEditor = false; onOpenDisplaySettings() },
         )
     }
-    if (showGenerate) GeneratePage(vm, onDismiss = { showGenerate = false })
+    generateKind?.let { kind -> GeneratePage(vm, kind, onDismiss = { generateKind = null }) }
     if (showTrip) TripPlanSheet(vm, onDismiss = { showTrip = false })
     if (showFinish) {
         val summary = app.necessityq.domain.TripSummary.of(snapshot?.lines.orEmpty())
@@ -1815,11 +1817,15 @@ private fun FilterSection(title: String, content: @Composable () -> Unit) {
 
 // ---------- list from past purchases, reset ----------
 
+/** The two ways to build a list, apart: [PAST] is computed by the app from what was bought; [AI] asks the model about the household. */
+private enum class GenerateKind { PAST, AI }
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun GeneratePage(vm: AppViewModel, onDismiss: () -> Unit) {
-    // the first time a list is built: the one-time survey of how much the household buys, before the proposal
-    var surveyOpen by remember { mutableStateOf(vm.shouldAskSurvey()) }
+private fun GeneratePage(vm: AppViewModel, kind: GenerateKind, onDismiss: () -> Unit) {
+    val ai = kind == GenerateKind.AI
+    // by AI: the one-time survey (where the AI proposes the amounts) comes first; from past purchases there is no survey
+    var surveyOpen by remember { mutableStateOf(ai && vm.shouldAskSurvey()) }
     // the survey's answers just given (the saved ones come back a moment later)
     var answered by remember { mutableStateOf<app.necessityq.domain.HouseholdBaseline?>(null) }
     var mode by remember { mutableStateOf(GenerateMode.DUE) }
@@ -1871,26 +1877,32 @@ private fun GeneratePage(vm: AppViewModel, onDismiss: () -> Unit) {
             }
         } else Column(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("רשימה מקניות עבר", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-                TextButton(onClick = { surveyOpen = true }) { Text("שאלון הכמויות") }
+                Text(if (ai) "רשימה לפי הבית שלכם (AI)" else "רשימה מקניות עבר", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                if (ai) TextButton(onClick = { surveyOpen = true }) { Text("עריכת הכמויות") }
             }
             Text(
-                "בדקו מה יתווסף: אפשר לבטל סימון ולשנות כמות לפני ההוספה. מה שהוצע מראש והסרתם, האפליקציה תזכור ותציע פחות. " +
+                (if (ai) "הרשימה נבנתה מהכמויות שה-AI הציע לבית שלכם ושתיקנתם. " else "הרשימה נבנתה מהקניות שלכם בעבר, בלי AI. ") +
+                    "בדקו מה יתווסף: אפשר לבטל סימון ולשנות כמות לפני ההוספה. מה שהוצע מראש והסרתם, האפליקציה תזכור ותציע פחות. " +
                     "הפריטים יסומנו \"אוטומטי\".",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                GenerateMode.entries.forEach { m -> FilterChip(selected = mode == m, onClick = { mode = m }, label = { Text(m.label) }) }
+            if (!ai) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    GenerateMode.entries.forEach { m -> FilterChip(selected = mode == m, onClick = { mode = m }, label = { Text(m.label) }) }
+                }
+                Text(mode.hint, style = MaterialTheme.typography.bodySmall)
             }
-            Text(mode.hint, style = MaterialTheme.typography.bodySmall)
             Text(
                 "קנייה ${cadence.label}: הכמויות עד הקנייה הבאה (אפשר לשנות בהגדרות).",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (proposal.isEmpty()) {
-                Text("אין מה להציע — כל הפריטים כבר ברשימה, או שאין עדיין מספיק היסטוריה.", Modifier.padding(vertical = 16.dp))
+                Text(
+                    if (ai) "אין מה להציע — כל הפריטים כבר ברשימה." else "אין מה להציע — כל הפריטים כבר ברשימה, או שאין עדיין מספיק היסטוריה.",
+                    Modifier.padding(vertical = 16.dp),
+                )
             } else {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("${chosen.size} מתוך ${proposal.size} נבחרו", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
@@ -2324,7 +2336,7 @@ private fun QuickAddField(
         onValueChange = onChange,
         modifier = modifier.fillMaxWidth(),
         placeholder = { Text("מה חסר? למשל: 2 קוטג' 5%", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
         trailingIcon = {
             if (query.isBlank()) {
                 IconButton(onClick = onScan) {
@@ -2492,7 +2504,7 @@ private fun TripListCard(count: Int, starter: Boolean, onBuild: () -> Unit) {
         Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(8.dp))
         Text(
-            if (starter) "רשימה ראשונה ($count מוצרים לפי הבית שלכם) · "
+            if (starter) "רשימה ראשונה לפי הבית שלכם ($count מוצרים) · "
             else "בניית רשימה עד הקנייה הבאה ($count מוצרים לפי הקצב שלכם) · ",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onPrimaryContainer,

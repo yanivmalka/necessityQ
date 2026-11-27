@@ -295,7 +295,15 @@ object FirstListSurvey {
     private const val CHECK_FACTOR = 3.0
 }
 
-/** Port: the model's estimate of what a home of these ages buys of each item, per item's period. Null = could not ask. */
+/** Why the model's estimate did not come: each reason is told to the user in its own words. */
+enum class EstimateFailure { OFFLINE, TIMEOUT, LIMIT, SIGNED_OUT, BAD_REPLY, UNAVAILABLE, ERROR }
+
+class EstimateException(val failure: EstimateFailure, cause: Throwable? = null) : Exception(failure.name, cause)
+
+/**
+ * Port: the model's estimate of what a home of these ages buys of each item, per item's period. Null = nothing to ask
+ * (no ages or items). Throws [EstimateException] when it could not ask or the answer was unusable.
+ */
 interface BaselineEstimator {
     suspend fun estimate(householdId: String, ages: List<Int>, items: List<SurveyItem>): Map<String, Double>?
 }
