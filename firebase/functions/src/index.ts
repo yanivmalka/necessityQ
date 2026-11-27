@@ -28,7 +28,7 @@ import {
 import { Branch, Snapshot } from "./model";
 import { downloadTzameret, snapshotStats } from "./nutrition";
 import { DAILY_LIMIT, DEFAULT_MODEL, cacheKey, dayKey, readWithGemini, validateRequest } from "./interpret";
-import { BASELINE_DAILY_LIMIT, baselineCacheKey, estimateWithGemini, validateBaselineRequest } from "./baseline";
+import { baselineCacheKey, estimateWithGemini, validateBaselineRequest } from "./baseline";
 
 // Israeli region: several retailer portals refuse requests from abroad.
 setGlobalOptions({ region: "me-west1", maxInstances: 2 });
@@ -373,7 +373,7 @@ export const interpretItems = onCall(
 
 /**
  * רשימה ראשונה למשפחה: the amounts the first-list survey proposes, estimated from the ages of the people at home
- * (see baseline.ts). Members of the household only; cached by makeup and questions; a daily limit per household.
+ * (see baseline.ts). Members of the household only; cached by makeup and questions; no daily limit yet.
  */
 export const estimateBaseline = onCall(
   { memory: "256MiB", timeoutSeconds: 60, invoker: "public" },
@@ -391,15 +391,8 @@ export const estimateBaseline = onCall(
     const hit = await cached.get();
     if (hit.exists) return { amounts: hit.get("amounts") ?? {}, cached: true };
 
-    // the limit counts only questions that reach the model
-    const usage = household.collection("usage").doc(`baseline-${dayKey(new Date())}`);
-    const allowed = await db.runTransaction(async (tx) => {
-      const count = ((await tx.get(usage)).get("count") as number | undefined) ?? 0;
-      if (count >= BASELINE_DAILY_LIMIT) return false;
-      tx.set(usage, { count: count + 1 }, { merge: true });
-      return true;
-    });
-    if (!allowed) throw new HttpsError("resource-exhausted", "daily limit reached");
+    // no daily limit for now (a decision: one user while in development); the limits are decided with the
+    // product's general model before launch (ROADMAP 0.6)
 
     const ai = new GoogleGenAI({ apiKey: geminiKey() });
     const model = geminiModel();

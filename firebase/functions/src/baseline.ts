@@ -15,7 +15,6 @@ import { UNITS } from "./interpret";
 export const BASELINE_PROMPT_VERSION = 1;
 export const MAX_PEOPLE = 15;
 export const MAX_SURVEY_ITEMS = 60;
-export const BASELINE_DAILY_LIMIT = 10;
 /** An amount above this, in any unit and period, is not a household's shopping. */
 export const MAX_AMOUNT = 500;
 
