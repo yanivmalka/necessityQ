@@ -7,6 +7,8 @@ import { setGlobalOptions } from "firebase-functions/v2";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onMessagePublished } from "firebase-functions/v2/pubsub";
+import { defineString } from "firebase-functions/params";
+import { GoogleGenAI } from "@google/genai";
 import { GoogleAuth } from "google-auth-library";
 import { guardConfig, parseNotification, shouldCut } from "./budget";
 import { AlertTarget, ChatMessage, alertTargets, alertText, isDeadToken } from "./chat";
@@ -26,6 +28,7 @@ import {
 } from "./ingest";
 import { Branch, Snapshot } from "./model";
 import { downloadTzameret, snapshotStats } from "./nutrition";
+import { DAILY_LIMIT, DEFAULT_MODEL, cacheKey, dayKey, readWithGemini, validateRequest } from "./interpret";
 
 // Israeli region: several retailer portals refuse requests from abroad.
 setGlobalOptions({ region: "me-west1", maxInstances: 2 });
@@ -313,3 +316,57 @@ async function sendAlerts(householdId: string, messageId: string, m: ChatMessage
   logger.info("chat push", { householdId, messageId, targets: targets.length, sent: result.successCount });
   return result.successCount;
 }
+
+/**
+ * The Gemini API key (Google AI Studio). Kept as the GitHub secret GEMINI_API_KEY; the deploy workflow writes it to
+ * functions/.env, so no command line is needed. Empty = not set up yet: the app then adds text as typed.
+ */
+const geminiKey = defineString("GEMINI_API_KEY", { default: "" });
+/** Which Gemini model reads (GEMINI_MODEL in functions/.env to change it without code). */
+const geminiModel = defineString("GEMINI_MODEL", { default: DEFAULT_MODEL });
+
+/**
+ * הבנת כוונה בהוספה לרשימה: reads free text the app did not understand ("משהו לכריכים לילדים") as grocery
+ * items (see interpret.ts). Members of the household only; cached by text; a daily limit per household.
+ */
+export const interpretItems = onCall(
+  { memory: "256MiB", timeoutSeconds: 60, invoker: "public" },
+  async (req) => {
+    if (!req.auth) throw new HttpsError("unauthenticated", "sign in first");
+    if (!geminiKey.value()) throw new HttpsError("failed-precondition", "GEMINI_API_KEY is not set");
+    const request = validateRequest(req.data);
+    if (typeof request === "string") throw new HttpsError("invalid-argument", request);
+    const { text, people, householdId } = request;
+    const household = db.doc(`households/${householdId}`);
+    const members = ((await household.get()).get("members") as string[] | undefined) ?? [];
+    if (!members.includes(req.auth.uid)) throw new HttpsError("permission-denied", "not a member");
+
+    const cached = db.doc(`interpretCache/${cacheKey(text, people)}`);
+    const hit = await cached.get();
+    if (hit.exists) return { items: hit.get("items") ?? [], cached: true };
+
+    // the limit counts only questions that reach the model
+    const usage = household.collection("usage").doc(`interpret-${dayKey(new Date())}`);
+    const allowed = await db.runTransaction(async (tx) => {
+      const count = ((await tx.get(usage)).get("count") as number | undefined) ?? 0;
+      if (count >= DAILY_LIMIT) return false;
+      tx.set(usage, { count: count + 1 }, { merge: true });
+      return true;
+    });
+    if (!allowed) throw new HttpsError("resource-exhausted", "daily limit reached");
+
+    const ai = new GoogleGenAI({ apiKey: geminiKey.value() });
+    const model = geminiModel.value();
+    let items;
+    try {
+      items = await readWithGemini(ai, model, text, people);
+    } catch (e) {
+      logger.error("interpret failed", { householdId, error: e instanceof Error ? e.message : String(e) });
+      throw new HttpsError("unavailable", "could not read the text right now");
+    }
+    // no household or user in the cache: only the words typed and the reading
+    await cached.set({ text, people: people ?? null, items, model, at: FieldValue.serverTimestamp() });
+    logger.info("interpret", { householdId, items: items.length });
+    return { items, cached: false };
+  },
+);

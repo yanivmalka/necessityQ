@@ -105,7 +105,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     val completions: StateFlow<List<ItemIdentity>> = combine(searchQuery, snapshot) { q, snap -> q to snap }
         .mapLatest { (q, snap) ->
-            val name = QuickEntryParser.parse(q)?.item?.displayName ?: q
+            // the words as typed (without the amount): "שרי" searches cherry tomatoes, not every tomato
+            val name = QuickEntryParser.parse(q)?.nameText ?: q
             if (q.isBlank()) emptyList() else Autocomplete.complete(name, snap?.stats?.values.orEmpty())
         }
         .flowOn(kotlinx.coroutines.Dispatchers.Default)
@@ -136,7 +137,75 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         val (hid, uid, lines) = ctx() ?: return
         if (text.isBlank()) return
         query.value = ""
+        val interpreter = container.interpreter
+        val history = snapshot.value?.stats?.values.orEmpty().map { it.identity }
+        // what the app reads by itself is added at once; only text it can't read goes to be read (one at a time)
+        if (interpreter == null || _reading.value != null || !app.necessityq.domain.QuickAddIntent.needsReading(text, history)) {
+            launchSafe { container.service.addFromText(hid, uid, text, lines)?.let { _added.tryEmit(it.item.id) } }
+            return
+        }
+        val asking = QuickReading.Reading(text)
+        _reading.value = asking
+        viewModelScope.launch {
+            // a failure here (offline, the daily limit) is not a crash: the text is added as typed
+            val items = runCatching { interpreter.interpret(hid, text, container.service.householdPeople(hid)) }.getOrNull()
+            if (_reading.value !== asking) return@launch // cancelled meanwhile
+            val proposals = items?.let(app.necessityq.domain.QuickAddIntent::proposals).orEmpty()
+            when {
+                proposals.isEmpty() -> {
+                    _reading.value = null
+                    _messages.tryEmit(if (items == null) "הבנת הטקסט לא זמינה כרגע, נוסף כפי שנכתב" else "לא זוהה מוצר, נוסף כפי שנכתב")
+                    launchSafe { container.service.addFromText(hid, uid, text, snapshot.value?.lines.orEmpty())?.let { _added.tryEmit(it.item.id) } }
+                }
+                // one item: added at once, with the amount typed when the reading gave none ("2 חלבב" → 2 × חלב)
+                proposals.size == 1 -> {
+                    _reading.value = null
+                    val p = proposals.single()
+                    val quantity = p.quantity ?: QuickEntryParser.parse(text)?.quantity
+                    launchSafe {
+                        container.service.add(hid, uid, p.identity, quantity, LineSource.MANUAL, snapshot.value?.lines.orEmpty())
+                        _added.tryEmit(p.identity.id)
+                    }
+                }
+                // several: shown to confirm before anything is added
+                else -> _reading.value = QuickReading.Proposal(text, proposals)
+            }
+        }
+    }
+
+    /** Quick-add text being read by the model, or its reading waiting for the household to confirm. */
+    sealed interface QuickReading {
+        val text: String
+        data class Reading(override val text: String) : QuickReading
+        data class Proposal(override val text: String, val items: List<app.necessityq.domain.ProposedItem>) : QuickReading
+    }
+
+    private val _reading = MutableStateFlow<QuickReading?>(null)
+    val reading: StateFlow<QuickReading?> = _reading
+
+    /** Adds the items the household kept from a reading. */
+    fun confirmReading(items: List<app.necessityq.domain.ProposedItem>) {
+        _reading.value = null
+        val (hid, uid, lines) = ctx() ?: return
+        launchSafe {
+            for (p in items) container.service.add(hid, uid, p.identity, p.quantity, LineSource.MANUAL, lines)
+            items.lastOrNull()?.let { _added.tryEmit(it.identity.id) }
+        }
+    }
+
+    /** Adds the text as it was typed, not as it was read. */
+    fun addReadingAsTyped() {
+        val text = _reading.value?.text ?: return
+        _reading.value = null
+        val (hid, uid, lines) = ctx() ?: return
         launchSafe { container.service.addFromText(hid, uid, text, lines)?.let { _added.tryEmit(it.item.id) } }
+    }
+
+    /** Stops waiting for a reading, or drops it; the text goes back to the box to edit. */
+    fun cancelReading() {
+        val text = _reading.value?.text ?: return
+        _reading.value = null
+        if (query.value.isBlank()) query.value = text
     }
 
 
@@ -1093,14 +1162,10 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         OnlineSearch(q, mine, branch?.let { loaded[it] }?.products)
     }
         .mapLatest { (q, mine, products) ->
-            val name = QuickEntryParser.parse(q)?.item?.displayName ?: q
+            val name = QuickEntryParser.parse(q)?.nameText ?: q
             if (name.trim().length < 2 || products == null) return@mapLatest emptyList<ItemIdentity>()
-            val known = mine.map { it.id }.toSet()
-            app.necessityq.domain.PriceData.search(products, name, limit = 60)
-                .map { app.necessityq.domain.Scan.genericIdentity(it) }
-                .filter { it.id !in known && it.name.isNotBlank() }
-                .distinctBy { it.id }
-                .take(8)
+            // whole words, not any part of one: "לחם" is bread, not "לחמית" (see ItemSearch)
+            app.necessityq.domain.ItemSearch.storeItems(products, name, exclude = mine.map { it.id }.toSet(), limit = 8)
         }
         .flowOn(kotlinx.coroutines.Dispatchers.Default)
         .catch { emit(emptyList()) }

@@ -202,6 +202,7 @@ fun ListScreen(
     val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
     val completions by vm.completions.collectAsStateWithLifecycle()
     val onlineCompletions by vm.onlineCompletions.collectAsStateWithLifecycle()
+    val reading by vm.reading.collectAsStateWithLifecycle()
     val mode by vm.mode.collectAsStateWithLifecycle()
     val sort by vm.sort.collectAsStateWithLifecycle()
     val display by vm.display.collectAsStateWithLifecycle()
@@ -648,6 +649,10 @@ fun ListScreen(
                 )
             }
         }
+        // text the app could not read by itself is being read (QuickAddIntent): say so, and allow to stop
+        (reading as? AppViewModel.QuickReading.Reading)?.let { r ->
+            ReadingProgress(r.text, onCancel = vm::cancelReading, modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp))
+        }
         if (completions.isNotEmpty() || onlineCompletions.isNotEmpty()) {
             // what the household buys first, then generic items from the branch's products — two scrolling rows
             val entries = buildList<Pair<String?, app.necessityq.domain.ItemIdentity?>> {
@@ -1001,6 +1006,14 @@ fun ListScreen(
             },
             confirmButton = { TextButton(onClick = { showFinish = false; vm.finishShopping() }) { Text("סיום קנייה") } },
             dismissButton = { TextButton(onClick = { showFinish = false }) { Text("ביטול") } },
+        )
+    }
+    (reading as? AppViewModel.QuickReading.Proposal)?.let { proposal ->
+        ReadingDialog(
+            proposal,
+            onAdd = vm::confirmReading,
+            onAsTyped = vm::addReadingAsTyped,
+            onDismiss = vm::cancelReading,
         )
     }
     if (showReset) ResetDialog(snapshot?.lines.orEmpty(), onReset = { vm.resetList(it); showReset = false }, onDismiss = { showReset = false })
@@ -2813,4 +2826,77 @@ private fun AdviceCard(
             TextButton(onClick = onDecline) { Text("לא תודה") }
         }
     }
+}
+
+/** Quick-add text is being read ("מבין את „משהו לכריכים“…"), with a way to stop waiting. */
+@Composable
+private fun ReadingProgress(text: String, onCancel: () -> Unit, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            "מבין את „$text“…",
+            Modifier.weight(1f),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        TextButton(onClick = onCancel) { Text("ביטול") }
+    }
+}
+
+/**
+ * What a reading understood from the text, to confirm before anything is added (all checked; uncheck what is not
+ * wanted). "כפי שנכתב" adds the text as one item, as typed.
+ */
+@Composable
+private fun ReadingDialog(
+    proposal: AppViewModel.QuickReading.Proposal,
+    onAdd: (List<app.necessityq.domain.ProposedItem>) -> Unit,
+    onAsTyped: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var chosen by remember(proposal) { mutableStateOf(proposal.items.map { it.identity.id }.toSet()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("„${proposal.text}“") },
+        text = {
+            Column {
+                Text(
+                    "זה מה שהבנתי. מה שמסומן יתווסף לרשימה.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 6.dp),
+                )
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
+                    items(proposal.items, key = { it.identity.id }) { item ->
+                        val on = item.identity.id in chosen
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clickable { chosen = if (on) chosen - item.identity.id else chosen + item.identity.id }
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(checked = on, onCheckedChange = null)
+                            Box(Modifier.size(10.dp).clip(CircleShape).background(categoryColor(item.identity.category)))
+                            Spacer(Modifier.width(8.dp))
+                            Text(item.identity.displayName, Modifier.weight(1f))
+                            item.quantity?.let {
+                                Text(it.format(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+                TextButton(onClick = onAsTyped, modifier = Modifier.padding(top = 4.dp)) { Text("להוסיף כפי שנכתב") }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onAdd(proposal.items.filter { it.identity.id in chosen }) },
+                enabled = chosen.isNotEmpty(),
+            ) { Text(if (chosen.size == proposal.items.size) "הוספה" else "הוספת ${chosen.size}") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("ביטול") } },
+    )
 }

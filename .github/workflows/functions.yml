@@ -48,9 +48,16 @@ jobs:
         env:
           FIREBASE_TOKEN_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           if [ -z "$FIREBASE_TOKEN_JSON" ] || [ -z "$FIREBASE_PROJECT_ID" ]; then
             echo "Firebase deploy secrets not set; skipping."; exit 0
+          fi
+          # the Gemini key for interpretItems (GitHub secret GEMINI_API_KEY); without it the function answers "not set up"
+          if [ -n "$GEMINI_API_KEY" ]; then
+            printf 'GEMINI_API_KEY=%s\n' "$GEMINI_API_KEY" >> firebase/functions/.env
+          else
+            echo "GEMINI_API_KEY not set: quick-add reading stays off."
           fi
           echo "$FIREBASE_TOKEN_JSON" > "$RUNNER_TEMP/sa.json"
           export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
