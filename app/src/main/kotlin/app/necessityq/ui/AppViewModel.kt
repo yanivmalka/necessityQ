@@ -579,7 +579,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         val fromModel = estimates.values.any { it.source == app.necessityq.domain.SurveyEstimate.Source.MODEL }
         // an answer that held none of the survey's items is as unusable as no answer
         if (model != null && !fromModel && failure == null) failure = app.necessityq.domain.EstimateFailure.BAD_REPLY
-        return SurveyEstimateResult(estimates, fromModel, failure)
+        val fromModelCount = estimates.values.count { it.source == app.necessityq.domain.SurveyEstimate.Source.MODEL }
+        return SurveyEstimateResult(estimates, fromModel, failure, asked = items.size, answered = model?.size ?: 0, accepted = fromModelCount)
     }
 
     /** The survey's amounts, whether the AI gave them, and if it did not, why. */
@@ -587,6 +588,10 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         val estimates: Map<String, app.necessityq.domain.SurveyEstimate>,
         val fromModel: Boolean,
         val failure: app.necessityq.domain.EstimateFailure?,
+        /** products sent to the AI, products it answered, answers used (the rest were far from usual, or came from history) */
+        val asked: Int = 0,
+        val answered: Int = 0,
+        val accepted: Int = 0,
     )
 
     /** Keeps the survey's answers (or that it was skipped): from now on they size the first list and new items. */

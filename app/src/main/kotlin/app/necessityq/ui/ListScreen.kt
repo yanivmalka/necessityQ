@@ -1825,7 +1825,8 @@ private enum class GenerateKind { PAST, AI }
 private fun GeneratePage(vm: AppViewModel, kind: GenerateKind, onDismiss: () -> Unit) {
     val ai = kind == GenerateKind.AI
     // by AI: the one-time survey (where the AI proposes the amounts) comes first; from past purchases there is no survey
-    var surveyOpen by remember { mutableStateOf(ai && vm.shouldAskSurvey()) }
+    // the AI way always asks the AI now (the survey with its fresh estimate), never a list from answers saved earlier
+    var surveyOpen by remember { mutableStateOf(ai || vm.shouldAskSurvey()) }
     // the survey's answers just given (the saved ones come back a moment later)
     var answered by remember { mutableStateOf<app.necessityq.domain.HouseholdBaseline?>(null) }
     var mode by remember { mutableStateOf(GenerateMode.DUE) }
@@ -1881,7 +1882,7 @@ private fun GeneratePage(vm: AppViewModel, kind: GenerateKind, onDismiss: () -> 
                 if (ai) TextButton(onClick = { surveyOpen = true }) { Text("עריכת הכמויות") }
             }
             Text(
-                (if (ai) "הרשימה נבנתה מהכמויות שה-AI הציע לבית שלכם ושתיקנתם. " else "הרשימה נבנתה מהקניות שלכם בעבר, בלי AI. ") +
+                (if (ai) "הרשימה נבנתה מהכמויות שאישרתם בשאלון. ה-AI קובע רק כמויות; המוצרים עצמם הם רשימת הבסיס הקבועה. " else "הרשימה נבנתה מהקניות שלכם בעבר, בלי AI. ") +
                     "בדקו מה יתווסף: אפשר לבטל סימון ולשנות כמות לפני ההוספה. מה שהוצע מראש והסרתם, האפליקציה תזכור ותציע פחות. " +
                     "הפריטים יסומנו \"אוטומטי\".",
                 style = MaterialTheme.typography.bodySmall,
