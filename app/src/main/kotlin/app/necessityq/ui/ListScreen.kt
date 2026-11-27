@@ -1247,7 +1247,7 @@ private fun daysAgo(stats: ItemStats?, today: LocalDate): String? {
 }
 
 private fun cadence(stats: ItemStats?): String? =
-    stats?.cadenceDays?.let { "בערך כל ${it.roundToInt().coerceAtLeast(1)} ימים" }
+    stats?.cadenceDays?.let { "בערך " + app.necessityq.domain.Rhythm.text(it) }
 
 private fun tileInfo(line: ListLine, stats: ItemStats?, names: Map<String, String>, tile: TileLayout, today: LocalDate): String =
     listOfNotNull(
