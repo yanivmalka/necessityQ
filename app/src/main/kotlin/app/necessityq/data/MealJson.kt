@@ -9,6 +9,7 @@ import app.necessityq.domain.FlavorPref
 import app.necessityq.domain.BaselineAmount
 import app.necessityq.domain.Gender
 import app.necessityq.domain.HouseholdBaseline
+import app.necessityq.domain.TripCadence
 import app.necessityq.domain.HouseholdMakeup
 import app.necessityq.domain.ListMemory
 import app.necessityq.domain.MealData
@@ -83,6 +84,8 @@ object MealJson {
         val buy: List<String> = emptyList(),
         val packs: Map<String, Long> = emptyMap(),
         val baseline: B? = null,
+        /** [TripCadence.days]; absent = a weekly trip. */
+        val tripDays: Int? = null,
     )
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -123,6 +126,7 @@ object MealJson {
             baseline = data.baseline?.let { b ->
                 B(b.filledAtMillis, b.amounts.mapValues { (_, a) -> BA(a.amount, a.unit.name, a.periodDays) }, b.makeup?.ages, b.skipped)
             },
+            tripDays = data.cadence.takeIf { it != TripCadence.DEFAULT }?.days,
         ),
     )
 
@@ -176,6 +180,7 @@ object MealJson {
                     skipped = b.skipped,
                 )
             },
+            cadence = TripCadence.ofDays(r.tripDays),
         )
     }
 }

@@ -123,8 +123,55 @@ class FirstListSurveyTest {
         assertEquals(Quantity(3.0, QuantityUnit.LITER), milk.quantity)
         assertEquals(TripSizer.SURVEY_STARTER_REASON, milk.reason)
         assertTrue(TripSizer.isStarter(milk.reason))
-        val rice = starter.first { it.identity.name == "אורז" }
-        assertEquals("לפי השאלון · לחודש", rice.quantityNote)
+        // the reason already says the survey: the note does not repeat it
+        assertNull(milk.quantityNote)
+    }
+
+    // ---------- how often the household shops (#103) ----------
+
+    private fun told(vararg answers: Pair<String, Double>) = FirstListSurvey.baseline(answers.toMap(), null, 1L)
+    private fun firstList(b: HouseholdBaseline, cadence: TripCadence) =
+        TripSizer(emptyList(), 0.0, b, tripDays = cadence.days).starter(emptySet()).associateBy { it.identity.name }
+
+    @Test fun `a monthly answer is bought for one trip, not for the whole month`() {
+        // seven packs of hot dogs a month were all put on a weekly trip
+        val weekly = firstList(told("נקניקיות" to 7.0), TripCadence.WEEKLY).getValue("נקניקיות")
+        assertEquals(Quantity(2.0, QuantityUnit.PACKAGE), weekly.quantity)
+        val monthly = firstList(told("נקניקיות" to 7.0), TripCadence.MONTHLY).getValue("נקניקיות")
+        assertEquals(Quantity(7.0, QuantityUnit.PACKAGE), monthly.quantity)
+    }
+
+    @Test fun `what lasts longer than a trip is one, and says how long it lasts`() {
+        val b = told("אבקת כביסה" to 1.0)
+        // a quarter a week, half in two weeks: one, which lasts a month
+        for (c in listOf(TripCadence.WEEKLY, TripCadence.BIWEEKLY)) {
+            val powder = firstList(b, c).getValue("אבקת כביסה")
+            assertEquals(c.name, Quantity(1.0, QuantityUnit.PIECE), powder.quantity)
+            assertEquals(c.name, "מספיק לחודש", powder.quantityNote)
+        }
+        val monthly = firstList(b, TripCadence.MONTHLY).getValue("אבקת כביסה")
+        assertEquals(Quantity(1.0, QuantityUnit.PIECE), monthly.quantity)
+        assertNull(monthly.quantityNote)
+    }
+
+    @Test fun `a weekly answer is bought for the whole stretch of a longer trip`() {
+        val b = told("חלב" to 3.0)
+        assertEquals(Quantity(6.0, QuantityUnit.LITER), firstList(b, TripCadence.BIWEEKLY).getValue("חלב").quantity)
+        assertTrue(firstList(b, TripCadence.MONTHLY).getValue("חלב").quantity!!.amount >= 12.0)
+    }
+
+    @Test fun `an item bought every few days is bought that many times for a monthly trip`() {
+        assertEquals(4, TripSizer.timesIn(7, 1.0))
+        assertEquals(10, TripSizer.timesIn(30, 3.0))
+        assertEquals(4, TripSizer.timesIn(30, 7.0))
+    }
+
+    @Test fun `how often the household shops is one of three`() {
+        assertEquals(TripCadence.WEEKLY, TripCadence.ofDays(null))
+        assertEquals(TripCadence.BIWEEKLY, TripCadence.ofDays(14))
+        assertEquals(TripCadence.WEEKLY, TripCadence.ofDays(9))
+        assertEquals("לשבועיים", TripCadence.spanText(15.0))
+        assertEquals("לחודשיים", TripCadence.spanText(60.0))
     }
 
     @Test fun `the answer sizes an item the household has not bought, for as long as a purchase lasts`() {

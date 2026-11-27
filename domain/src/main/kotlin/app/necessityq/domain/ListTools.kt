@@ -65,7 +65,7 @@ data class GeneratedItem(
  * Builds a list from the household's history. Nothing is added by itself — the result is a proposal;
  * accepted lines are marked [LineSource.AUTO] so they stay distinguishable from what people added.
  *
- * [GenerateMode.DUE] is the same list as the "בניית רשימה לשבוע" card ([SuggestionEngine.forNextTrip]), preselected;
+ * [GenerateMode.DUE] is the same list as the "בניית רשימה עד הקנייה הבאה" card ([SuggestionEngine.forNextTrip]), preselected;
  * items whose rhythm is still a guess are shown below it, not preselected. A household with no history yet gets a
  * first list from the survey's answers or its size ([TripSizer.starter]). Amounts come from [TripSizer], as everywhere else.
  */
@@ -76,7 +76,8 @@ object ListGenerator {
         purchases: List<Purchase>,
         current: List<ListLine>,
         today: LocalDate,
-        horizonDays: Long = 7,
+        /** How often the household shops ([TripCadence.days]): the list is for until the trip after this one. */
+        horizonDays: Long = TripCadence.DEFAULT.days.toLong(),
         zone: ZoneId = ZoneId.systemDefault(),
         /** Items the household recently turned down: still shown (they asked for the whole list), but not preselected. */
         suppressed: Set<String> = emptySet(),
@@ -92,7 +93,7 @@ object ListGenerator {
         chosen: PackChoices = PackChoices(),
     ): List<GeneratedItem> {
         val onList = current.filter { it.status == LineStatus.NEEDED }.map { it.itemId }.toSet()
-        val sizer = TripSizer(stats, people, baseline, chosen)
+        val sizer = TripSizer(stats, people, baseline, chosen, horizonDays.toInt())
         val horizon = horizonDays.toInt()
         val proposed = when (mode) {
             GenerateMode.DUE -> {

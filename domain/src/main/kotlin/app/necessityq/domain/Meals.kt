@@ -185,6 +185,8 @@ data class MealData(
     val packs: Map<String, Long> = emptyMap(),
     /** The first-list survey's answers ([FirstListSurvey]); null until it was filled in or skipped. */
     val baseline: HouseholdBaseline? = null,
+    /** How often the household goes shopping: the amounts of every trip's list are for this long ([TripSizer]). */
+    val cadence: TripCadence = TripCadence.DEFAULT,
 ) {
     /** Left off the list: marked "יש בבית", or a staple the household has not said it needs ([Staples]). */
     fun isAtHome(ingredient: ScaledIngredient): Boolean = isAtHome(ingredient.base, ingredient.quantity)

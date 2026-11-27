@@ -4,6 +4,36 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
+/**
+ * How often the household goes shopping, as it said. Every amount proposed for a trip is for this stretch: what runs
+ * out sooner is bought for the whole stretch (four weeks of bread for a monthly trip), and what lasts longer is bought
+ * one pack at a time, and only on the trips it is due (washing powder at a quarter a week: one a month).
+ */
+enum class TripCadence(val days: Int, val label: String, val span: String) {
+    WEEKLY(7, "פעם בשבוע", "לשבוע"),
+    BIWEEKLY(14, "פעם בשבועיים", "לשבועיים"),
+    MONTHLY(30, "פעם בחודש", "לחודש");
+
+    companion object {
+        val DEFAULT = WEEKLY
+
+        fun ofDays(days: Int?): TripCadence = entries.firstOrNull { it.days == days } ?: DEFAULT
+
+        /** "לשבוע", "לשבועיים", "ל־3 שבועות", "לחודש", "לחודשיים", "ל־3 חודשים": how long an amount lasts. */
+        fun spanText(days: Double): String {
+            val weeks = (days / 7.0).roundToInt()
+            return when {
+                days < 10.5 -> "לשבוע"
+                weeks == 2 -> "לשבועיים"
+                weeks == 3 -> "ל־3 שבועות"
+                days < 45 -> "לחודש"
+                days < 75 -> "לחודשיים"
+                else -> "ל־${(days / 30.0).roundToInt()} חודשים"
+            }
+        }
+    }
+}
+
 /** An amount and, when it is not simply the household's usual purchase, where it came from. */
 data class SizedQuantity(val quantity: Quantity?, val note: String? = null)
 
@@ -25,6 +55,8 @@ class TripSizer(
     private val baseline: HouseholdBaseline? = null,
     /** The packs the household chose ([HouseholdPacks]); the rest are learned from what it usually buys. */
     private val chosen: PackChoices = PackChoices(),
+    /** How often the household shops ([TripCadence.days]): an item with no rhythm of its own is bought for this long. */
+    val tripDays: Int = TripCadence.DEFAULT.days,
 ) {
     private val byId = stats.associateBy { it.itemId }
 
@@ -42,6 +74,8 @@ class TripSizer(
         val usual = stats?.typicalQuantity
         val then = stats?.typicalPeople
         var q: Quantity? = usual
+        // how many days the computed amount is meant to last, to tell when a whole pack lasts much longer
+        var coverDays: Double? = null
         if (usual != null) {
             if (people > 0.0 && then != null && then > 0.0 && abs(people / then - 1.0) >= SCALE_THRESHOLD) {
                 q = usual.times(HouseholdSize.scale(people, then))
@@ -49,14 +83,16 @@ class TripSizer(
                 notes += "מותאם ל־${peopleText(people)}"
             }
         } else {
+            // with no rhythm of its own, an item is bought for as long as the household goes between trips
+            val days = stats?.cadenceDays ?: tripDays.toDouble()
             val told = baseline?.amountFor(identity.name)
-            val table = if (told != null) null else SmartQuantities.forItem(identity.name, stats?.cadenceDays, people, calibration)
+            val table = if (told != null) null else SmartQuantities.forItem(identity.name, days, people, calibration)
             if (told != null) {
-                val days = stats?.cadenceDays ?: told.periodDays.toDouble()
                 q = told.forDays(days)
                 if (q != null) {
                     computed = true
-                    notes += if (stats?.cadenceDays == null && told.periodDays == SurveyPeriod.MONTH.days) "$SURVEY_NOTE · לחודש" else SURVEY_NOTE
+                    coverDays = days
+                    notes += SURVEY_NOTE
                 }
             } else if (table != null) {
                 q = table
@@ -69,11 +105,18 @@ class TripSizer(
         if (current != null && times > 1) {
             q = current.times(times.toDouble())
             computed = true
-            notes += (if (horizonDays == 7) "לשבוע" else "ל־$horizonDays ימים") + ": " + timesText(times)
+            notes += spanOf(horizonDays!!) + ": " + timesText(times)
         }
         val pack = packFor(identity)
         // a computed amount is whole packs of what the household buys (19 yoghurts in packs of 8 are 16)
         val result = q?.let { if (computed) pack?.nearest(it) ?: purchasable(identity.name, identity.variant, it) else wholeCount(it) }
+        // one pack that lasts well beyond the trip: say how long ("מספיק לחודש"), so it is clear why it is one
+        val need = q
+        val cover = coverDays
+        if (result != null && need != null && cover != null && result.dimension == need.dimension && need.baseAmount > 0.0) {
+            val lasts = cover * result.baseAmount / need.baseAmount
+            if (lasts >= cover * LASTS_LONGER) notes += "מספיק " + TripCadence.spanText(lasts)
+        }
         return SizedQuantity(result, notes.joinToString(" · ").ifEmpty { null })
     }
 
@@ -88,9 +131,9 @@ class TripSizer(
     }
 
     /**
-     * A first list for a household with no history yet: what it said it buys in the first-list survey (the weekly
-     * items for a week, the monthly ones for a month), and the staples the per-person table knows that the survey
-     * did not ask about (all of them without the survey), for a week, for the size of the household. Empty when
+     * A first list for a household with no history yet: what it said it buys in the first-list survey, for as long
+     * as it goes between trips ([tripDays]), and the staples the per-person table knows that the survey
+     * did not ask about (all of them without the survey), for the same stretch, for the size of the household. Empty when
      * neither is known.
      */
     fun starter(skip: Set<String>): List<Suggestion> {
@@ -108,10 +151,12 @@ class TripSizer(
             if (reason == STARTER_REASON && def == null) return@mapNotNull null
             val identity = ItemIdentity(def?.name ?: name, null, def?.category ?: Category.OTHER)
             if (identity.id in skip) return@mapNotNull null
-            val sized = size(identity, null, 7)
+            val sized = size(identity, null, tripDays)
+            // the reason already says the survey; the note keeps only what it adds
+            val note = sized.note?.split(" · ")?.filter { it != SURVEY_NOTE }?.joinToString(" · ")?.ifEmpty { null }
             Suggestion(
                 itemId = identity.id, identity = identity, kind = SuggestionKind.RUNNING_LOW,
-                quantity = sized.quantity, score = 1.0, reason = reason, quantityNote = sized.note,
+                quantity = sized.quantity, score = 1.0, reason = reason, quantityNote = note,
             )
         }.distinctBy { it.itemId }
     }
@@ -122,6 +167,11 @@ class TripSizer(
         const val STARTER_REASON = "רשימה ראשונה לפי גודל הבית"
         const val SURVEY_STARTER_REASON = "רשימה ראשונה לפי השאלון"
         const val SURVEY_NOTE = "לפי השאלון"
+        /** A pack that lasts this many times the stretch it was bought for is said to ("מספיק לחודש"). */
+        const val LASTS_LONGER = 1.5
+
+        /** "לשבוע", "לשבועיים", "לחודש", or "ל־10 ימים" for a stretch that is none of them. */
+        fun spanOf(days: Int): String = TripCadence.entries.firstOrNull { it.days == days }?.span ?: "ל־$days ימים"
 
         /** True for a line of a first list ([starter]). */
         fun isStarter(reason: String?): Boolean = reason == STARTER_REASON || reason == SURVEY_STARTER_REASON
@@ -129,7 +179,8 @@ class TripSizer(
         /** How many purchases of an item a list for [horizonDays] needs: one, or more when it runs out sooner. */
         fun timesIn(horizonDays: Int?, cadenceDays: Double?): Int {
             if (horizonDays == null || cadenceDays == null || cadenceDays <= 0.0) return 1
-            return (horizonDays / cadenceDays).roundToInt().coerceIn(1, 4)
+            // at most four purchases in a week or two; a monthly trip may hold bread for every few days
+            return (horizonDays / cadenceDays).roundToInt().coerceIn(1, max(4, horizonDays / 3))
         }
 
         /**

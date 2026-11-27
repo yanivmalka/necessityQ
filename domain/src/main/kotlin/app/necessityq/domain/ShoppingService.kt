@@ -79,6 +79,17 @@ class ShoppingService(
         choices.value = choices.value + (householdId to chosen)
     }
 
+    /** Per household, how often it shops ([TripCadence]); kept by the app. */
+    private val cadences = MutableStateFlow<Map<String, TripCadence>>(emptyMap())
+
+    /** How often [householdId] shops: the trip's list and its amounts are for until the trip after this one. */
+    fun setHouseholdCadence(householdId: String, cadence: TripCadence) {
+        cadences.value = cadences.value + (householdId to cadence)
+    }
+
+    /** What sizes a household's amounts, besides its purchases. */
+    private data class Sizing(val people: Double, val baseline: HouseholdBaseline?, val chosen: PackChoices, val tripDays: Int)
+
     /**
      * Purchases recorded before the household's size was (older versions) count as made at the size it has now, the
      * first time it is known: from then on, a household that grows or shrinks gets amounts that follow it at once,
@@ -108,8 +119,9 @@ class ShoppingService(
             people.map { it[householdId] ?: 0.0 }.distinctUntilChanged(),
             baselines.map { it[householdId] }.distinctUntilChanged(),
             choices.map { it[householdId] ?: PackChoices() }.distinctUntilChanged(),
-        ) { p, b, c -> Triple(p, b, c) },
-    ) { lines, allPurchases, suppressions, (people, baseline, chosen) ->
+            cadences.map { (it[householdId] ?: TripCadence.DEFAULT).days }.distinctUntilChanged(),
+        ) { p, b, c, d -> Sizing(p, b, c, d) },
+    ) { lines, allPurchases, suppressions, (people, baseline, chosen, tripDays) ->
         val today = today()
         val purchases = counted(allPurchases, lines)
         val stretch = suppressions.associate { it.itemId to ConsumptionStatsEngine.atHomeStretch(atHomeMarks(it, today)) }
@@ -119,11 +131,11 @@ class ShoppingService(
         val rejections = rejections(lines, suppressions, today)
         val suggestions = suggestionEngine.suggest(stats.values, needed, suppressions, today, rejections)
         val active = suppressions.filter { it.untilEpochDay > today.toEpochDay() }
-        val sizer = TripSizer(stats.values, people, baseline, chosen)
+        val sizer = TripSizer(stats.values, people, baseline, chosen, tripDays)
         // a household with no history yet: a first list from the survey's answers or its size
         val tripList = if (stats.isEmpty()) sizer.starter(needed + active.map { it.itemId })
-        else suggestionEngine.forNextTrip(stats.values, needed, suppressions, today, TRIP_DAYS, rejections = rejections)
-            .map { sizer.size(it, TRIP_DAYS) }
+        else suggestionEngine.forNextTrip(stats.values, needed, suppressions, today, tripDays, rejections = rejections)
+            .map { sizer.size(it, tripDays) }
         ListSnapshot(
             lines = lines,
             grouped = ListRules.grouped(lines),
@@ -512,8 +524,6 @@ class ShoppingService(
     }
 
     companion object {
-        /** The week's list looks this many days ahead (to the trip after the next one). */
-        const val TRIP_DAYS = 7
         private const val REJECTION_MEMORY_MILLIS = 60L * 86_400_000L
 
         /** Deterministic: checking the same line off twice (two members at once) records one purchase. */

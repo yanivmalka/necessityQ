@@ -1816,8 +1816,10 @@ private fun GenerateSheet(vm: AppViewModel, onDismiss: () -> Unit) {
     // the survey's answers just given (the saved ones come back a moment later)
     var answered by remember { mutableStateOf<app.necessityq.domain.HouseholdBaseline?>(null) }
     var mode by remember { mutableStateOf(GenerateMode.DUE) }
-    val proposal = remember(mode, answered, surveyOpen) {
-        if (surveyOpen) emptyList() else answered?.let { vm.proposeList(mode, it) } ?: vm.proposeList(mode)
+    // how often the household shops: chosen here, the amounts follow it at once (the saved one comes back later)
+    var cadence by remember { mutableStateOf(vm.meals.value.cadence) }
+    val proposal = remember(mode, answered, surveyOpen, cadence) {
+        if (surveyOpen) emptyList() else vm.proposeList(mode, answered ?: vm.meals.value.baseline, cadence)
     }
     var chosen by remember(proposal) { mutableStateOf(proposal.filter { it.preselected }.map { it.identity.id }.toSet()) }
     // amounts changed in the review, by item id (null value = "no amount")
@@ -1872,6 +1874,21 @@ private fun GenerateSheet(vm: AppViewModel, onDismiss: () -> Unit) {
                 GenerateMode.entries.forEach { m -> FilterChip(selected = mode == m, onClick = { mode = m }, label = { Text(m.label) }) }
             }
             Text(mode.hint, style = MaterialTheme.typography.bodySmall)
+            Text("קונים", style = MaterialTheme.typography.labelLarge)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                app.necessityq.domain.TripCadence.entries.forEach { c ->
+                    FilterChip(
+                        selected = cadence == c,
+                        onClick = { if (cadence != c) { cadence = c; vm.setCadence(c) } },
+                        label = { Text(c.label) },
+                    )
+                }
+            }
+            Text(
+                "הכמויות מחושבות עד הקנייה הבאה. מה שנגמר לאט יותר מוצע ביחידה אחת, רק כשהגיע זמנו.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             if (proposal.isEmpty()) {
                 Text("אין מה להציע — כל הפריטים כבר ברשימה, או שאין עדיין מספיק היסטוריה.", Modifier.padding(vertical = 16.dp))
             } else {
@@ -2475,7 +2492,7 @@ private fun TripListCard(count: Int, starter: Boolean, onBuild: () -> Unit) {
         Spacer(Modifier.width(8.dp))
         Text(
             if (starter) "רשימה ראשונה ($count מוצרים לפי הבית שלכם) · "
-            else "בניית רשימה לשבוע ($count מוצרים לפי הקצב שלכם) · ",
+            else "בניית רשימה עד הקנייה הבאה ($count מוצרים לפי הקצב שלכם) · ",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onPrimaryContainer,
             modifier = Modifier.weight(1f, fill = false),
