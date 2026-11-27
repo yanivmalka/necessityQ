@@ -155,7 +155,8 @@ class PackSizesTest {
     @Test fun `thirty eggs are one tray of thirty`() {
         assertEquals("מארז 30", PackSizes.packLabel("ביצים", null, pieces(30.0)))
         assertEquals("2 מארזים של 12", PackSizes.packLabel("ביצים", null, pieces(24.0)))
-        assertEquals("30 יח' (מארז 30)", PackSizes.describe("ביצים", null, pieces(30.0)))
+        assertEquals("מארז 30", PackSizes.describe("ביצים", null, pieces(30.0)))
+        assertEquals("7 יח'", PackSizes.describe("ביצים", null, pieces(7.0)))
         assertEquals(null, PackSizes.packLabel("ביצים", null, pieces(7.0)))
         assertEquals(null, PackSizes.packLabel("חלב", null, Quantity(1.0, QuantityUnit.LITER)))
         assertEquals(30L, PackSizes.piecesPerPack("ביצים", null, 30.0))

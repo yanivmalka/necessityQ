@@ -1604,7 +1604,10 @@ private fun ProductTile(
                                         modifier = Modifier.padding(end = 6.dp),
                                     )
                                 }
-                                if (showStepper) QuantityStepper(line.quantity, onMinus, onPlus, onSetQuantity, line.displayName, quantityCheck)
+                                if (showStepper) QuantityStepper(
+                                    line.quantity, onMinus, onPlus, onSetQuantity, line.displayName, quantityCheck,
+                                    label = line.quantity?.let { app.necessityq.domain.stepperAmount(line.name, line.variant, it, pack) },
+                                )
                             }
                         }
                     }
@@ -1903,8 +1906,9 @@ private fun GenerateSheet(vm: AppViewModel, onDismiss: () -> Unit) {
                         // the amount is editable here; changing it also selects the item
                         QuantityStepper(
                             quantity,
-                            onMinus = { quantities = quantities + (item.identity.id to stepIn(vm.packOf(item.identity.id), quantity, -1)) },
-                            onPlus = { quantities = quantities + (item.identity.id to stepIn(vm.packOf(item.identity.id), quantity, +1)); chosen = chosen + item.identity.id },
+                            onMinus = { quantities = quantities + (item.identity.id to stepIn(vm.packOf(item.identity.id), quantity, -1, item.identity)) },
+                            onPlus = { quantities = quantities + (item.identity.id to stepIn(vm.packOf(item.identity.id), quantity, +1, item.identity)); chosen = chosen + item.identity.id },
+                            label = quantity?.let { app.necessityq.domain.stepperAmount(item.identity.name, item.identity.variant, it, vm.packOf(item.identity.id)) },
                         )
                     }
                 }
@@ -2167,6 +2171,8 @@ fun QuantityStepper(
     onSet: ((Quantity?, Boolean) -> Unit)? = null,
     itemName: String = "",
     check: (Quantity) -> app.necessityq.domain.QuantityCheck? = { null },
+    /** The amount as shown between the buttons ("מארז 30"); null = [quantity] as it is. */
+    label: String? = null,
 ) {
     var editing by remember { mutableStateOf(false) }
     if (editing && onSet != null) QuantityEditDialog(quantity, itemName, check, onSet) { editing = false }
@@ -2184,7 +2190,7 @@ fun QuantityStepper(
                 .let { if (onSet != null) it.clickable(onClickLabel = "הקלדת כמות") { editing = true } else it },
             contentAlignment = Alignment.Center,
         ) {
-            Text(quantity?.format() ?: "—", fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center)
+            Text(label ?: quantity?.format() ?: "—", fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center)
         }
         IconButton(onClick = onMinus, modifier = Modifier.size(38.dp)) { Icon(Icons.Default.Remove, contentDescription = "פחות", Modifier.size(20.dp)) }
     }
@@ -2926,5 +2932,6 @@ private fun ReadingDialog(
     )
 }
 
-/** One pack more or less of what the household buys ([pack]), else one unit ([QuantitySteps.step]). */
-private fun stepIn(pack: app.necessityq.domain.Pack?, q: Quantity?, delta: Int): Quantity? = pack?.step(q, delta) ?: QuantitySteps.step(q, delta)
+/** One pack more or less of what the household buys ([pack]), else one unit of [item] ([QuantitySteps.step]). */
+private fun stepIn(pack: app.necessityq.domain.Pack?, q: Quantity?, delta: Int, item: app.necessityq.domain.ItemIdentity): Quantity? =
+    pack?.step(q, delta) ?: QuantitySteps.step(q, delta, item.name, item.variant)

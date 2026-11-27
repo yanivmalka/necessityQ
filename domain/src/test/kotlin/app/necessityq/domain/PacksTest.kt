@@ -41,15 +41,15 @@ class PacksTest {
         assertEquals(Quantity.pieces(16), yoghurt.nearest(Quantity.pieces(19)))
         assertEquals(Quantity.pieces(24), yoghurt.covering(Quantity.pieces(19)))
         assertEquals(Quantity.pieces(8), yoghurt.nearest(Quantity.pieces(3)))
-        assertEquals("16 יח' · 2 מארזים של 8", yoghurt.describe(Quantity.pieces(16)))
+        assertEquals("2 מארזים של 8", yoghurt.describe(Quantity.pieces(16)))
         assertEquals("19 יח'", yoghurt.describe(Quantity.pieces(19)))
         assertEquals(Quantity.pieces(24), yoghurt.step(Quantity.pieces(16), +1))
         assertEquals(Quantity.pieces(8), yoghurt.step(Quantity.pieces(16), -1))
         assertEquals(Quantity.pieces(8), yoghurt.step(Quantity.pieces(8), -1))
 
         val eggs = Pack(30)
-        assertEquals("30 יח' · מארז 30", eggs.describe(Quantity.pieces(30)))
-        assertEquals("2 חב' · 2 מארזים של 30", eggs.describe(Quantity(2.0, QuantityUnit.PACKAGE)))
+        assertEquals("מארז 30", eggs.describe(Quantity.pieces(30)))
+        assertEquals("2 מארזים של 30", eggs.describe(Quantity(2.0, QuantityUnit.PACKAGE)))
 
         val milk = Pack(1, liters(2.0))
         assertEquals("2 ליטר", milk.describe(liters(2.0)))

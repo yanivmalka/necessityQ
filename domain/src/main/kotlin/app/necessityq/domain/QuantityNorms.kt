@@ -170,13 +170,14 @@ object QuantityNorms {
 
     /**
      * For amounts the app puts on the list by itself (suggestions, past purchases, recipes, the menu): a slip
-     * becomes a usual amount — the household's own if it has one, otherwise one unit. Anything else is kept
+     * becomes a usual amount — the household's own if it has one, otherwise the item's first amount in the slip's kind
+     * ("300 ליטר חלב": a litre; "300 ביצים": one pack, see [QuantitySteps.firstFor]), else one unit. Anything else is kept
      * (a large one is flagged on the list, see [warningFor]).
      */
     fun homeSized(name: String, category: Category, quantity: Quantity?, householdUsual: Quantity? = null): Quantity? {
         val check = check(name, category, quantity, householdUsual) ?: return null
         if (check.level != QuantityLevel.ABSURD) return quantity
-        return householdUsual?.takeIf { check(name, category, it)?.level != QuantityLevel.ABSURD } ?: Quantity.pieces(1)
+        return householdUsual?.takeIf { check(name, category, it)?.level != QuantityLevel.ABSURD } ?: QuantitySteps.firstFor(name).takeIf { it.dimension == quantity?.dimension } ?: Quantity.pieces(1)
     }
 
     /** The usual upper amount in a readable unit close to the one used ("4 יח'", "3 ק\"ג", "1.5 ליטר"). */

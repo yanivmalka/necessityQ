@@ -179,9 +179,11 @@ object PackSizes {
 
     private const val MAX_PACKS_LABEL = 6L
 
-    /** [q] as shown on a line or a suggestion: "30 יח' (מארז 30)" when the pieces make whole packs. */
-    fun describe(name: String, variant: String?, q: Quantity): String =
-        q.format() + (packLabel(name, variant, q)?.let { " ($it)" } ?: "")
+    /**
+     * [q] as shown on a line or a suggestion: in packs when the pieces make whole packs — eggs are bought as "מארז 30",
+     * not as "30 יח'" — else as it is.
+     */
+    fun describe(name: String, variant: String?, q: Quantity): String = packLabel(name, variant, q) ?: q.format()
 
     /**
      * An amount read by a model as packs that can only be pieces: "30 חב' ביצים" is 30 eggs (one tray), as no home

@@ -229,6 +229,7 @@ fun ItemSheet(
                 ) {
                     QuantityStepper(line.quantity, onMinus = { vm.adjustQuantity(line, -1) }, onPlus = { vm.adjustQuantity(line, +1) }, onSet = { q, approved -> vm.changeQuantity(line, q, approved) },
                         itemName = line.displayName, check = { vm.quantityCheck(line, it) },
+                        label = line.quantity?.let { app.necessityq.domain.stepperAmount(line.name, line.variant, it, vm.packOf(line.itemId)) },
                     )
                     UnitChooser(line.quantity?.unit, app.necessityq.domain.QuantitySteps.choicesFor(line.name, line.category, line.quantity?.unit), Modifier.weight(1f)) { vm.setQuantityUnit(line, it) }
                 }
