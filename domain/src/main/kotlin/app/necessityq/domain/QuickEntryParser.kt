@@ -102,7 +102,21 @@ object QuickEntryParser {
         val nameText = tokens.joinToString(" ")
         if (nameText.isBlank()) return null
         val identity = ItemIdentity.fromText(nameText)
-        val quantity = amount?.takeIf { it > 0 }?.let { Quantity(it, unit ?: QuantityUnit.PIECE) }
+        val quantity = amount?.takeIf { it > 0 }?.let { Quantity(it, unit ?: bareUnit(identity, it)) }
         return ParsedEntry(identity, quantity, input, nameText)
+    }
+
+    /**
+     * A number with no unit: pieces, unless no home buys that many pieces of a thing sold by weight or volume —
+     * "750 גבינה לבנה" is 750 grams, not 750 tubs ("2 גבינה לבנה" stays two).
+     */
+    private fun bareUnit(item: ItemIdentity, amount: Double): QuantityUnit {
+        if (amount < 100.0 || amount % 50.0 != 0.0 || item.category == Category.OTHER) return QuantityUnit.PIECE
+        val choices = QuantitySteps.choicesFor(item.name, item.category)
+        return when {
+            QuantityUnit.GRAM in choices -> QuantityUnit.GRAM
+            QuantityUnit.LITER in choices -> QuantityUnit.MILLILITER
+            else -> QuantityUnit.PIECE
+        }
     }
 }

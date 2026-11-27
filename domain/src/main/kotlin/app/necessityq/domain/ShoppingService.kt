@@ -32,6 +32,11 @@ data class ListSnapshot(
     val atHome: Set<String> = emptySet(),
     /** The size of the household the amounts were worked out for ([HouseholdSize.people]); 0 when unknown. */
     val people: Double = 0.0,
+    /**
+     * Per item (lines and items with a history): the pack the household buys ([HouseholdPacks]). Every amount the
+     * app proposes, shows and steps goes by it, and so do the price and the order of the branch's products.
+     */
+    val packs: Map<String, Pack> = emptyMap(),
 )
 
 /**
@@ -66,6 +71,14 @@ class ShoppingService(
         baselines.value = baselines.value + (householdId to baseline)
     }
 
+    /** Per household, what it chose: per item the pack of its chosen product, per pack key ([PackSizes.keyFor]) a size. */
+    private val choices = MutableStateFlow<Map<String, PackChoices>>(emptyMap())
+
+    /** The packs [householdId] chose (its products at the branch, the pack sizes it picked): see [HouseholdPacks]. */
+    fun setHouseholdPacks(householdId: String, chosen: PackChoices) {
+        choices.value = choices.value + (householdId to chosen)
+    }
+
     /**
      * Purchases recorded before the household's size was (older versions) count as made at the size it has now, the
      * first time it is known: from then on, a household that grows or shrinks gets amounts that follow it at once,
@@ -94,8 +107,9 @@ class ShoppingService(
         combine(
             people.map { it[householdId] ?: 0.0 }.distinctUntilChanged(),
             baselines.map { it[householdId] }.distinctUntilChanged(),
-        ) { p, b -> p to b },
-    ) { lines, allPurchases, suppressions, (people, baseline) ->
+            choices.map { it[householdId] ?: PackChoices() }.distinctUntilChanged(),
+        ) { p, b, c -> Triple(p, b, c) },
+    ) { lines, allPurchases, suppressions, (people, baseline, chosen) ->
         val today = today()
         val purchases = counted(allPurchases, lines)
         val stretch = suppressions.associate { it.itemId to ConsumptionStatsEngine.atHomeStretch(atHomeMarks(it, today)) }
@@ -105,7 +119,7 @@ class ShoppingService(
         val rejections = rejections(lines, suppressions, today)
         val suggestions = suggestionEngine.suggest(stats.values, needed, suppressions, today, rejections)
         val active = suppressions.filter { it.untilEpochDay > today.toEpochDay() }
-        val sizer = TripSizer(stats.values, people, baseline)
+        val sizer = TripSizer(stats.values, people, baseline, chosen)
         // a household with no history yet: a first list from the survey's answers or its size
         val tripList = if (stats.isEmpty()) sizer.starter(needed + active.map { it.itemId })
         else suggestionEngine.forNextTrip(stats.values, needed, suppressions, today, TRIP_DAYS, rejections = rejections)
@@ -124,6 +138,8 @@ class ShoppingService(
             suppressed = active.map { it.itemId }.toSet(),
             atHome = active.filter { it.atHome }.map { it.itemId }.toSet(),
             people = people,
+            packs = (lines.map { it.identity } + stats.values.map { it.identity }).distinctBy { it.id }
+                .mapNotNull { id -> sizer.packFor(id)?.let { id.id to it } }.toMap(),
         )
     }
 
@@ -289,8 +305,9 @@ class ShoppingService(
     suspend fun purge(householdId: String, lines: List<ListLine>) =
         repository.purgeLines(householdId, lines.filter { it.status == LineStatus.REMOVED }.map { it.id })
 
-    suspend fun adjustQuantity(householdId: String, line: ListLine, delta: Int) {
-        val next = QuantitySteps.step(line.quantity, delta)
+    /** One tap on +/-: a whole pack of what the household buys ([pack]: a tray, a carton), else a unit. */
+    suspend fun adjustQuantity(householdId: String, line: ListLine, delta: Int, pack: Pack? = null) {
+        val next = pack?.step(line.quantity, delta) ?: QuantitySteps.step(line.quantity, delta)
         if (next != line.quantity) changeQuantity(householdId, line, next)
     }
 
