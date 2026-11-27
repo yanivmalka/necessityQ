@@ -325,6 +325,11 @@ async function sendAlerts(householdId: string, messageId: string, m: ChatMessage
  */
 const geminiKey = (): string => process.env.GEMINI_API_KEY ?? "";
 const geminiModel = (): string => process.env.GEMINI_MODEL || DEFAULT_MODEL;
+/**
+ * The Gemini client. v1beta explicitly: @google/genai 3.x calls v1 by default, where the "-latest" aliases and
+ * JSON-schema answers are not served ("models/gemini-flash-latest is not found for API version v1").
+ */
+const gemini = (): GoogleGenAI => new GoogleGenAI({ apiKey: geminiKey(), apiVersion: "v1beta" });
 
 /**
  * הבנת כוונה בהוספה לרשימה: reads free text the app did not understand ("משהו לכריכים לילדים") as grocery
@@ -356,7 +361,7 @@ export const interpretItems = onCall(
     });
     if (!allowed) throw new HttpsError("resource-exhausted", "daily limit reached");
 
-    const ai = new GoogleGenAI({ apiKey: geminiKey() });
+    const ai = gemini();
     const model = geminiModel();
     let items;
     try {
@@ -395,14 +400,15 @@ export const estimateBaseline = onCall(
     // no daily limit for now (a decision: one user while in development); the limits are decided with the
     // product's general model before launch (ROADMAP 0.6)
 
-    const ai = new GoogleGenAI({ apiKey: geminiKey() });
+    const ai = gemini();
     const model = geminiModel();
     let amounts;
     try {
       amounts = await estimateWithGemini(ai, model, ages, items);
     } catch (e) {
-      logger.error("baseline failed", { householdId, error: e instanceof Error ? e.message : String(e) });
-      throw new HttpsError("unavailable", "could not estimate right now");
+      const error = e instanceof Error ? e.message : String(e);
+      logger.error("baseline failed", { householdId, error });
+      throw new HttpsError("internal", `Gemini: ${error.slice(0, 300)}`);
     }
     // no household or user in the cache: only the ages and the estimate
     if (Object.keys(amounts).length > 0) {
@@ -446,14 +452,17 @@ export const suggestStarterList = onCall(
     });
     if (!allowed) throw new HttpsError("resource-exhausted", "daily limit reached");
 
-    const ai = new GoogleGenAI({ apiKey: geminiKey() });
+    const ai = gemini();
     const model = geminiModel();
     let items;
     try {
       items = await starterWithGemini(ai, model, request);
     } catch (e) {
-      logger.error("starter failed", { householdId, error: e instanceof Error ? e.message : String(e) });
-      throw new HttpsError("unavailable", "could not build the list right now");
+      const error = e instanceof Error ? e.message : String(e);
+      logger.error("starter failed", { householdId, error });
+      // "internal", not "unavailable": the app reads "unavailable" as no network. The model's own words go back,
+      // so the user (the developer) sees why the model refused (a bad key, an unknown model, a quota)
+      throw new HttpsError("internal", `Gemini: ${error.slice(0, 300)}`);
     }
     if (items.length > 0) {
       await cached.set({ ages: [...request.ages].sort((a, b) => a - b), days: request.days, items, model, at: FieldValue.serverTimestamp() });

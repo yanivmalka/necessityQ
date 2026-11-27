@@ -606,7 +606,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: app.necessityq.domain.EstimateException) {
-            AiListResult(failure = e.failure)
+            AiListResult(failure = e.failure, detail = e.detail)
         } catch (e: Exception) {
             AiListResult(failure = app.necessityq.domain.EstimateFailure.ERROR)
         }
@@ -619,6 +619,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         val cached: Boolean = false,
         val model: String? = null,
         val answered: Int = 0,
+        /** the server's words about the failure (the model's error), shown as they are */
+        val detail: String? = null,
     )
 
     /** The survey's amounts, whether the AI gave them, and if it did not, why. */

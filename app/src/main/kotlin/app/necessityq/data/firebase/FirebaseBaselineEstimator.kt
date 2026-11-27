@@ -34,9 +34,12 @@ class FirebaseBaselineEstimator(private val functions: FirebaseFunctions) : Base
                     FirebaseFunctionsException.Code.RESOURCE_EXHAUSTED -> EstimateFailure.LIMIT
                     FirebaseFunctionsException.Code.UNAUTHENTICATED -> EstimateFailure.SIGNED_OUT
                     FirebaseFunctionsException.Code.UNAVAILABLE -> EstimateFailure.OFFLINE
+                    // the server reached the model and the model refused (a bad key, an unknown model, a quota)
+                    FirebaseFunctionsException.Code.INTERNAL -> EstimateFailure.MODEL_ERROR
                     else -> EstimateFailure.ERROR
                 },
                 e,
+                detail = e.message,
             )
         } catch (e: java.io.IOException) {
             throw EstimateException(EstimateFailure.OFFLINE, e)

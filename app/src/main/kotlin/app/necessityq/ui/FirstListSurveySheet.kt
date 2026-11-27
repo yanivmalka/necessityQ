@@ -212,6 +212,7 @@ private fun failureText(f: app.necessityq.domain.EstimateFailure): String = when
     app.necessityq.domain.EstimateFailure.SIGNED_OUT -> "צריך להתחבר לחשבון כדי להשתמש ב-AI. מוצגות כמויות כלליות."
     app.necessityq.domain.EstimateFailure.BAD_REPLY -> "ה-AI החזיר תשובה שלא הצלחנו לקרוא. מוצגות כמויות כלליות; אפשר לנסות שוב."
     app.necessityq.domain.EstimateFailure.UNAVAILABLE -> "ה-AI לא זמין כאן (בלי בית משותף בענן). מוצגות כמויות כלליות."
+    app.necessityq.domain.EstimateFailure.MODEL_ERROR -> "הבקשה הגיעה לשרת, אבל Gemini סירב לענות. מוצגות כמויות כלליות."
     app.necessityq.domain.EstimateFailure.ERROR -> "אירעה שגיאה בפנייה ל-AI. מוצגות כמויות כלליות; אפשר לנסות שוב."
 }
 

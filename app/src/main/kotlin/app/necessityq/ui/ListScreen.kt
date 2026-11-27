@@ -1880,6 +1880,7 @@ private fun GeneratePage(vm: AppViewModel, kind: GenerateKind, onDismiss: () -> 
                 onGroups = { groups = it },
                 loading = aiLoading,
                 failure = aiResult?.failure,
+                detail = aiResult?.detail,
                 onAsk = { aiAsked++ },
             )
         } else if (added != null) {
@@ -2003,6 +2004,7 @@ private fun AiListStart(
     onGroups: (Map<app.necessityq.domain.AgeGroup, Int>) -> Unit,
     loading: Boolean,
     failure: app.necessityq.domain.EstimateFailure?,
+    detail: String?,
     onAsk: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2037,7 +2039,13 @@ private fun AiListStart(
                 Spacer(Modifier.width(10.dp))
                 Text("נשלח ל-AI. ה-AI בונה רשימה לבית שלכם… (עד דקה)", style = MaterialTheme.typography.bodyMedium)
             }
-            failure != null -> Text(aiListFailureText(failure), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+            failure != null -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(aiListFailureText(failure), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                // the exact error, so what went wrong is known and not guessed
+                detail?.takeIf { it.isNotBlank() }?.let {
+                    Text("פרטי השגיאה: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
         }
         val retryable = failure != app.necessityq.domain.EstimateFailure.LIMIT && failure != app.necessityq.domain.EstimateFailure.UNAVAILABLE
         if (!loading && (failure == null || retryable)) {
@@ -2058,6 +2066,7 @@ private fun aiListFailureText(f: app.necessityq.domain.EstimateFailure): String 
     app.necessityq.domain.EstimateFailure.SIGNED_OUT -> "צריך להתחבר לחשבון כדי להשתמש ב-AI."
     app.necessityq.domain.EstimateFailure.BAD_REPLY -> "ה-AI ענה, אבל בלי מוצרים שאפשר להוסיף (או שכולם כבר ברשימה)."
     app.necessityq.domain.EstimateFailure.UNAVAILABLE -> "ה-AI לא מוגדר בשרת (אין מפתח, או שהפונקציה עוד לא נפרסה)."
+    app.necessityq.domain.EstimateFailure.MODEL_ERROR -> "הבקשה הגיעה לשרת, אבל Gemini סירב לענות."
     app.necessityq.domain.EstimateFailure.ERROR -> "השרת קיבל את הבקשה, אבל הפנייה ל-AI נכשלה."
 }
 
