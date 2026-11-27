@@ -143,6 +143,10 @@ object ItemSearch {
         return if (strict.isEmpty() && q.words.size > 1) pass(relaxed = true) else strict
     }
 
+    /** Some of [names] has every word of [q], fully typed: the text names a known item and needs no reading. */
+    fun fitsFully(q: Query, names: Iterable<String>): Boolean =
+        names.any { score(q, words(it), prefixOk = false, relaxed = false) != null }
+
     /**
      * Generic items from a branch's [products] for [text] ("לחם" → "לחם אחיד", not "לחמית"), leaving out the
      * item ids in [exclude] (offered already).
