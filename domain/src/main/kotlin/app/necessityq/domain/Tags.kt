@@ -36,7 +36,7 @@ object ItemTags {
             }
         }
         when (stats?.classification) {
-            Classification.ROUTINE -> add(ItemTag(TagKind.ROUTINE, "קבוע"))
+            Classification.ROUTINE -> add(ItemTag(TagKind.ROUTINE, stats.cadenceDays?.let(Rhythm::text) ?: "בקצב קבוע"))
             Classification.OCCASIONAL -> add(ItemTag(TagKind.OCCASIONAL, "לפעמים"))
             Classification.ONE_OFF, null -> add(ItemTag(TagKind.SPECIAL, "מיוחד"))
         }

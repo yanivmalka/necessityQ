@@ -313,6 +313,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun proposeList(
         mode: app.necessityq.domain.GenerateMode,
         baseline: app.necessityq.domain.HouseholdBaseline? = meals.value.baseline,
+        /** How often the household shops, when it was just chosen (the saved one may not have come back yet). */
+        cadence: app.necessityq.domain.TripCadence = meals.value.cadence,
     ): List<app.necessityq.domain.GeneratedItem> {
         val snap = snapshot.value ?: return emptyList()
         val people = baseline?.makeup?.takeIf { meals.value.members.isEmpty() }?.people ?: snap.people
@@ -320,6 +322,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             mode, snap.stats.values, purchases.value, snap.lines, java.time.LocalDate.now(),
             suppressed = snap.suppressed, atHome = snap.atHome, rejections = snap.rejections, people = people,
             baseline = baseline,
+            horizonDays = cadence.days.toLong(),
             // the same packs as the list, the suggestions and the +/− (HouseholdPacks)
             chosen = app.necessityq.domain.PackChoices(snap.packs, meals.value.packs),
         )
@@ -524,6 +527,20 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                 else loadedMeals.map { hid to it?.baseline }
             }.distinctUntilChanged().collect { (hid, baseline) -> container.service.setHouseholdBaseline(hid, baseline) }
         }
+        // how often the household shops sets how long every trip's amounts last
+        viewModelScope.launch {
+            householdId.flatMapLatest { hid ->
+                if (hid == null) emptyFlow<Pair<String, app.necessityq.domain.TripCadence>>()
+                else loadedMeals.map { hid to (it?.cadence ?: app.necessityq.domain.TripCadence.DEFAULT) }
+            }.distinctUntilChanged().collect { (hid, cadence) -> container.service.setHouseholdCadence(hid, cadence) }
+        }
+    }
+
+    /** How often the household shops: every trip's list and its amounts follow it at once. */
+    fun setCadence(cadence: app.necessityq.domain.TripCadence) {
+        val (hid, _, _) = ctx() ?: return
+        container.service.setHouseholdCadence(hid, cadence)
+        updateMeals { it.copy(cadence = cadence) }
     }
 
     // ---------- first-list survey ----------
@@ -809,9 +826,12 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     /** The first-run questions answered: their features, and — for a shared household — straight on to inviting. */
-    fun finishFirstRun(value: app.necessityq.domain.Features, invite: Boolean) {
+    fun finishFirstRun(value: app.necessityq.domain.Features, invite: Boolean, cadence: app.necessityq.domain.TripCadence) {
+        // the replay shows the questions again without changing the household's data
+        val replay = firstRunReplay.value != null
         endFirstRunReplay(restore = false)
         setFeatures(value)
+        if (!replay) setCadence(cadence)
         if (invite && isShared) openInvite.value = true
     }
 

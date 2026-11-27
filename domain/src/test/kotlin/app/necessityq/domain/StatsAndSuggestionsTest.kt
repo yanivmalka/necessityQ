@@ -254,4 +254,42 @@ class StatsAndSuggestionsTest {
         val bought = line.copy(status = LineStatus.BOUGHT)
         assertTrue(ListRules.decideAdd(listOf(bought), line.itemId, null) is ListRules.AddDecision.New)
     }
+
+    // ---------- an item's own rhythm (#103) ----------
+
+    private fun propose(purchases: List<Purchase>, today: LocalDate, horizon: Long = 7) = ListGenerator.propose(
+        GenerateMode.DUE, engine.compute(purchases, today).values, purchases, emptyList(), today, horizon, zone,
+    )
+
+    @Test fun `three purchases at even gaps are a rhythm, whatever the gap`() {
+        for ((days, words) in listOf(14 to "כל שבועיים", 30 to "כל חודש", 60 to "כל חודשיים", 182 to "כל חצי שנה")) {
+            val purchases = every("שקיות אשפה", days, 3)
+            val today = start.plusDays(days * 3L - 2)
+            val stats = engine.compute(purchases, today).values.single()
+            assertEquals(words, Classification.ROUTINE, stats.classification)
+            val item = propose(purchases, today).single()
+            assertTrue(words, item.preselected)
+            assertTrue(item.reason, item.reason.contains(words))
+        }
+    }
+
+    @Test fun `uneven gaps are not a rhythm yet`() {
+        val purchases = listOf(purchase("נייר כסף", start), purchase("נייר כסף", start.plusDays(7)), purchase("נייר כסף", start.plusDays(47)))
+        assertEquals(Classification.OCCASIONAL, engine.compute(purchases, start.plusDays(50)).values.single().classification)
+    }
+
+    @Test fun `two purchases are offered with a question, not ticked`() {
+        val purchases = every("מלח", 30, 2)
+        val item = propose(purchases, start.plusDays(58)).single()
+        assertTrue(!item.preselected)
+        assertEquals("נקנה פעמיים, בערך כל חודש · נראה שנגמר. לקנות?", item.reason)
+    }
+
+    @Test fun `a rhythm in words`() {
+        assertEquals("כל שבוע", Rhythm.text(7.0))
+        assertEquals("כל 3 שבועות", Rhythm.text(21.0))
+        assertEquals("כל חודשיים", Rhythm.text(61.0))
+        assertEquals("כל חצי שנה", Rhythm.text(180.0))
+        assertEquals("כל שנה", Rhythm.text(365.0))
+    }
 }

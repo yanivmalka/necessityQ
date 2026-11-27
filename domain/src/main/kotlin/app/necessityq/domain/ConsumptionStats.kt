@@ -8,7 +8,43 @@ import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.roundToLong
 
+/**
+ * [ROUTINE]: bought at a steady rhythm ([Rhythm.isSteady]: at least three purchases, at fairly even gaps), whatever
+ * the gap is (every week or every half year). [OCCASIONAL]: bought more than once, but not yet at a steady rhythm.
+ */
 enum class Classification { ROUTINE, OCCASIONAL, ONE_OFF }
+
+/**
+ * An item's own rhythm, in words a household uses ("כל שבועיים", "כל חצי שנה"), and when it counts as steady: at
+ * least [MIN_PURCHASES] purchases whose gaps stray from the usual one by at most [MAX_VARIATION] of it (median).
+ */
+object Rhythm {
+    const val MIN_PURCHASES = 3
+    const val MAX_VARIATION = 0.35
+
+    fun isSteady(purchaseDays: Int, cadenceDays: Double?, spreadDays: Double?): Boolean =
+        purchaseDays >= MIN_PURCHASES && cadenceDays != null && cadenceDays > 0.0 &&
+            spreadDays != null && spreadDays / cadenceDays <= MAX_VARIATION
+
+    /** "כל יום", "כל 4 ימים", "כל שבוע", "כל שבועיים", "כל חודש", "כל חודשיים", "כל חצי שנה", "כל שנה". */
+    fun text(cadenceDays: Double): String {
+        val d = cadenceDays
+        return when {
+            d < 1.5 -> "כל יום"
+            d < 2.5 -> "כל יומיים"
+            d < 5.5 -> "כל ${d.roundToLong()} ימים"
+            d < 10.5 -> "כל שבוע"
+            d < 17.5 -> "כל שבועיים"
+            d < 25.0 -> "כל 3 שבועות"
+            d < 45.0 -> "כל חודש"
+            d < 75.0 -> "כל חודשיים"
+            d < 105.0 -> "כל 3 חודשים"
+            d < 135.0 -> "כל 4 חודשים"
+            d < 270.0 -> "כל חצי שנה"
+            else -> "כל שנה"
+        }
+    }
+}
 
 /** Everything the statistics engine knows about one generic item for one household. */
 data class ItemStats(
@@ -39,6 +75,9 @@ data class ItemStats(
 ) {
     /** True when the last purchase is an estimate because later trips were not documented. */
     val lastPurchaseEstimated: Boolean get() = estimatedLastPurchase != lastPurchase
+
+    /** Bought at a steady rhythm ([Rhythm.isSteady]): on the trip it is due, it is added without asking. */
+    val hasRhythm: Boolean get() = classification == Classification.ROUTINE
 
     fun daysSinceLast(today: LocalDate): Long = ChronoUnit.DAYS.between(estimatedLastPurchase, today)
 
@@ -179,7 +218,7 @@ class ConsumptionStatsEngine(
         val confidence = baseConfidence * (1.0 - (variation * 0.5).coerceAtMost(0.5)) * estimatePenalty
 
         val classification = when {
-            trips.size >= 4 && variation < 0.6 -> Classification.ROUTINE
+            Rhythm.isSteady(trips.size, measured, spread) -> Classification.ROUTINE
             trips.size >= 2 -> Classification.OCCASIONAL
             else -> Classification.ONE_OFF
         }

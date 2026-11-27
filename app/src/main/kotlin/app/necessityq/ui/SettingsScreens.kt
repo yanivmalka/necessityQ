@@ -276,6 +276,18 @@ fun SettingsScreen(vm: AppViewModel, modifier: Modifier = Modifier, initialTab: 
 private fun ListSettings(vm: AppViewModel) {
     val current by vm.display.collectAsStateWithLifecycle()
     val features by vm.features.collectAsStateWithLifecycle()
+    val meals by vm.meals.collectAsStateWithLifecycle()
+    SettingsCard("כל כמה זמן קונים", "הכמויות ברשימה מחושבות עד הקנייה הבאה. מה שנגמר לאט יותר מוצע ביחידה אחת, רק כשהגיע זמנו.") {
+        app.necessityq.domain.TripCadence.entries.forEach { c ->
+            Row(
+                Modifier.fillMaxWidth().clickable { vm.setCadence(c) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(selected = meals.cadence == c, onClick = { vm.setCadence(c) })
+                Text(c.label)
+            }
+        }
+    }
     SettingsCard("נגיעה בפריט", "מה קורה כשנוגעים בפריט ברשימה.") {
         app.necessityq.platform.TapMode.entries.forEach { mode ->
             Row(

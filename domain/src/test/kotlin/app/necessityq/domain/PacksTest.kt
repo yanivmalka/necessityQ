@@ -53,7 +53,7 @@ class PacksTest {
 
         val milk = Pack(1, liters(2.0))
         assertEquals("2 ליטר", milk.describe(liters(2.0)))
-        assertEquals("4 ליטר · 2 × 2 ליטר", milk.describe(liters(4.0)))
+        assertEquals("4 ליטר · 2 יח' של 2 ליטר", milk.describe(liters(4.0)))
         assertEquals(liters(4.0), milk.step(liters(2.0), +1))
         assertEquals(liters(2.0), milk.nearest(liters(1.5)))
         assertEquals(Quantity(2.0, QuantityUnit.PACKAGE), milk.step(Quantity(1.0, QuantityUnit.PACKAGE), +1))
@@ -115,5 +115,13 @@ class PacksTest {
         assertEquals(Quantity.pieces(2), QuickEntryParser.parse("2 גבינה לבנה")!!.quantity)
         assertEquals(Quantity.pieces(30), QuickEntryParser.parse("30 מלפפונים")!!.quantity)
         assertEquals(Quantity.pieces(80), QuickEntryParser.parse("80 הפתעות לפסוקים")!!.quantity)
+    }
+
+    @Test fun `a pack of cans says its size in words (#103)`() {
+        // "מארז 4 × 140 גרם" read in a Hebrew line as 140 packs of 4 grams
+        val tuna = Pack(4, Quantity(140.0, QuantityUnit.GRAM))
+        assertEquals("מארז 4 יח' של 140 גרם", tuna.packsText(1))
+        assertEquals("2 מארזים של 4 יח' של 140 גרם", tuna.packsText(2))
+        assertFalse(tuna.label().contains("×"))
     }
 }

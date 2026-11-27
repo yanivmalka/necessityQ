@@ -46,8 +46,11 @@ object CartLoad {
 // ---------- list from past purchases ----------
 
 enum class GenerateMode(val label: String, val hint: String) {
-    DUE("מה שעומד להיגמר", "לפי קצב הקנייה: מה שהגיע זמנו או ייגמר עד הקנייה הבאה"),
-    ROUTINE("כל הקבועים", "כל מה שנקנה באופן קבוע, בכמות הרגילה"),
+    DUE(
+        "מה שעומד להיגמר",
+        "מה שהגיע זמנו או ייגמר עד הקנייה הבאה. מה שנקנה 3 פעמים בהפרשים דומים מסומן מראש; מה שנקנה רק פעמיים מוצע עם שאלה.",
+    ),
+    ROUTINE("כל מה שיש לו קצב", "כל מה שנקנה לפחות 3 פעמים בהפרשים דומים (כל שבוע, כל חודש, כל חצי שנה), בכמות הרגילה"),
     LAST_TRIP("כמו הקנייה הקודמת", "כל מה שנקנה בפעם האחרונה"),
 }
 
@@ -65,7 +68,7 @@ data class GeneratedItem(
  * Builds a list from the household's history. Nothing is added by itself — the result is a proposal;
  * accepted lines are marked [LineSource.AUTO] so they stay distinguishable from what people added.
  *
- * [GenerateMode.DUE] is the same list as the "בניית רשימה לשבוע" card ([SuggestionEngine.forNextTrip]), preselected;
+ * [GenerateMode.DUE] is the same list as the "בניית רשימה עד הקנייה הבאה" card ([SuggestionEngine.forNextTrip]), preselected;
  * items whose rhythm is still a guess are shown below it, not preselected. A household with no history yet gets a
  * first list from the survey's answers or its size ([TripSizer.starter]). Amounts come from [TripSizer], as everywhere else.
  */
@@ -76,7 +79,8 @@ object ListGenerator {
         purchases: List<Purchase>,
         current: List<ListLine>,
         today: LocalDate,
-        horizonDays: Long = 7,
+        /** How often the household shops ([TripCadence.days]): the list is for until the trip after this one. */
+        horizonDays: Long = TripCadence.DEFAULT.days.toLong(),
         zone: ZoneId = ZoneId.systemDefault(),
         /** Items the household recently turned down: still shown (they asked for the whole list), but not preselected. */
         suppressed: Set<String> = emptySet(),
@@ -92,28 +96,31 @@ object ListGenerator {
         chosen: PackChoices = PackChoices(),
     ): List<GeneratedItem> {
         val onList = current.filter { it.status == LineStatus.NEEDED }.map { it.itemId }.toSet()
-        val sizer = TripSizer(stats, people, baseline, chosen)
+        val sizer = TripSizer(stats, people, baseline, chosen, horizonDays.toInt())
         val horizon = horizonDays.toInt()
         val proposed = when (mode) {
             GenerateMode.DUE -> {
+                // what runs out before the trip after this one: by its steady rhythm, preselected; by two purchases
+                // (or uneven gaps), offered with a question
                 val week = SuggestionEngine().forNextTrip(stats, onList, emptyList(), today, horizon, rejections = rejections)
+                val byId = stats.associateBy { it.itemId }
                 val weekIds = week.map { it.itemId }.toSet()
+                val due = week.map { w ->
+                    val s = byId[w.itemId]
+                    if (s == null || s.hasRhythm) GeneratedItem(w.identity, w.quantity, w.reason)
+                    else GeneratedItem(w.identity, w.quantity, askReason(s), preselected = false)
+                }
                 val unsure = stats.mapNotNull { s ->
                     if (s.itemId in weekIds) return@mapNotNull null
-                    val due = s.nextDue ?: return@mapNotNull null
-                    val cadence = s.cadenceDays ?: return@mapNotNull null
-                    if (s.confidence <= 0.0 || due.isAfter(today.plusDays(horizonDays))) return@mapNotNull null
-                    GeneratedItem(
-                        s.identity, s.typicalQuantity,
-                        SuggestionEngine.runningLowReason(cadence, s.daysSinceLast(today), s.lastPurchaseEstimated) + " · קצב לא קבוע",
-                        preselected = false,
-                    )
+                    val next = s.nextDue ?: return@mapNotNull null
+                    if (s.cadenceDays == null || s.confidence <= 0.0 || next.isAfter(today.plusDays(horizonDays))) return@mapNotNull null
+                    GeneratedItem(s.identity, s.typicalQuantity, askReason(s), preselected = false)
                 }
                 val starter = if (stats.isEmpty()) sizer.starter(onList).map { GeneratedItem(it.identity, it.quantity, it.reason) } else emptyList()
-                week.map { GeneratedItem(it.identity, it.quantity, it.reason) } + unsure + starter
+                due + unsure + starter
             }
-            GenerateMode.ROUTINE -> stats.filter { it.classification == Classification.ROUTINE }.map { s ->
-                GeneratedItem(s.identity, s.typicalQuantity, "קבוע · נקנה ${s.purchaseDays} פעמים")
+            GenerateMode.ROUTINE -> stats.filter { it.hasRhythm }.map { s ->
+                GeneratedItem(s.identity, s.typicalQuantity, "נקנה " + Rhythm.text(s.cadenceDays!!) + " · ${s.purchaseDays} פעמים")
             }
             GenerateMode.LAST_TRIP -> {
                 val day: (Purchase) -> LocalDate = { Instant.ofEpochMilli(it.boughtAtMillis).atZone(zone).toLocalDate() }
@@ -144,6 +151,15 @@ object ListGenerator {
             }
             .sortedWith(compareBy({ it.identity.category.order }, { it.identity.displayName }))
     }
+}
+
+/**
+ * Why an item without a steady rhythm yet is offered, as a question: "נקנה פעמיים, בערך כל חודש · נראה שנגמר. לקנות?".
+ */
+fun askReason(s: ItemStats): String {
+    val times = if (s.purchaseDays == 2) "פעמיים" else "${s.purchaseDays} פעמים"
+    val every = s.cadenceDays?.let { ", בערך " + Rhythm.text(it) } ?: ""
+    return "נקנה $times$every · נראה שנגמר. לקנות?"
 }
 
 // ---------- reset ----------

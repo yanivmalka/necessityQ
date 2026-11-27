@@ -22,9 +22,12 @@ data class Pack(val pieces: Int = 1, val each: Quantity? = null) {
     /** All it holds by weight or volume (8 × 150 גרם = 1.2 ק"ג); null when it is counted only. */
     val total: Quantity? get() = each?.let { Quantity.fromBase(it.baseAmount * pieces, it.dimension) }
 
-    /** "מארז 30", "2 ליטר", "מארז 8 × 150 גרם", "6 × 1.5 ליטר". */
+    /**
+     * "מארז 30", "2 ליטר", "מארז 8 יח' של 150 גרם", "6 יח' של 1.5 ליטר". In words and not "8 × 150": in a Hebrew line
+     * the numbers around "×" swap places, and "4 × 140 גרם" read as 140 packs of 4 grams.
+     */
     fun label(): String = when {
-        pieces > 1 && each != null -> "$pieces × ${each.format()}"
+        pieces > 1 && each != null -> "$pieces יח' של ${each.format()}"
         pieces > 1 -> "מארז $pieces"
         each != null -> each.format()
         else -> "יחידה"
@@ -76,7 +79,7 @@ data class Pack(val pieces: Int = 1, val each: Quantity? = null) {
     }
 
     /**
-     * [q] as shown with its packs: "30 יח' · מארז 30", "16 יח' · 2 מארזים של 8", "4 ליטר · 2 × 2 ליטר". Just [q] when
+     * [q] as shown with its packs: "30 יח' · מארז 30", "16 יח' · 2 מארזים של 8", "4 ליטר · 2 יח' של 2 ליטר". Just [q] when
      * it is a single pack whose content says it all ("2 ליטר"), or when it is not a whole number of packs.
      */
     fun describe(q: Quantity): String {
@@ -103,9 +106,9 @@ data class Pack(val pieces: Int = 1, val each: Quantity? = null) {
         return packsText(whole.toInt())
     }
 
-    /** "מארז 30", "2 מארזים של 30", "2 × 2 ליטר", "2 מארזים של 8 × 150 גרם". */
+    /** "מארז 30", "2 מארזים של 30", "2 יח' של 2 ליטר", "2 מארזים של 8 יח' של 150 גרם". */
     fun packsText(packs: Int): String = when {
-        pieces == 1 && each != null -> if (packs == 1) each.format() else "$packs × ${each.format()}"
+        pieces == 1 && each != null -> if (packs == 1) each.format() else "$packs יח' של ${each.format()}"
         packs == 1 -> if (each != null) "מארז ${label()}" else label()
         else -> "$packs מארזים של " + if (each != null) label() else "$pieces"
     }
@@ -128,7 +131,7 @@ data class PackChoices(val products: Map<String, Pack> = emptyMap(), val sizes: 
 
 /**
  * The amount of a line or a suggestion as shown: in packs when the household's pack is known ("מארז 30",
- * "4 ליטר · 2 × 2 ליטר"), else with the item's usual packs ([PackSizes.describe]).
+ * "4 ליטר · 2 יח' של 2 ליטר"), else with the item's usual packs ([PackSizes.describe]).
  */
 fun describeAmount(name: String, variant: String?, q: Quantity, pack: Pack?): String =
     pack?.describe(q) ?: PackSizes.describe(name, variant, q)
