@@ -200,8 +200,7 @@ fun ListScreen(
     val query by vm.query.collectAsStateWithLifecycle()
     // the list is narrowed only once typing pauses, not on every letter typed or deleted
     val searchQuery by vm.searchQuery.collectAsStateWithLifecycle()
-    val completions by vm.completions.collectAsStateWithLifecycle()
-    val onlineCompletions by vm.onlineCompletions.collectAsStateWithLifecycle()
+    val completionGroups by vm.completionGroups.collectAsStateWithLifecycle()
     val reading by vm.reading.collectAsStateWithLifecycle()
     val mode by vm.mode.collectAsStateWithLifecycle()
     val sort by vm.sort.collectAsStateWithLifecycle()
@@ -653,23 +652,21 @@ fun ListScreen(
         (reading as? AppViewModel.QuickReading.Reading)?.let { r ->
             ReadingProgress(r.text, onCancel = vm::cancelReading, modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp))
         }
-        if (completions.isNotEmpty() || onlineCompletions.isNotEmpty()) {
-            // what the household buys first, then generic items from the branch's products — two scrolling rows
-            val entries = buildList<Pair<String?, app.necessityq.domain.ItemIdentity?>> {
-                if (completions.isNotEmpty() && onlineCompletions.isNotEmpty()) add("שלי" to null)
-                completions.forEach { add(null to it) }
-                if (onlineCompletions.isNotEmpty()) add("מהסופר" to null)
-                onlineCompletions.forEach { add("" to it) }
-            }
-            TwoRowStrip(entries, fullHeight = { it.second == null }) { (label, item) ->
-                when {
-                    item == null -> CompletionLabel(label.orEmpty())
-                    label == null -> SuggestionChip(onClick = { vm.pickCompletion(item) }, label = { Text(item.displayName) })
-                    else -> SuggestionChip(
-                        onClick = { vm.pickCompletion(item) },
-                        label = { Text(item.displayName) },
-                        icon = { Icon(Icons.Default.Storefront, null, Modifier.size(16.dp)) },
+        if (completionGroups.isNotEmpty()) {
+            // by supermarket section, the one of what was typed first: related products are offered, each in its own
+            // section ("לחם": the breads, then לחמית under the snacks) — two scrolling rows
+            val entries = buildList<Any> { completionGroups.forEach { g -> add(g); addAll(g.items) } }
+            TwoRowStrip(entries, fullHeight = { it is app.necessityq.domain.CompletionGroup }) { entry ->
+                when (entry) {
+                    is app.necessityq.domain.CompletionGroup -> CompletionGroupLabel(entry.category, entry.main)
+                    is app.necessityq.domain.Completion -> SuggestionChip(
+                        onClick = { vm.pickCompletion(entry.identity) },
+                        label = { Text(entry.identity.displayName) },
+                        icon = if (entry.source == app.necessityq.domain.Completion.Source.STORE) {
+                            { Icon(Icons.Default.Storefront, null, Modifier.size(16.dp)) }
+                        } else null,
                     )
+                    else -> {}
                 }
             }
         }
@@ -2202,14 +2199,19 @@ fun TagBadge(tag: ItemTag) {
     )
 }
 
+/** The supermarket section of a group of suggestions; the section of what was typed stands out. */
 @Composable
-private fun CompletionLabel(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(top = 8.dp),
-    )
+private fun CompletionGroupLabel(category: Category, main: Boolean) {
+    Row(Modifier.padding(start = 6.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(categoryColor(category)))
+        Spacer(Modifier.width(4.dp))
+        Text(
+            category.label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (main) FontWeight.Bold else FontWeight.Normal,
+            color = if (main) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 /** Chips in two rows that scroll sideways, so suggestions never push the list off the screen. */
