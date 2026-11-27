@@ -29,6 +29,7 @@ import { Branch, Snapshot } from "./model";
 import { downloadTzameret, snapshotStats } from "./nutrition";
 import { DAILY_LIMIT, DEFAULT_MODEL, cacheKey, dayKey, readWithGemini, validateRequest } from "./interpret";
 import { baselineCacheKey, estimateWithGemini, validateBaselineRequest } from "./baseline";
+import { STARTER_DAILY_LIMIT, starterCacheKey, starterWithGemini, validateStarterRequest } from "./starter";
 
 // Israeli region: several retailer portals refuse requests from abroad.
 setGlobalOptions({ region: "me-west1", maxInstances: 2 });
@@ -409,5 +410,55 @@ export const estimateBaseline = onCall(
     }
     logger.info("baseline", { householdId, items: Object.keys(amounts).length });
     return { amounts, cached: false };
+  },
+);
+
+/**
+ * רשימה עם AI: the AI chooses the products and amounts of a household's list from the ages at home and the span
+ * (see starter.ts). Members only; cached by makeup, span and catalogue; a daily limit per household on questions
+ * that reach the model.
+ */
+export const suggestStarterList = onCall(
+  { memory: "256MiB", timeoutSeconds: 90, invoker: "public" },
+  async (req) => {
+    if (!req.auth) throw new HttpsError("unauthenticated", "sign in first");
+    if (!geminiKey()) throw new HttpsError("failed-precondition", "GEMINI_API_KEY is not set");
+    const request = validateStarterRequest(req.data);
+    if (typeof request === "string") throw new HttpsError("invalid-argument", request);
+    const { householdId } = request;
+    const household = db.doc(`households/${householdId}`);
+    const members = ((await household.get()).get("members") as string[] | undefined) ?? [];
+    if (!members.includes(req.auth.uid)) throw new HttpsError("permission-denied", "not a member");
+
+    const cached = db.doc(`starterCache/${starterCacheKey(request)}`);
+    const hit = await cached.get();
+    if (hit.exists) {
+      logger.info("starter", { householdId, cached: true });
+      return { items: hit.get("items") ?? [], model: hit.get("model") ?? null, cached: true };
+    }
+
+    const usage = household.collection("usage").doc(`starter-${dayKey(new Date())}`);
+    const allowed = await db.runTransaction(async (tx) => {
+      const count = ((await tx.get(usage)).get("count") as number | undefined) ?? 0;
+      if (count >= STARTER_DAILY_LIMIT) return false;
+      tx.set(usage, { count: count + 1 }, { merge: true });
+      return true;
+    });
+    if (!allowed) throw new HttpsError("resource-exhausted", "daily limit reached");
+
+    const ai = new GoogleGenAI({ apiKey: geminiKey() });
+    const model = geminiModel();
+    let items;
+    try {
+      items = await starterWithGemini(ai, model, request);
+    } catch (e) {
+      logger.error("starter failed", { householdId, error: e instanceof Error ? e.message : String(e) });
+      throw new HttpsError("unavailable", "could not build the list right now");
+    }
+    if (items.length > 0) {
+      await cached.set({ ages: [...request.ages].sort((a, b) => a - b), days: request.days, items, model, at: FieldValue.serverTimestamp() });
+    }
+    logger.info("starter", { householdId, cached: false, items: items.length, model });
+    return { items, model, cached: false };
   },
 );

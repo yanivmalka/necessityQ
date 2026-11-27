@@ -1824,14 +1824,31 @@ private enum class GenerateKind { PAST, AI }
 @Composable
 private fun GeneratePage(vm: AppViewModel, kind: GenerateKind, onDismiss: () -> Unit) {
     val ai = kind == GenerateKind.AI
-    // by AI: the one-time survey (where the AI proposes the amounts) comes first; from past purchases there is no survey
-    var surveyOpen by remember { mutableStateOf(ai && vm.shouldAskSurvey()) }
+    // the survey of amounts is no longer part of building a list: the AI way asks the AI for the whole list
+    var surveyOpen by remember { mutableStateOf(false) }
+    // the AI way: who lives at home (profiles, or what was told once), then the AI's answer
+    val profiles = remember { vm.meals.value.members.isNotEmpty() }
+    val knownMakeup = remember { vm.surveyMakeup() }
+    var groups by remember { mutableStateOf(mapOf(app.necessityq.domain.AgeGroup.ADULTS to 2)) }
+    val makeup = if (!knownMakeup.isEmpty) knownMakeup else app.necessityq.domain.HouseholdMakeup.ofGroups(groups)
+    var aiAsked by remember { mutableStateOf(0) }
+    var aiLoading by remember { mutableStateOf(false) }
+    var aiResult by remember { mutableStateOf<AppViewModel.AiListResult?>(null) }
+    LaunchedEffect(aiAsked) {
+        if (!ai || aiAsked == 0) return@LaunchedEffect
+        aiLoading = true
+        aiResult = null
+        aiResult = vm.suggestAiList(makeup)
+        aiLoading = false
+    }
+    // with the household known, the AI is asked at once
+    LaunchedEffect(Unit) { if (ai && !knownMakeup.isEmpty) aiAsked = 1 }
     // the survey's answers just given (the saved ones come back a moment later)
     var answered by remember { mutableStateOf<app.necessityq.domain.HouseholdBaseline?>(null) }
     var mode by remember { mutableStateOf(GenerateMode.DUE) }
     // how often the household shops (first run, settings): the amounts are until the next trip
     val cadence = vm.meals.value.cadence
-    val proposal = remember(mode, answered, surveyOpen, cadence) {
+    val proposal = if (ai) aiResult?.items.orEmpty() else remember(mode, answered, surveyOpen, cadence) {
         if (surveyOpen) emptyList() else vm.proposeList(mode, answered ?: vm.meals.value.baseline, cadence)
     }
     var chosen by remember(proposal) { mutableStateOf(proposal.filter { it.preselected }.map { it.identity.id }.toSet()) }
@@ -1854,6 +1871,17 @@ private fun GeneratePage(vm: AppViewModel, kind: GenerateKind, onDismiss: () -> 
         if (surveyOpen) {
             val done = { b: app.necessityq.domain.HouseholdBaseline -> vm.saveSurvey(b); answered = b; surveyOpen = false }
             FirstListSurveyContent(vm, saved = answered ?: vm.meals.value.baseline, onSave = done, onSkip = done)
+        } else if (ai && added == null && (aiResult == null || aiResult?.items.isNullOrEmpty())) {
+            AiListStart(
+                makeup = makeup,
+                profiles = profiles,
+                known = !knownMakeup.isEmpty,
+                groups = groups,
+                onGroups = { groups = it },
+                loading = aiLoading,
+                failure = aiResult?.failure,
+                onAsk = { aiAsked++ },
+            )
         } else if (added != null) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(if (added.size == 1) "נוסף פריט אחד" else "נוספו ${added.size} פריטים", style = MaterialTheme.typography.titleLarge)
@@ -1877,11 +1905,20 @@ private fun GeneratePage(vm: AppViewModel, kind: GenerateKind, onDismiss: () -> 
             }
         } else Column(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(if (ai) "רשימה לפי הבית שלכם (AI)" else "רשימה מקניות עבר", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-                if (ai) TextButton(onClick = { surveyOpen = true }) { Text("עריכת הכמויות") }
+                Text(if (ai) "רשימה שבנה AI" else "רשימה מקניות עבר", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                if (ai) TextButton(onClick = { aiAsked++ }, enabled = !aiLoading) { Text("לבקש שוב") }
+            }
+            aiResult?.takeIf { ai }?.let { r ->
+                Text(
+                    "ה-AI (${r.model ?: "Gemini"}) בחר ${r.items.size} מוצרים ל${makeup.describe()}, עד הקנייה הבאה" +
+                        (if (r.cached) ". תשובה שמורה: אותו הרכב בית כבר נשלח בעבר." else ".") ,
+                    Modifier.fillMaxWidth().clip(NqShapes.Panel).background(MaterialTheme.colorScheme.primaryContainer).padding(10.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
             }
             Text(
-                (if (ai) "הרשימה נבנתה מהכמויות שה-AI הציע לבית שלכם ושתיקנתם. " else "הרשימה נבנתה מהקניות שלכם בעבר, בלי AI. ") +
+                (if (ai) "" else "הרשימה נבנתה מהקניות שלכם בעבר, בלי AI. ") +
                     "בדקו מה יתווסף: אפשר לבטל סימון ולשנות כמות לפני ההוספה. מה שהוצע מראש והסרתם, האפליקציה תזכור ותציע פחות. " +
                     "הפריטים יסומנו \"אוטומטי\".",
                 style = MaterialTheme.typography.bodySmall,
@@ -1954,6 +1991,74 @@ private fun GeneratePage(vm: AppViewModel, kind: GenerateKind, onDismiss: () -> 
         }
       }
     }
+}
+
+/** The AI way before the answer: who lives at home (when not known), what will be sent, waiting, or what went wrong. */
+@Composable
+private fun AiListStart(
+    makeup: app.necessityq.domain.HouseholdMakeup,
+    profiles: Boolean,
+    known: Boolean,
+    groups: Map<app.necessityq.domain.AgeGroup, Int>,
+    onGroups: (Map<app.necessityq.domain.AgeGroup, Int>) -> Unit,
+    loading: Boolean,
+    failure: app.necessityq.domain.EstimateFailure?,
+    onAsk: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("רשימה שבנה AI", style = MaterialTheme.typography.titleLarge)
+        Text(
+            "ה-AI (Gemini של Google) בוחר אילו מוצרים ובאיזו כמות, לפי מי שגר בבית ועד הקנייה הבאה. " +
+                "נשלחים רק הגילים, בלי שמות, ורשימת המוצרים שהאפליקציה מכירה. לפני ההוספה תוכלו לבדוק ולתקן.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (known) {
+            Text((if (profiles) "לפי בני המשפחה: " else "מי שגר בבית: ") + makeup.describe(), style = MaterialTheme.typography.bodyMedium)
+        } else {
+            Text("מי גר בבית?", style = MaterialTheme.typography.titleSmall)
+            app.necessityq.domain.AgeGroup.entries.forEach { g ->
+                val n = groups[g] ?: 0
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(g.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    IconButton(onClick = { onGroups(groups + (g to (n - 1).coerceAtLeast(0))) }, enabled = n > 0 && !loading) {
+                        Icon(Icons.Default.Remove, contentDescription = "פחות ${g.label}")
+                    }
+                    Text(n.toString(), Modifier.width(32.dp), textAlign = TextAlign.Center)
+                    IconButton(onClick = { onGroups(groups + (g to (n + 1).coerceAtMost(app.necessityq.domain.HouseholdMakeup.MAX_PEOPLE))) }, enabled = !loading) {
+                        Icon(Icons.Default.Add, contentDescription = "עוד ${g.label}")
+                    }
+                }
+            }
+        }
+        when {
+            loading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(10.dp))
+                Text("נשלח ל-AI. ה-AI בונה רשימה לבית שלכם… (עד דקה)", style = MaterialTheme.typography.bodyMedium)
+            }
+            failure != null -> Text(aiListFailureText(failure), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+        }
+        val retryable = failure != app.necessityq.domain.EstimateFailure.LIMIT && failure != app.necessityq.domain.EstimateFailure.UNAVAILABLE
+        if (!loading && (failure == null || retryable)) {
+            Button(onClick = onAsk, enabled = !makeup.isEmpty, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.AutoAwesome, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(if (failure != null) "לנסות שוב" else "בניית רשימה עם AI")
+            }
+        }
+    }
+}
+
+/** Why the AI list did not come, in plain words. */
+private fun aiListFailureText(f: app.necessityq.domain.EstimateFailure): String = when (f) {
+    app.necessityq.domain.EstimateFailure.OFFLINE -> "אין חיבור לאינטרנט, ולכן הבקשה לא הגיעה ל-AI."
+    app.necessityq.domain.EstimateFailure.TIMEOUT -> "ה-AI לא ענה בזמן."
+    app.necessityq.domain.EstimateFailure.LIMIT -> "הגעתם למכסה היומית של בקשות ל-AI. מחר אפשר שוב."
+    app.necessityq.domain.EstimateFailure.SIGNED_OUT -> "צריך להתחבר לחשבון כדי להשתמש ב-AI."
+    app.necessityq.domain.EstimateFailure.BAD_REPLY -> "ה-AI ענה, אבל בלי מוצרים שאפשר להוסיף (או שכולם כבר ברשימה)."
+    app.necessityq.domain.EstimateFailure.UNAVAILABLE -> "ה-AI לא מוגדר בשרת (אין מפתח, או שהפונקציה עוד לא נפרסה)."
+    app.necessityq.domain.EstimateFailure.ERROR -> "השרת קיבל את הבקשה, אבל הפנייה ל-AI נכשלה."
 }
 
 @Composable
