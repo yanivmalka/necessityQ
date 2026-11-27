@@ -401,8 +401,9 @@ export const estimateBaseline = onCall(
     try {
       amounts = await estimateWithGemini(ai, model, ages, items);
     } catch (e) {
-      logger.error("baseline failed", { householdId, error: e instanceof Error ? e.message : String(e) });
-      throw new HttpsError("unavailable", "could not estimate right now");
+      const error = e instanceof Error ? e.message : String(e);
+      logger.error("baseline failed", { householdId, error });
+      throw new HttpsError("internal", `Gemini: ${error.slice(0, 300)}`);
     }
     // no household or user in the cache: only the ages and the estimate
     if (Object.keys(amounts).length > 0) {
@@ -452,8 +453,11 @@ export const suggestStarterList = onCall(
     try {
       items = await starterWithGemini(ai, model, request);
     } catch (e) {
-      logger.error("starter failed", { householdId, error: e instanceof Error ? e.message : String(e) });
-      throw new HttpsError("unavailable", "could not build the list right now");
+      const error = e instanceof Error ? e.message : String(e);
+      logger.error("starter failed", { householdId, error });
+      // "internal", not "unavailable": the app reads "unavailable" as no network. The model's own words go back,
+      // so the user (the developer) sees why the model refused (a bad key, an unknown model, a quota)
+      throw new HttpsError("internal", `Gemini: ${error.slice(0, 300)}`);
     }
     if (items.length > 0) {
       await cached.set({ ages: [...request.ages].sort((a, b) => a - b), days: request.days, items, model, at: FieldValue.serverTimestamp() });

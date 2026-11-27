@@ -34,10 +34,13 @@ class FirebaseListSuggester(private val functions: FirebaseFunctions) : ListSugg
                     FirebaseFunctionsException.Code.RESOURCE_EXHAUSTED -> EstimateFailure.LIMIT
                     FirebaseFunctionsException.Code.UNAUTHENTICATED -> EstimateFailure.SIGNED_OUT
                     FirebaseFunctionsException.Code.UNAVAILABLE -> EstimateFailure.OFFLINE
+                    // the server reached the model and the model refused (a bad key, an unknown model, a quota)
+                    FirebaseFunctionsException.Code.INTERNAL -> EstimateFailure.MODEL_ERROR
                     FirebaseFunctionsException.Code.FAILED_PRECONDITION, FirebaseFunctionsException.Code.NOT_FOUND -> EstimateFailure.UNAVAILABLE
                     else -> EstimateFailure.ERROR
                 },
                 e,
+                detail = e.message,
             )
         } catch (e: java.io.IOException) {
             throw EstimateException(EstimateFailure.OFFLINE, e)
