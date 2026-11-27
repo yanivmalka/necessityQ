@@ -102,7 +102,7 @@ The text is Hebrew, typed quickly on a phone: it may be one product, a misspelli
 Return the items to put on the list:
 - name: the generic product in Hebrew, as Israelis write it on a shopping list, without brand or package size ("גבינה צהובה", "חזה עוף", "פלפל"). Fix misspellings. Plural or singular as people usually write it on a list.
 - variant: only a kind that matters when buying ("5%", "ללא לקטוז", "אדום", "פרוס"), otherwise an empty string.
-- amount and unit: only when the text gives an amount, or the purpose clearly implies one (a household of N people, "לשבוע"); otherwise amount 0 and unit "none". Units: piece, package, kilogram, gram, liter, milliliter.
+- amount and unit: only when the text gives an amount, or the purpose clearly implies one (a household of N people, "לשבוע"); otherwise amount 0 and unit "none". Units: piece, package, kilogram, gram, liter, milliliter. "piece" is one single item (one egg, one pitta, one bottle); "package" is one pack as sold (a tray of eggs, a bag of pittas): 30 eggs are 30 pieces or 1 package, never 30 packages.
 - category: the supermarket section.
 
 Rules:

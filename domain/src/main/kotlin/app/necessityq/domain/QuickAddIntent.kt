@@ -59,6 +59,7 @@ object QuickAddIntent {
             else id.copy(category = Category.entries.firstOrNull { it.name == item.category } ?: Category.OTHER)
         }
         val quantity = item.amount?.takeIf { it > 0 }?.let { Quantity(it, units[item.unit] ?: QuantityUnit.PIECE) }
+            ?.let { PackSizes.asPieces(item.name, item.variant, it) }
         ProposedItem(identity, quantity)
     }.distinctBy { it.identity.id }
 }

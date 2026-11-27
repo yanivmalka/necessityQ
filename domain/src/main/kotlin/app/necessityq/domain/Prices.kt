@@ -74,6 +74,37 @@ data class BranchProduct(
      */
     val pricePerKilo: Double?
         get() = if (soldByWeight) priceUnitKilos?.let { price / it } else null
+
+    /**
+     * How many pieces one package holds, for a product sold by the pack (a tray of 30 eggs, 10 pittas, a six-pack
+     * of water): the file's amount when its unit is pieces, else the count in the name ("30 יח'", "מארז 12",
+     * "6X1.5 ליטר"). Null when it is one piece or not known.
+     */
+    val piecesPerPack: Double?
+        get() {
+            if (soldByWeight) return null
+            packageSize?.takeIf { PackCounts.isPieceUnit(unit) && it >= 2.0 && it <= PackCounts.MAX }?.let { return it }
+            return PackCounts.inName(name)
+        }
+}
+
+/** Pieces per package of a product, from its unit or its name. */
+object PackCounts {
+    const val MAX = 500.0
+    private val pieceUnits = setOf("יח", "יחידה", "יחידות", "יחי", "unit", "units", "pcs")
+    private val countWords = "יח|יחידות|יחידה|ביצים|פיתות|לחמניות|גלילים|גליל|שקיות|חיתולים|טיטולים|מגבונים|שקיקים|קפסולות|בקבוקים|פחיות|גביעים|טורטיות"
+    private val counted = Regex("""(\d{1,3})\s*(?:$countWords)(?![\p{L}])""")
+    private val pack = Regex("""(?:מארז|שישיית|מארז של)\s*(\d{1,3})""")
+    private val times = Regex("""(\d{1,3})\s*[xX×*]\s*\d""")
+
+    fun isPieceUnit(unit: String): Boolean = HebrewText.matchKey(unit).replace("'", "").replace(".", "").trim() in pieceUnits
+
+    fun inName(name: String): Double? {
+        val n = name.replace('׳', '\'').replace("'", "")
+        val found = counted.find(n) ?: pack.find(n) ?: times.find(n) ?: return null
+        val v = found.groupValues[1].toDoubleOrNull() ?: return null
+        return v.takeIf { it >= 2.0 && it <= MAX }
+    }
 }
 
 /**
@@ -460,12 +491,27 @@ object ListCost {
      * Produce sold by weight but counted in pieces ("7 לימונים") uses the typical weight of a piece
      * ([gramsPerPiece], see [PieceWeights]); null when that is not known, so no number is made up.
      */
-    fun packages(quantity: Quantity?, weighted: Boolean, gramsPerPiece: Double? = null): Double? = when (quantity?.unit) {
+    fun packages(quantity: Quantity?, weighted: Boolean, gramsPerPiece: Double? = null, piecesPerPack: Double? = null): Double? = when (quantity?.unit) {
         null -> 1.0
-        QuantityUnit.PIECE, QuantityUnit.PACKAGE ->
-            if (weighted && quantity.unit == QuantityUnit.PIECE) gramsPerPiece?.let { quantity.amount * it / 1000.0 } else quantity.amount
+        QuantityUnit.PIECE, QuantityUnit.PACKAGE -> when {
+            weighted && quantity.unit == QuantityUnit.PIECE -> gramsPerPiece?.let { quantity.amount * it / 1000.0 }
+            // 30 eggs are one tray of 30: pieces of a product sold by the pack are counted in packs
+            quantity.unit == QuantityUnit.PIECE && piecesPerPack != null && piecesPerPack >= 2.0 ->
+                kotlin.math.ceil(quantity.amount / piecesPerPack - 1e-9).coerceAtLeast(1.0)
+            else -> quantity.amount
+        }
         QuantityUnit.KILOGRAM, QuantityUnit.LITER -> if (weighted) quantity.amount else 1.0
         QuantityUnit.GRAM, QuantityUnit.MILLILITER -> if (weighted) quantity.amount / 1000.0 else 1.0
+    }
+
+    /**
+     * Pieces per package for [line] priced by [product]: the product's own pack when known, else the item's usual
+     * packs ([PackSizes.piecesPerPack]); null when the line is not in pieces or the item is not sold in packs.
+     */
+    fun piecesPerPack(line: ListLine, product: BranchProduct?): Double? {
+        val q = line.quantity?.takeIf { it.unit == QuantityUnit.PIECE } ?: return null
+        product?.piecesPerPack?.let { return it }
+        return PackSizes.piecesPerPack(line.name, line.variant, q.amount)?.toDouble()
     }
 
     fun of(lines: List<ListLine>, householdPrices: Map<String, Double>, branch: Map<String, ItemPriceInfo>): ListCostEstimate {
@@ -481,7 +527,7 @@ object ListCost {
                 own != null -> (own * PriceEstimate.units(line.quantity)).let { low += it; high += it }
                 info?.preferred != null -> {
                     val p = info.preferred
-                    val n = packages(line.quantity, p.soldByWeight, grams) ?: continue
+                    val n = packages(line.quantity, p.soldByWeight, grams, piecesPerPack(line, p)) ?: continue
                     // a weight on the list is priced per kilo; unknown unit of the price → not priced
                     val each = if (p.soldByWeight && line.quantity != null) p.pricePerKilo ?: continue else p.price
                     (each * n).let { low += it; high += it }
@@ -499,7 +545,7 @@ object ListCost {
                         firstByWeight && line.quantity != null -> continue
                         ItemPrices.byWeight(info.candidates) && !info.perKilo -> continue
                         else -> {
-                            val n = packages(line.quantity, firstByWeight, grams) ?: continue
+                            val n = packages(line.quantity, firstByWeight, grams, piecesPerPack(line, null)) ?: continue
                             low += info.low * n
                             high += info.high * n
                         }

@@ -138,4 +138,63 @@ class PackSizesTest {
         assertEquals(Quantity.pieces(10), PackSizes.toBuy("פיתה", Quantity.pieces(8)))
         assertEquals(Quantity.pieces(12), PackSizes.toBuy("פיתות", Quantity.pieces(11)))
     }
+
+    // ---------- pieces and packs (eggs: 30 eggs are one tray, not 30 trays) ----------
+
+    private fun pieces(x: Double) = Quantity(x, QuantityUnit.PIECE)
+    private fun packs(x: Double) = Quantity(x, QuantityUnit.PACKAGE)
+
+    @Test fun `packs stay packs when rounded to what the shop sells`() {
+        assertEquals(packs(1.0), PackSizes.nearest("פיתות", packs(1.0)))
+        assertEquals(packs(2.0), PackSizes.toBuy("פיתות", packs(2.0)))
+        assertEquals(packs(1.0), PackSizes.nearest("ביצים", packs(1.0)))
+        // pieces still round to whole packs of pieces
+        assertEquals(pieces(12.0), PackSizes.toBuy("ביצים", pieces(10.0)))
+    }
+
+    @Test fun `thirty eggs are one tray of thirty`() {
+        assertEquals("מארז 30", PackSizes.packLabel("ביצים", null, pieces(30.0)))
+        assertEquals("2 מארזים של 12", PackSizes.packLabel("ביצים", null, pieces(24.0)))
+        assertEquals("30 יח' (מארז 30)", PackSizes.describe("ביצים", null, pieces(30.0)))
+        assertEquals(null, PackSizes.packLabel("ביצים", null, pieces(7.0)))
+        assertEquals(null, PackSizes.packLabel("חלב", null, Quantity(1.0, QuantityUnit.LITER)))
+        assertEquals(30L, PackSizes.piecesPerPack("ביצים", null, 30.0))
+        assertEquals(12L, PackSizes.piecesPerPack("ביצים", null, 10.0))
+    }
+
+    @Test fun `a model's thirty packs of eggs are thirty eggs`() {
+        assertEquals(pieces(30.0), PackSizes.asPieces("ביצים", null, packs(30.0)))
+        assertEquals(packs(2.0), PackSizes.asPieces("ביצים", null, packs(2.0)))
+        assertEquals(packs(30.0), PackSizes.asPieces("חלב", null, packs(30.0)))
+    }
+
+    @Test fun `pieces of a product sold by the pack are priced per pack`() {
+        fun egg(name: String, size: Double?, unit: String) =
+            BranchProduct("1", name, "", size, unit, false, false, 25.0, null, "", 25.0, 25.0)
+        assertEquals(30.0, egg("ביצים L", 30.0, "יחידה").piecesPerPack!!, 1e-9)
+        assertEquals(12.0, egg("ביצים גדולות 12 יח'", null, "").piecesPerPack!!, 1e-9)
+        assertEquals(6.0, egg("מים מינרליים 6X1.5 ליטר", null, "").piecesPerPack!!, 1e-9)
+        assertEquals(null, egg("חלב 3% 1 ליטר", 1.0, "ליטר").piecesPerPack)
+        assertEquals(1.0, ListCost.packages(pieces(30.0), weighted = false, piecesPerPack = 30.0)!!, 1e-9)
+        assertEquals(2.0, ListCost.packages(pieces(24.0), weighted = false, piecesPerPack = 12.0)!!, 1e-9)
+        assertEquals(1.0, ListCost.packages(pieces(6.0), weighted = false, piecesPerPack = 30.0)!!, 1e-9)
+        // without a pack size the count is as before
+        assertEquals(30.0, ListCost.packages(pieces(30.0), weighted = false)!!, 1e-9)
+
+        val line = ListLine(
+            id = "e", itemId = "ביצים", name = "ביצים", variant = null, category = Category.DAIRY, quantity = pieces(30.0), note = null,
+            status = LineStatus.NEEDED, source = LineSource.MANUAL, addedBy = "u", addedAtMillis = 0, updatedAtMillis = 0,
+        )
+        val tray = egg("ביצים L", 30.0, "יחידה")
+        val chosen = ListCost.of(listOf(line), emptyMap(), mapOf("ביצים" to ItemPriceInfo("b", 25.0, 25.0, listOf(tray), tray)))
+        assertEquals(25.0, chosen.low, 1e-9)
+        // no product chosen: the item's usual packs (a tray of 30)
+        val range = ListCost.of(listOf(line), emptyMap(), mapOf("ביצים" to ItemPriceInfo("b", 25.0, 25.0, listOf(tray), null)))
+        assertEquals(25.0, range.low, 1e-9)
+    }
+
+    @Test fun `thirty trays of eggs is a slip`() {
+        assertTrue(QuantityNorms.check("ביצים", Category.DAIRY, packs(30.0))!!.isUnusual)
+        assertFalse(QuantityNorms.check("ביצים", Category.DAIRY, pieces(30.0))!!.isUnusual)
+    }
 }

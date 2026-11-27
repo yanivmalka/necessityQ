@@ -93,6 +93,16 @@ object ItemSearch {
         else -> null
     }
 
+    /** [word] is the construct form ("ביצי", "תפוחי") of what was [typed] in another form ("ביצים", "תפוח"). */
+    private fun isConstruct(typed: String, word: String): Boolean =
+        word.length > 2 && word.endsWith("י") && !typed.endsWith("י") && word != typed
+
+    /** [phrase] is a catalogue name of the item [q] names ("שוקי עוף" for "שוקיים"). */
+    private fun sameItem(q: Query, phrase: String): Boolean {
+        val meant = Catalog.lookup(q.words.joinToString(" ")) ?: return false
+        return Catalog.lookup(phrase)?.name == meant.name
+    }
+
     /** How a name fits: its [score] (higher is better), and whether it is [close] (every word, as typed or in another form). */
     data class Match(val score: Int, val close: Boolean)
 
@@ -108,6 +118,8 @@ object ItemSearch {
         var total = 0
         var matched = 0
         var beginningOfWord = false
+        val matchedAt = HashSet<Int>()
+        val constructs = mutableListOf<Int>()
         q.words.forEachIndexed { i, typed ->
             val last = i == q.words.lastIndex
             var best: Fit? = null
@@ -121,6 +133,8 @@ object ItemSearch {
                 if (!relaxed) return null
             } else {
                 if (b == Fit.PREFIX) beginningOfWord = true else matched++
+                matchedAt += at
+                if (b == Fit.FORM && isConstruct(typed, name[at]) && at < name.lastIndex) constructs += at
                 total += b.points * 10
                 if (i == 0 && at == 0) total += 15 // what the thing is: the first word typed is its first word
             }
@@ -128,6 +142,10 @@ object ItemSearch {
         if (relaxed && matched == 0) return null
         if (name.size == q.words.size) total += 5 // nothing more than what was typed
         if (q.colors && name.any { it in colorWords }) total += 8
+        // "ביצים" is not "ביצי שוקולד": a word in its construct form joined to a word that was not typed names
+        // another thing ("תפוחי אדמה" are not "תפוחים"), unless the pair is a name of what was typed ("שוקי עוף").
+        // It is not offered at all: typing "ביצי" (or "ביצי שו") still finds it
+        if (constructs.any { j -> j + 1 !in matchedAt && !sameItem(q, "${name[j]} ${name[j + 1]}") }) return null
         val close = !relaxed && !(beginningOfWord && lastIsWord)
         return Match(total - name.size, close)
     }
@@ -157,6 +175,17 @@ object ItemSearch {
             .map { Ranked(it.first, it.second) }
         val strict = pass(relaxed = false)
         return if (strict.none { it.match.close } && q.words.size > 1) strict + pass(relaxed = true).filter { r -> strict.none { it.value == r.value } } else strict
+    }
+
+    /**
+     * [name] is what [text] means, as the quick-add box reads it: every word, as typed or in another form, and the
+     * last one may still be being typed. A longer word that begins with a whole word typed is only related
+     * ("לחם" is not "לחמית"), so it does not count. Text with no naming words compares as any part of the name.
+     */
+    fun nameMatches(text: String, name: String, vocabulary: Vocabulary): Boolean {
+        val q = query(text) ?: return HebrewText.matchKey(name).contains(HebrewText.matchKey(text))
+        val lastIsWord = vocabulary.isWord(q.words.last())
+        return match(q, words(name), prefixOk = true, lastIsWord, relaxed = false)?.close == true
     }
 
     /** Some of [names] has every word of [q], fully typed: the text names a known item and needs no reading. */

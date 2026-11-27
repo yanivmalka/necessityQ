@@ -26,6 +26,8 @@ class ItemSearchTest {
         product("13", "חלב 3% 1 ליטר", "תנובה"),
         product("14", "קוטג' 5% 250 גרם", "טרה"),
         product("15", "קוטג' 9% 250 גרם", "תנובה"),
+        product("16", "ביצי שוקולד הפתעה", "קינדר"),
+        product("17", "ביצים L 12 יח'"),
     )
 
     private fun stats(text: String): ItemStats {
@@ -136,5 +138,19 @@ class ItemSearchTest {
         assertFalse(ItemSearch.sameForm("לחם", "לחמית"))
         assertFalse(ItemSearch.sameForm("חלב", "חלבה"))
         assertFalse(ItemSearch.sameForm("לבן", "לבנה"))
+    }
+
+    @Test
+    fun `eggs are not chocolate eggs, and apples are not potatoes`() {
+        val g = groups("ביצים")
+        assertEquals("ביצים", names(g.first().items).first())
+        assertFalse(g.toString(), g.all().any { it.contains("שוקולד") })
+        // what is typed as the construct form still finds it
+        assertTrue(ItemSearch.nameMatches("ביצי שוקולד", "ביצי שוקולד הפתעה", ItemSearch.vocabulary(emptyList())))
+        val q = ItemSearch.query("תפוחים")!!
+        val ranked = ItemSearch.rank(q, listOf("תפוחים", "תפוחי אדמה"), ItemSearch.vocabulary(emptyList())) { listOf(it) }
+        assertEquals(listOf("תפוחים"), ranked.map { it.value })
+        // a pair that is a name of the item typed still counts
+        assertTrue(groups("שוקיים").first().items.any { it.identity.name == "שוקיים" })
     }
 }

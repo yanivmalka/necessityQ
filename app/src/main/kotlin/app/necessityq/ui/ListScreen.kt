@@ -283,7 +283,7 @@ fun ListScreen(
     val chatItemIds = remember(messages) { messages.map { it.itemId }.toSet() }
     // the quick-add box also searches the list: what is typed narrows the open lines (on top of the filter)
     val searchText = remember(searchQuery) { if (searchQuery.isBlank()) "" else QuickEntryParser.parse(searchQuery)?.item?.displayName ?: searchQuery.trim() }
-    val listFilter = remember(filter, searchText) { if (searchText.isBlank() || filter.text.isNotBlank()) filter else filter.copy(text = searchText) }
+    val listFilter = remember(filter, searchText) { if (searchText.isBlank() || filter.text.isNotBlank()) filter else filter.copy(text = searchText, wholeWords = true) }
     // a split trip: each stop shows its own list (items added since, not in the split, show at every stop)
     val splitting = shopping && tripStops.size > 1 && tripAssignment.isNotEmpty()
     val shownLines = remember(snapshot?.lines, splitting, tripAssignment, activeStop) {
@@ -1546,7 +1546,7 @@ private fun ProductTile(
                                     if (showQuantityText) {
                                         Spacer(Modifier.width(8.dp))
                                         Text(
-                                            line.quantity!!.format() + (weight?.let { "  " + app.necessityq.domain.PieceWeights.label(it) } ?: ""),
+                                            app.necessityq.domain.PackSizes.describe(line.name, line.variant, line.quantity!!) + (weight?.let { "  " + app.necessityq.domain.PieceWeights.label(it) } ?: ""),
                                             fontWeight = FontWeight.SemiBold,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.clip(NqShapes.Pill)
@@ -2559,7 +2559,7 @@ private fun RunningLowCard(s: Suggestion, info: String, onAdd: () -> Unit, onDis
             Column(Modifier.weight(1f).padding(top = 10.dp)) {
                 Text(name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 // the amount, and where it came from when it is not just the usual purchase ("לפי 4 נפשות")
-                listOfNotNull(s.quantity?.format(), s.quantityNote).joinToString(" · ").ifEmpty { null }?.let {
+                listOfNotNull(s.quantity?.let { app.necessityq.domain.PackSizes.describe(s.identity.name, s.identity.variant, it) }, s.quantityNote).joinToString(" · ").ifEmpty { null }?.let {
                     Text(
                         it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2, overflow = TextOverflow.Ellipsis,

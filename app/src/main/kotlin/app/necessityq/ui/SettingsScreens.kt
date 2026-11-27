@@ -113,6 +113,7 @@ fun AccountScreen(vm: AppViewModel, account: Account, modifier: Modifier = Modif
     else Text("גרסה זו פועלת במצב מכשיר יחיד, ללא חשבון.")
     PermissionsCard()
     SampleDataCard(vm)
+    if (vm.canRunQuickChecks(account)) QuickChecksCard(vm)
     // "הדגמת התחלה": only for the accounts in FirstRunDemo
     if (vm.canReplayFirstRun(account)) {
         var confirm by remember { mutableStateOf(false) }
@@ -656,6 +657,46 @@ private fun NotifySettings(vm: AppViewModel) {
 }
 
 /** A group of settings about one thing: a card with a title, an optional line of explanation, and the options. */
+/** Shortcuts for the manual checks of 0.5 (test accounts only): the situations at once, instead of days of use. */
+@Composable
+private fun QuickChecksCard(vm: AppViewModel) {
+    var amounts by remember { mutableStateOf<List<app.necessityq.domain.QuickChecks.AmountCheck>?>(null) }
+    SettingsCard(
+        "בדיקות מהירות (0.5)",
+        "קיצורים לבדיקות 8, 9, 10, 13, 14 ו-15 ברשימת הבדיקה. הם פועלים על הבית הנוכחי ועל ההצעות שמוצגות עכשיו.",
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(horizontal = 4.dp)) {
+            OutlinedButton(onClick = vm::quickCheckAccuracy) { Text("דיוק: 6 הצעות שהוכרעו (4 נקנו, 2 נמחקו)") }
+            Text(
+                "ההיסטוריה לא משתנה (הקניות נמחקות ממנה), אבל 2 ההצעות שנמחקו נספרות כדחייה.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(onClick = { vm.quickCheckAtHomeTwice() }) { Text("\"יש לי בבית\" פעמיים על ההצעה הראשונה") }
+            OutlinedButton(onClick = { vm.quickCheckDismissThrice() }) { Text("דחייה שלוש פעמים של ההצעה הראשונה") }
+            OutlinedButton(onClick = { amounts = vm.quickCheckAmounts() }) { Text("בדיקת כמויות בכל ההצעות") }
+        }
+    }
+    amounts?.let { list ->
+        val bad = list.filter { it.problem != null }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { amounts = null },
+            title = { Text(if (bad.isEmpty()) "כל ${list.size} הכמויות תקינות" else "${bad.size} מתוך ${list.size} כמויות לבדיקה") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    (bad + list.filter { it.problem == null }).forEach { c ->
+                        Text(
+                            "${c.name}: ${c.amount}" + (c.problem?.let { " · $it" } ?: ""),
+                            color = if (c.problem != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { amounts = null }) { Text("סגירה") } },
+        )
+    }
+}
+
 @Composable
 private fun SettingsCard(title: String, hint: String? = null, content: @Composable () -> Unit) {
     Column(

@@ -174,6 +174,12 @@ data class ListFilter(
     val missingOnly: Boolean = false,
     /** Only products that have a conversation in the current shopping. */
     val withChatOnly: Boolean = false,
+    /**
+     * [text] is what was typed in the quick-add box: compared word by word, like the quick-add suggestions
+     * ([ItemSearch]), so "לחם" shows the breads on the list and not "לחמית". The filter panel's own search keeps
+     * matching any part of a name ("עגב").
+     */
+    val wholeWords: Boolean = false,
 ) {
     val isActive: Boolean
         get() = text.isNotBlank() || source != SourceFilter.ALL || categories.isNotEmpty() || missingOnly || withChatOnly
@@ -196,9 +202,13 @@ data class ListFilter(
         return parts.joinToString(" · ")
     }
 
-    fun matches(line: ListLine, chatItemIds: Set<String> = emptySet()): Boolean {
+    fun matches(
+        line: ListLine,
+        chatItemIds: Set<String> = emptySet(),
+        vocabulary: ItemSearch.Vocabulary? = null,
+    ): Boolean {
         if (withChatOnly && line.itemId !in chatItemIds) return false
-        if (text.isNotBlank() && !HebrewText.matchKey(line.displayName).contains(HebrewText.matchKey(text))) return false
+        if (text.isNotBlank() && !matchesText(line.displayName, vocabulary)) return false
         when (source) {
             SourceFilter.ALL -> Unit
             SourceFilter.MANUAL -> if (!line.isManual) return false
@@ -212,8 +222,15 @@ data class ListFilter(
     }
 
     /** Applies to open lines only; bought and removed lines pass through untouched. */
-    fun apply(lines: List<ListLine>, chatItemIds: Set<String> = emptySet()): List<ListLine> =
-        if (!isActive) lines else lines.filter { it.status != LineStatus.NEEDED || matches(it, chatItemIds) }
+    fun apply(lines: List<ListLine>, chatItemIds: Set<String> = emptySet()): List<ListLine> {
+        if (!isActive) return lines
+        val vocabulary = if (wholeWords && text.isNotBlank()) ItemSearch.vocabulary(lines.map { it.displayName }) else null
+        return lines.filter { it.status != LineStatus.NEEDED || matches(it, chatItemIds, vocabulary) }
+    }
+
+    private fun matchesText(name: String, vocabulary: ItemSearch.Vocabulary?): Boolean =
+        if (wholeWords) ItemSearch.nameMatches(text, name, vocabulary ?: ItemSearch.vocabulary(emptyList()))
+        else HebrewText.matchKey(name).contains(HebrewText.matchKey(text))
 }
 
 // ---------- estimated total ----------

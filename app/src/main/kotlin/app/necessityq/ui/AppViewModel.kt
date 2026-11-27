@@ -826,6 +826,64 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     /** Bumped when the replay starts: the opening screen is shown again. */
     val introRun = MutableStateFlow(0)
 
+    // ---------- "בדיקות מהירות" of 0.5: test accounts only ([app.necessityq.domain.QuickChecks]) ----------
+
+    fun canRunQuickChecks(account: app.necessityq.domain.Account): Boolean = app.necessityq.domain.QuickChecks.allowed(account.email)
+
+    /** Test 8: six suggestions decided at once (four bought, two deleted), without changing the history. */
+    fun quickCheckAccuracy() {
+        val (hid, uid, lines) = ctx() ?: return
+        val snap = snapshot.value ?: return
+        val picks = app.necessityq.domain.QuickChecks.candidates(snap).take(app.necessityq.domain.QuickChecks.ACCURACY_PICKS)
+        if (picks.size < app.necessityq.domain.QuickChecks.ACCURACY_PICKS) {
+            _messages.tryEmit("צריך ${app.necessityq.domain.QuickChecks.ACCURACY_PICKS} הצעות לבדיקה, יש ${picks.size}")
+            return
+        }
+        launchSafe {
+            val n = container.service.quickCheckAccuracy(hid, uid, picks, lines, app.necessityq.domain.QuickChecks.BOUGHT)
+            _messages.tryEmit("$n הצעות הוכרעו: ${app.necessityq.domain.QuickChecks.BOUGHT} נקנו, השאר נמחקו. כרטיס \"דיוק ההצעות\" בראש ההיסטוריה")
+        }
+    }
+
+    /** The first suggestion a check can use, or a message why there is none. */
+    private fun quickCheckTarget(): Suggestion? {
+        val snap = snapshot.value ?: return null
+        return (snap.runningLow.firstOrNull() ?: app.necessityq.domain.QuickChecks.candidates(snap).firstOrNull())
+            .also { if (it == null) _messages.tryEmit("אין הצעה לבדיקה כרגע") }
+    }
+
+    /** Tests 9, 14, 15: "יש לי בבית" twice on the first suggestion. Returns its name. */
+    fun quickCheckAtHomeTwice(): String? {
+        val s = quickCheckTarget() ?: return null
+        val (hid, _, _) = ctx() ?: return null
+        launchSafe {
+            repeat(2) {
+                container.service.haveAtHome(hid, s, snapshot.value?.stats?.get(s.itemId), snapshot.value?.rejections?.get(s.itemId) ?: 0)
+            }
+            _messages.tryEmit("${s.identity.displayName}: סומן \"יש לי בבית\" פעמיים")
+        }
+        return s.identity.displayName
+    }
+
+    /** Test 10: the first suggestion turned down three times. Returns its name. */
+    fun quickCheckDismissThrice(): String? {
+        val s = quickCheckTarget() ?: return null
+        val (hid, _, _) = ctx() ?: return null
+        launchSafe {
+            repeat(3) { i ->
+                container.service.dismissSuggestion(hid, s, snapshot.value?.stats?.get(s.itemId), (snapshot.value?.rejections?.get(s.itemId) ?: 0) + i)
+            }
+            _messages.tryEmit("${s.identity.displayName}: נדחה שלוש פעמים")
+        }
+        return s.identity.displayName
+    }
+
+    /** Test 13: every amount proposed now, checked against what a shop sells. */
+    fun quickCheckAmounts(): List<app.necessityq.domain.QuickChecks.AmountCheck> {
+        val snap = snapshot.value ?: return emptyList()
+        return app.necessityq.domain.QuickChecks.amounts(snap.runningLow + snap.tripList + snap.frequent)
+    }
+
     /** Only the accounts in [app.necessityq.domain.FirstRunDemo] may replay the first run. */
     fun canReplayFirstRun(account: app.necessityq.domain.Account): Boolean = app.necessityq.domain.FirstRunDemo.allowed(account.email)
 

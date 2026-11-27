@@ -323,6 +323,28 @@ class ShoppingService(
         repository.checkOff(householdId, line.id, purchase)
     }
 
+    /**
+     * Quick check of the accuracy card (test accounts, see [QuickChecks]): puts [picks] on the list as accepted
+     * suggestions, buys the first [bought] and deletes the rest, then takes the purchases out of the history again,
+     * so the card has decided suggestions to count and the rhythm of the items is not changed. Returns how many lines
+     * were added.
+     */
+    suspend fun quickCheckAccuracy(householdId: String, userId: String, picks: List<Suggestion>, current: List<ListLine>, bought: Int): Int {
+        picks.forEach { acceptSuggestion(householdId, userId, it, current) }
+        val ids = picks.map { it.itemId }.toSet()
+        val added = repository.lines(householdId).first()
+            .filter { it.itemId in ids && it.status == LineStatus.NEEDED && current.none { c -> c.id == it.id } }
+        added.forEachIndexed { i, line ->
+            if (i < bought) {
+                checkOff(householdId, userId, line)
+                repository.deletePurchase(householdId, purchaseIdFor(line.id))
+            } else {
+                delete(householdId, line)
+            }
+        }
+        return added.size
+    }
+
     suspend fun reopen(householdId: String, line: ListLine) =
         repository.reopen(householdId, line.id, purchaseIdFor(line.id), clock.nowMillis())
 

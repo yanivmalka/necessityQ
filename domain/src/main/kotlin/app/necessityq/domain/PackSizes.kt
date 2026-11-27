@@ -1,5 +1,6 @@
 package app.necessityq.domain
 
+import kotlin.math.abs
 import kotlin.math.ceil
 
 /**
@@ -117,6 +118,8 @@ object PackSizes {
         need ?: return null
         val rule = ruleFor(name, variant)?.second ?: return need
         if (rule.dimension != need.dimension) return need
+        // "2 חב' פיתות" already counts packs: the pack sizes are in pieces, so they don't apply
+        if (need.unit == QuantityUnit.PACKAGE) return Quantity(ceil(need.amount - 1e-9).coerceAtLeast(1.0), QuantityUnit.PACKAGE)
         val sizes = if (preferred != null && preferred in rule.sizes) listOf(preferred) else rule.sizes
         val total = cover(need.baseAmount, sizes)
         return if (rule.dimension == Dimension.COUNT) Quantity(total.toDouble(), if (need.unit == QuantityUnit.PACKAGE) QuantityUnit.PACKAGE else QuantityUnit.PIECE)
@@ -131,11 +134,66 @@ object PackSizes {
     fun nearest(name: String, amount: Quantity, variant: String? = null): Quantity? {
         val rule = ruleFor(name, variant)?.second ?: return null
         if (rule.dimension != amount.dimension) return null
+        // packs counted as packs (a survey's "1 חב' פיתות"): whole packs, never "6 חב'" from a 6-pitta pack
+        if (amount.unit == QuantityUnit.PACKAGE) return Quantity(Math.round(amount.amount).toDouble().coerceAtLeast(1.0), QuantityUnit.PACKAGE)
         val unit = rule.sizes.reduce(::gcd)
         val target = (Math.round(amount.baseAmount / unit) * unit).coerceAtLeast(rule.sizes.min())
         val total = cover(target.toDouble(), rule.sizes)
         return if (rule.dimension == Dimension.COUNT) Quantity(total.toDouble(), if (amount.unit == QuantityUnit.PACKAGE) QuantityUnit.PACKAGE else QuantityUnit.PIECE)
         else Quantity.fromBase(total.toDouble(), rule.dimension)
+    }
+
+    /**
+     * Pieces in the pack that [pieces] of [name] come in, for an item sold in packs of pieces (eggs: 6, 12, 30;
+     * pittas: 6, 10): the smallest pack that holds them all, else the largest. 30 eggs are one tray of 30, not 30
+     * trays. Null when the item is not sold in packs of pieces.
+     */
+    fun piecesPerPack(name: String, variant: String?, pieces: Double): Long? {
+        val rule = ruleFor(name, variant)?.second ?: return null
+        if (rule.dimension != Dimension.COUNT) return null
+        return rule.sizes.sorted().firstOrNull { it + 1e-9 >= pieces } ?: rule.sizes.max()
+    }
+
+    /**
+     * [q] of [name] in packs, when it is pieces of an item sold in packs of pieces and makes whole packs:
+     * "מארז 30" for 30 eggs, "2 מארזים של 12" for 24. Null otherwise (the amount says it all).
+     */
+    fun packLabel(name: String, variant: String?, q: Quantity?): String? {
+        q ?: return null
+        if (q.unit != QuantityUnit.PIECE) return null
+        val rule = ruleFor(name, variant)?.second ?: return null
+        if (rule.dimension != Dimension.COUNT || rule.sizes.all { it <= 1 }) return null
+        val pieces = Math.round(q.amount)
+        if (abs(q.amount - pieces) > 1e-9 || pieces <= 0) return null
+        for (size in rule.sizes.sortedDescending()) {
+            if (size <= 1 || pieces % size != 0L) continue
+            val packs = pieces / size
+            return when {
+                packs == 1L -> "מארז $size"
+                packs <= MAX_PACKS_LABEL -> "$packs מארזים של $size"
+                else -> null
+            }
+        }
+        return null
+    }
+
+    private const val MAX_PACKS_LABEL = 6L
+
+    /** [q] as shown on a line or a suggestion: "30 יח' (מארז 30)" when the pieces make whole packs. */
+    fun describe(name: String, variant: String?, q: Quantity): String =
+        q.format() + (packLabel(name, variant, q)?.let { " ($it)" } ?: "")
+
+    /**
+     * An amount read by a model as packs that can only be pieces: "30 חב' ביצים" is 30 eggs (one tray), as no home
+     * buys 30 trays. Packs of an item sold in packs of pieces, as many as or more than its largest pack holds,
+     * become pieces; anything else is kept.
+     */
+    fun asPieces(name: String, variant: String?, q: Quantity): Quantity {
+        if (q.unit != QuantityUnit.PACKAGE) return q
+        val rule = ruleFor(name, variant)?.second ?: return q
+        if (rule.dimension != Dimension.COUNT) return q
+        val largest = rule.sizes.max()
+        return if (largest >= 2 && q.amount + 1e-9 >= largest) Quantity(q.amount, QuantityUnit.PIECE) else q
     }
 
     /** The smallest sum of the pack [sizes] (each usable any number of times) that is at least [need]. */
