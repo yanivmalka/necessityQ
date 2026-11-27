@@ -262,19 +262,25 @@ object ListRules {
             .map { (category, items) -> category to items.sortedBy { it.addedAtMillis } }
 }
 
-/** Autocomplete for the quick-add box: the household's own history first, then the catalogue. */
+/**
+ * Autocomplete for the quick-add box: the household's own items and the catalogue, by how well they fit what was
+ * typed ([ItemSearch]), the household's first on a tie. A kind typed ("קוטג 5%", "פלפלים בכל מיני צבעים") is kept:
+ * catalogue items are offered in it, and the household's items only when they are of it.
+ */
 object Autocomplete {
     fun complete(query: String, stats: Collection<ItemStats>, limit: Int = 6): List<ItemIdentity> {
-        val q = HebrewText.matchKey(query)
-        if (q.length < 1) return emptyList()
-        val fromHistory = stats
-            .filter { HebrewText.matchKey(it.identity.displayName).contains(q) }
-            .sortedWith(
-                compareByDescending<ItemStats> { HebrewText.matchKey(it.identity.displayName).startsWith(q) }
-                    .thenByDescending { it.frequencyScore },
-            )
+        val q = ItemSearch.query(query) ?: return emptyList()
+        val variantKey = q.variant?.let(HebrewText::matchKey)
+        val history = stats
+            .filter { variantKey == null || HebrewText.matchKey(it.identity.variant.orEmpty()) == variantKey }
+            .sortedByDescending { it.frequencyScore }
             .map { it.identity }
-        val fromCatalog = Catalog.search(query, limit).map { ItemIdentity(it.name, null, it.category) }
-        return (fromHistory + fromCatalog).distinctBy { it.id }.take(limit)
+        val vocabulary = ItemSearch.vocabulary(history.map { it.name })
+        val fromHistory = history.map { it to listOf(it.name) }
+        val fromCatalog = Catalog.items.map { ItemIdentity(it.name, q.variant, it.category) to listOf(it.name) + it.aliases }
+        return ItemSearch.rank(q, fromHistory + fromCatalog, vocabulary) { it.second }
+            .map { it.first }
+            .distinctBy { it.id }
+            .take(limit)
     }
 }

@@ -51,6 +51,25 @@ object Catalog {
         GenericItemDef("אבוקדו", Category.PRODUCE),
         GenericItemDef("קישואים", Category.PRODUCE, listOf("קישוא")),
         GenericItemDef("בטטה", Category.PRODUCE, listOf("בטטות")),
+        GenericItemDef("חצילים", Category.PRODUCE, listOf("חציל")),
+        GenericItemDef("כרוב", Category.PRODUCE, listOf("כרוב לבן", "כרוב סגול")),
+        GenericItemDef("כרובית", Category.PRODUCE),
+        GenericItemDef("ברוקולי", Category.PRODUCE),
+        GenericItemDef("פטריות", Category.PRODUCE, listOf("פטריה", "פטרייה", "שמפיניון")),
+        GenericItemDef("בצל ירוק", Category.PRODUCE),
+        GenericItemDef("שמיר", Category.PRODUCE),
+        GenericItemDef("נענע", Category.PRODUCE, listOf("מנטה")),
+        GenericItemDef("סלק", Category.PRODUCE),
+        GenericItemDef("ענבים", Category.PRODUCE, listOf("ענב")),
+        GenericItemDef("אבטיח", Category.PRODUCE),
+        GenericItemDef("מלון", Category.PRODUCE),
+        GenericItemDef("אגסים", Category.PRODUCE, listOf("אגס")),
+        GenericItemDef("תותים", Category.PRODUCE, listOf("תות", "תות שדה")),
+        GenericItemDef("קלמנטינות", Category.PRODUCE, listOf("קלמנטינה", "מנדרינות", "מנדרינה")),
+        GenericItemDef("אפרסקים", Category.PRODUCE, listOf("אפרסק")),
+        GenericItemDef("שזיפים", Category.PRODUCE, listOf("שזיף")),
+        GenericItemDef("קיווי", Category.PRODUCE),
+        GenericItemDef("מנגו", Category.PRODUCE),
         // מוצרי חלב וביצים
         GenericItemDef("חלב", Category.DAIRY),
         GenericItemDef("קוטג'", Category.DAIRY, listOf("קוטג", "גבינת קוטג")),
@@ -66,6 +85,8 @@ object Catalog {
         GenericItemDef("חמאה", Category.DAIRY),
         GenericItemDef("ביצים", Category.DAIRY, listOf("ביצה", "תבנית ביצים")),
         GenericItemDef("מעדנים", Category.DAIRY, listOf("מעדן", "פודינג")),
+        GenericItemDef("שוקו", Category.DAIRY, listOf("חלב שוקו")),
+        GenericItemDef("מרגרינה", Category.DAIRY),
         // לחם ומאפים
         GenericItemDef("לחם", Category.BAKERY, listOf("כיכר לחם")),
         GenericItemDef("לחם מלא", Category.BAKERY),
@@ -73,10 +94,20 @@ object Catalog {
         GenericItemDef("לחמניות", Category.BAKERY, listOf("לחמניה", "לחמנייה")),
         GenericItemDef("חלות", Category.BAKERY, listOf("חלה")),
         GenericItemDef("טורטיות", Category.BAKERY, listOf("טורטיה", "טורטייה")),
+        GenericItemDef("עוגה", Category.BAKERY, listOf("עוגות")),
+        GenericItemDef("באגט", Category.BAKERY, listOf("בגט")),
         // בשר, עוף ודגים
         GenericItemDef("חזה עוף", Category.MEAT_FISH, listOf("חזה")),
         GenericItemDef("שניצל", Category.MEAT_FISH, listOf("שניצלים")),
         GenericItemDef("כרעיים", Category.MEAT_FISH, listOf("כרעי עוף")),
+        GenericItemDef("שוקיים", Category.MEAT_FISH, listOf("שוקי עוף", "שוקיים עוף", "שוק עוף")),
+        GenericItemDef("כנפיים", Category.MEAT_FISH, listOf("כנפי עוף", "כנף")),
+        GenericItemDef("פרגיות", Category.MEAT_FISH, listOf("פרגית")),
+        GenericItemDef("עוף שלם", Category.MEAT_FISH),
+        GenericItemDef("כבד עוף", Category.MEAT_FISH, listOf("כבדים")),
+        GenericItemDef("המבורגר", Category.MEAT_FISH, listOf("המבורגרים")),
+        GenericItemDef("קבב", Category.MEAT_FISH),
+        GenericItemDef("פילה דג", Category.MEAT_FISH, listOf("דג", "דגים", "פילה")),
         GenericItemDef("בשר טחון", Category.MEAT_FISH, listOf("טחון")),
         GenericItemDef("נקניקיות", Category.MEAT_FISH, listOf("נקניקייה", "נקניקיה")),
         GenericItemDef("פסטרמה", Category.MEAT_FISH),
@@ -102,6 +133,22 @@ object Catalog {
         GenericItemDef("ממרח שוקולד", Category.PANTRY, listOf("ממרח")),
         GenericItemDef("עדשים", Category.PANTRY),
         GenericItemDef("קוסקוס", Category.PANTRY),
+        GenericItemDef("פלפל שחור", Category.PANTRY),
+        GenericItemDef("פפריקה", Category.PANTRY),
+        GenericItemDef("כמון", Category.PANTRY),
+        GenericItemDef("חומץ", Category.PANTRY),
+        GenericItemDef("חרדל", Category.PANTRY),
+        GenericItemDef("ריבה", Category.PANTRY),
+        GenericItemDef("זיתים", Category.PANTRY, listOf("זית")),
+        GenericItemDef("מלפפונים חמוצים", Category.PANTRY, listOf("חמוצים", "מלפפון חמוץ")),
+        GenericItemDef("תירס", Category.PANTRY, listOf("תירס בשימורים")),
+        GenericItemDef("פירורי לחם", Category.PANTRY),
+        GenericItemDef("שמרים", Category.PANTRY),
+        GenericItemDef("אבקת אפיה", Category.PANTRY, listOf("אבקת אפייה")),
+        GenericItemDef("קקאו", Category.PANTRY),
+        GenericItemDef("אבקת מרק", Category.PANTRY, listOf("מרק")),
+        GenericItemDef("בורגול", Category.PANTRY),
+        GenericItemDef("קינואה", Category.PANTRY),
         // דגני בוקר וחטיפים
         GenericItemDef("קורנפלקס", Category.BREAKFAST_SNACKS, listOf("קורן פלקס", "קורנפלקס דבש")),
         GenericItemDef("דגני בוקר", Category.BREAKFAST_SNACKS, listOf("דגנים")),
@@ -111,6 +158,13 @@ object Catalog {
         GenericItemDef("ביסלי", Category.BREAKFAST_SNACKS),
         GenericItemDef("במבה", Category.BREAKFAST_SNACKS),
         GenericItemDef("קרקרים", Category.BREAKFAST_SNACKS, listOf("קרקר")),
+        GenericItemDef("לחמית", Category.BREAKFAST_SNACKS, listOf("לחמיות")),
+        GenericItemDef("פריכיות", Category.BREAKFAST_SNACKS, listOf("פריכית")),
+        GenericItemDef("בייגלה", Category.BREAKFAST_SNACKS),
+        GenericItemDef("צ'יפס", Category.BREAKFAST_SNACKS, listOf("ציפס")),
+        GenericItemDef("וופלים", Category.BREAKFAST_SNACKS, listOf("וופל", "ופלים")),
+        GenericItemDef("אגוזים", Category.BREAKFAST_SNACKS, listOf("אגוזי מלך")),
+        GenericItemDef("שקדים", Category.BREAKFAST_SNACKS),
         GenericItemDef("שוקולד", Category.BREAKFAST_SNACKS),
         GenericItemDef("חטיפי דגנים", Category.BREAKFAST_SNACKS, listOf("חטיף דגנים")),
         // משקאות
@@ -123,6 +177,8 @@ object Catalog {
         GenericItemDef("ירקות קפואים", Category.FROZEN, listOf("אפונה", "שעועית ירוקה")),
         GenericItemDef("גלידה", Category.FROZEN),
         GenericItemDef("בורקס", Category.FROZEN),
+        GenericItemDef("בצק עלים", Category.FROZEN),
+        GenericItemDef("פיצה קפואה", Category.FROZEN),
         // ניקיון ובית
         GenericItemDef("נייר טואלט", Category.CLEANING, listOf("טואלט")),
         GenericItemDef("מגבות נייר", Category.CLEANING, listOf("נייר מגבת")),
@@ -132,12 +188,20 @@ object Catalog {
         GenericItemDef("שקיות אשפה", Category.CLEANING, listOf("שקיות זבל")),
         GenericItemDef("נייר כסף", Category.CLEANING, listOf("נייר אלומיניום")),
         GenericItemDef("חומר ניקוי", Category.CLEANING, listOf("אקונומיקה")),
+        GenericItemDef("ספוגים", Category.CLEANING, listOf("ספוג")),
+        GenericItemDef("מטליות", Category.CLEANING, listOf("מטלית")),
+        GenericItemDef("ניילון נצמד", Category.CLEANING),
+        GenericItemDef("נייר אפייה", Category.CLEANING, listOf("נייר אפיה")),
+        GenericItemDef("כלים חד פעמיים", Category.CLEANING, listOf("חד פעמי", "צלחות חד פעמיות", "כוסות חד פעמיות")),
+        GenericItemDef("מפיות", Category.CLEANING, listOf("מפית")),
         // טואלטיקה
         GenericItemDef("סבון ידיים", Category.TOILETRIES, listOf("סבון")),
         GenericItemDef("שמפו", Category.TOILETRIES),
         GenericItemDef("משחת שיניים", Category.TOILETRIES),
         GenericItemDef("מברשות שיניים", Category.TOILETRIES, listOf("מברשת שיניים")),
         GenericItemDef("דאודורנט", Category.TOILETRIES),
+        GenericItemDef("מרכך שיער", Category.TOILETRIES),
+        GenericItemDef("סבון גוף", Category.TOILETRIES, listOf("ג'ל רחצה")),
         // תינוקות
         GenericItemDef("חיתולים", Category.BABY),
         GenericItemDef("מגבונים", Category.BABY, listOf("מגבונים לחים")),
@@ -198,17 +262,5 @@ object Catalog {
             }
         }
         return null
-    }
-
-    fun search(query: String, limit: Int = 8): List<GenericItemDef> {
-        val q = HebrewText.matchKey(query)
-        if (q.isBlank()) return emptyList()
-        val starts = items.filter { item ->
-            HebrewText.matchKey(item.name).startsWith(q) || item.aliases.any { HebrewText.matchKey(it).startsWith(q) }
-        }
-        val contains = items.filter { item ->
-            item !in starts && (HebrewText.matchKey(item.name).contains(q) || item.aliases.any { HebrewText.matchKey(it).contains(q) })
-        }
-        return (starts + contains).take(limit)
     }
 }

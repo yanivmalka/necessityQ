@@ -105,7 +105,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     val completions: StateFlow<List<ItemIdentity>> = combine(searchQuery, snapshot) { q, snap -> q to snap }
         .mapLatest { (q, snap) ->
-            val name = QuickEntryParser.parse(q)?.item?.displayName ?: q
+            // the words as typed (without the amount): "שרי" searches cherry tomatoes, not every tomato
+            val name = QuickEntryParser.parse(q)?.nameText ?: q
             if (q.isBlank()) emptyList() else Autocomplete.complete(name, snap?.stats?.values.orEmpty())
         }
         .flowOn(kotlinx.coroutines.Dispatchers.Default)
@@ -1093,14 +1094,10 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         OnlineSearch(q, mine, branch?.let { loaded[it] }?.products)
     }
         .mapLatest { (q, mine, products) ->
-            val name = QuickEntryParser.parse(q)?.item?.displayName ?: q
+            val name = QuickEntryParser.parse(q)?.nameText ?: q
             if (name.trim().length < 2 || products == null) return@mapLatest emptyList<ItemIdentity>()
-            val known = mine.map { it.id }.toSet()
-            app.necessityq.domain.PriceData.search(products, name, limit = 60)
-                .map { app.necessityq.domain.Scan.genericIdentity(it) }
-                .filter { it.id !in known && it.name.isNotBlank() }
-                .distinctBy { it.id }
-                .take(8)
+            // whole words, not any part of one: "לחם" is bread, not "לחמית" (see ItemSearch)
+            app.necessityq.domain.ItemSearch.storeItems(products, name, exclude = mine.map { it.id }.toSet(), limit = 8)
         }
         .flowOn(kotlinx.coroutines.Dispatchers.Default)
         .catch { emit(emptyList()) }

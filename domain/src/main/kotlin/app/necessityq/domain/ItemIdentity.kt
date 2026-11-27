@@ -23,14 +23,31 @@ data class ItemIdentity(
 
     val displayName: String get() = if (variant.isNullOrBlank()) name else "$name $variant"
 
+    /** What free text says about an item: the words naming it, and the kind asked for ("5%", "ללא לקטוז", "צבעוני"). */
+    internal data class Parts(val text: String, val variant: String?, val colors: Boolean)
+
     companion object {
+        /** The variant of "בכל מיני צבעים", "צבעוניים": a mix of colours, not one colour. */
+        const val COLORFUL = "צבעוני"
+
         private val percent = Regex("(\\d+(?:[.,]\\d+)?)\\s*%")
         private val descriptors = listOf(
             "ללא לקטוז", "דל שומן", "מופחת שומן", "ללא סוכר", "ללא גלוטן", "אורגני", "טבעוני", "דל נתרן",
         )
+        // whole words only: Hebrew letters are not \w, so the edges are "no letter before / after"
+        private const val START = "(?<!\\p{L})"
+        private const val END = "(?!\\p{L})"
+        /** "פלפלים בכל מיני צבעים", "בצבעים שונים", "צבעוניים": the household wants a mix of colours. */
+        private val colorPhrase = Regex(
+            "$START(?:ו?(?:ב|מ)?כל\\s+(?:מיני\\s+|ה)?צבעים|ו?ב?צבעים\\s+שונים|צבעוני(?:ים|ות|ת)?)$END",
+        )
+        /** Words that say "some of each" and name nothing: "כל מיני", "מכל הסוגים", "סוגים שונים". */
+        private val fillerPhrase = Regex(
+            "$START(?:ו?(?:ב|מ)?כל\\s+(?:מיני|הסוגים|סוג)|ו?סוגים\\s+שונים)$END",
+        )
 
-        /** Builds the identity from free text (no quantity). */
-        fun fromText(raw: String): ItemIdentity {
+        /** Splits free text (no quantity) into the naming words and the variant, before any catalogue lookup. */
+        internal fun parts(raw: String): Parts {
             var text = HebrewText.clean(raw)
             val variantParts = mutableListOf<String>()
 
@@ -38,6 +55,12 @@ data class ItemIdentity(
                 variantParts += match.groupValues[1].replace(',', '.') + "%"
                 text = text.removeRange(match.range)
             }
+            val colors = colorPhrase.containsMatchIn(text)
+            if (colors) {
+                variantParts += COLORFUL
+                text = colorPhrase.replace(text, " ")
+            }
+            text = fillerPhrase.replace(text, " ")
             for (descriptor in descriptors) {
                 if (text.contains(descriptor)) {
                     variantParts += descriptor
@@ -45,7 +68,15 @@ data class ItemIdentity(
                 }
             }
             text = HebrewText.clean(text)
-            val unbranded = Catalog.stripBrands(text)
+            // only a variant was typed ("אורגני"): it is the name
+            if (text.isBlank()) return Parts(HebrewText.clean(raw), null, false)
+            return Parts(text, variantParts.joinToString(" ").ifBlank { null }, colors)
+        }
+
+        /** Builds the identity from free text (no quantity). */
+        fun fromText(raw: String): ItemIdentity {
+            val parts = parts(raw)
+            val unbranded = Catalog.stripBrands(parts.text)
             val exact = Catalog.lookup(unbranded)
             val def = exact ?: Catalog.bestContainedMatch(unbranded)
             // An exact alias collapses to the canonical spelling ("קוטג" → "קוטג'");
@@ -53,7 +84,7 @@ data class ItemIdentity(
             val name = exact?.name ?: unbranded
             return ItemIdentity(
                 name = name.ifBlank { HebrewText.clean(raw) },
-                variant = variantParts.joinToString(" ").ifBlank { null },
+                variant = parts.variant,
                 category = def?.category ?: Category.OTHER,
             )
         }

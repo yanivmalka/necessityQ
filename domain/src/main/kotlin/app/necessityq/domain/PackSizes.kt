@@ -55,7 +55,8 @@ object PackSizes {
      * The rest of the catalogue, and why a recipe's amount of it is left as it is:
      *  - sold loose by weight or by the piece: produce, fresh meat and fish, deli cheese, bakery;
      *  - sold in packs that vary too much by brand and shop to round to (cereal, snacks, frozen pastry, desserts);
-     *  - not food, so no recipe or menu asks for them (cleaning, toiletries, baby).
+     *  - not food, so no recipe or menu asks for them (cleaning, toiletries, baby);
+     *  - added to the catalogue for the quick-add search (#89, last group): left as they are until their sizes are checked.
      */
     internal val notPacked: Set<String> = listOf(
         "עגבניות", "מלפפונים", "בצל", "שום", "תפוחי אדמה", "גזר", "פלפל", "חסה", "פטרוזיליה", "כוסברה", "לימון", "בננות",
@@ -66,6 +67,15 @@ object PackSizes {
         "תבלינים", "דגני בוקר", "גרנולה", "עוגיות", "ביסלי", "במבה", "קרקרים", "חטיפי דגנים", "בורקס",
         "נייר טואלט", "מגבות נייר", "סבון כלים", "אבקת כביסה", "מרכך כביסה", "שקיות אשפה", "נייר כסף", "חומר ניקוי",
         "סבון ידיים", "שמפו", "משחת שיניים", "מברשות שיניים", "דאודורנט", "חיתולים", "מגבונים", "תמ\"ל",
+        // added for the quick-add search
+        "חצילים", "כרוב", "כרובית", "ברוקולי", "פטריות", "בצל ירוק", "שמיר", "נענע", "סלק", "ענבים", "אבטיח", "מלון",
+        "אגסים", "תותים", "קלמנטינות", "אפרסקים", "שזיפים", "קיווי", "מנגו",
+        "שוקו", "מרגרינה", "עוגה", "באגט",
+        "שוקיים", "כנפיים", "פרגיות", "עוף שלם", "כבד עוף", "המבורגר", "קבב", "פילה דג",
+        "פלפל שחור", "פפריקה", "כמון", "חומץ", "חרדל", "ריבה", "זיתים", "מלפפונים חמוצים", "תירס", "פירורי לחם",
+        "שמרים", "אבקת אפיה", "קקאו", "אבקת מרק", "בורגול", "קינואה",
+        "לחמית", "פריכיות", "בייגלה", "צ'יפס", "וופלים", "אגוזים", "שקדים", "בצק עלים", "פיצה קפואה",
+        "ספוגים", "מטליות", "ניילון נצמד", "נייר אפייה", "כלים חד פעמיים", "מפיות", "מרכך שיער", "סבון גוף",
     ).map(HebrewText::matchKey).toSet()
 
     /** Catalogue names that have a pack rule. */
