@@ -29,6 +29,7 @@ import { Branch, Snapshot } from "./model";
 import { downloadTzameret, snapshotStats } from "./nutrition";
 import { DAILY_LIMIT, DEFAULT_MODEL, cacheKey, dayKey, readWithGemini, validateRequest } from "./interpret";
 import { baselineCacheKey, estimateWithGemini, validateBaselineRequest } from "./baseline";
+import { withBusyRetry } from "./gemini";
 import { STARTER_DAILY_LIMIT, starterCacheKey, starterWithGemini, validateStarterRequest } from "./starter";
 
 // Israeli region: several retailer portals refuse requests from abroad.
@@ -362,10 +363,10 @@ export const interpretItems = onCall(
     if (!allowed) throw new HttpsError("resource-exhausted", "daily limit reached");
 
     const ai = gemini();
-    const model = geminiModel();
+    let model = geminiModel();
     let items;
     try {
-      items = await readWithGemini(ai, model, text, people);
+      ({ result: items, model } = await withBusyRetry(model, (m) => readWithGemini(ai, m, text, people)));
     } catch (e) {
       logger.error("interpret failed", { householdId, error: e instanceof Error ? e.message : String(e) });
       throw new HttpsError("unavailable", "could not read the text right now");
@@ -401,10 +402,10 @@ export const estimateBaseline = onCall(
     // product's general model before launch (ROADMAP 0.6)
 
     const ai = gemini();
-    const model = geminiModel();
+    let model = geminiModel();
     let amounts;
     try {
-      amounts = await estimateWithGemini(ai, model, ages, items);
+      ({ result: amounts, model } = await withBusyRetry(model, (m) => estimateWithGemini(ai, m, ages, items)));
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);
       logger.error("baseline failed", { householdId, error });
@@ -453,10 +454,10 @@ export const suggestStarterList = onCall(
     if (!allowed) throw new HttpsError("resource-exhausted", "daily limit reached");
 
     const ai = gemini();
-    const model = geminiModel();
+    let model = geminiModel();
     let items;
     try {
-      items = await starterWithGemini(ai, model, request);
+      ({ result: items, model } = await withBusyRetry(model, (m) => starterWithGemini(ai, m, request)));
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);
       logger.error("starter failed", { householdId, error });
