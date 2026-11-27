@@ -7,7 +7,6 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import app.necessityq.AppContainer
-import app.necessityq.domain.Autocomplete
 import app.necessityq.domain.retryWithBackoff
 import app.necessityq.domain.HebrewText
 import app.necessityq.domain.ItemIdentity
@@ -102,15 +101,6 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         .debounce { if (it.isBlank()) 0L else SEARCH_DELAY_MS }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, "")
-
-    val completions: StateFlow<List<ItemIdentity>> = combine(searchQuery, snapshot) { q, snap -> q to snap }
-        .mapLatest { (q, snap) ->
-            // the words as typed (without the amount): "שרי" searches cherry tomatoes, not every tomato
-            val name = QuickEntryParser.parse(q)?.nameText ?: q
-            if (q.isBlank()) emptyList() else Autocomplete.complete(name, snap?.stats?.values.orEmpty())
-        }
-        .flowOn(kotlinx.coroutines.Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private fun ctx(): Triple<String, String, List<ListLine>>? {
         val s = session.value as? Session.SignedIn ?: return null
@@ -1155,21 +1145,23 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /**
-     * Quick-add suggestions from the products of the branch (online data), as generic items
-     * ("קוטג' 5%"), beyond what the household already buys. Empty without price data.
+     * Quick-add suggestions by supermarket section ([app.necessityq.domain.QuickAddCompletions]): the household's
+     * items, the catalogue and the primary branch's products, the section of what was typed first and related
+     * products in their own sections ("לחם": לחם ומאפים, then לחמית under the snacks).
      */
-    val onlineCompletions: StateFlow<List<ItemIdentity>> = combine(searchQuery, completions, branchPrices, primaryBranchId) { q, mine, loaded, branch ->
-        OnlineSearch(q, mine, branch?.let { loaded[it] }?.products)
-    }
-        .mapLatest { (q, mine, products) ->
-            val name = QuickEntryParser.parse(q)?.nameText ?: q
-            if (name.trim().length < 2 || products == null) return@mapLatest emptyList<ItemIdentity>()
-            // whole words, not any part of one: "לחם" is bread, not "לחמית" (see ItemSearch)
-            app.necessityq.domain.ItemSearch.storeItems(products, name, exclude = mine.map { it.id }.toSet(), limit = 8)
+    val completionGroups: StateFlow<List<app.necessityq.domain.CompletionGroup>> =
+        combine(searchQuery, snapshot, branchPrices, primaryBranchId) { q, snap, loaded, branch ->
+            QuickAddSearch(q, snap?.stats?.values.orEmpty(), branch?.let { loaded[it] }?.products)
         }
-        .flowOn(kotlinx.coroutines.Dispatchers.Default)
-        .catch { emit(emptyList()) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+            .mapLatest { (q, stats, products) ->
+                if (q.isBlank()) return@mapLatest emptyList<app.necessityq.domain.CompletionGroup>()
+                // the words as typed (without the amount): "שרי" searches cherry tomatoes, not every tomato
+                val name = QuickEntryParser.parse(q)?.nameText ?: q
+                app.necessityq.domain.QuickAddCompletions.build(name, stats, products)
+            }
+            .flowOn(kotlinx.coroutines.Dispatchers.Default)
+            .catch { emit(emptyList()) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val indexCache = mutableMapOf<String, app.necessityq.domain.ProductIndex>()
 
@@ -2593,7 +2585,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     }
 }
 
-private data class OnlineSearch(val query: String, val mine: List<ItemIdentity>, val products: List<app.necessityq.domain.BranchProduct>?)
+private data class QuickAddSearch(val query: String, val stats: Collection<app.necessityq.domain.ItemStats>, val products: List<app.necessityq.domain.BranchProduct>?)
 private data class PriceInputs(
     val snapshot: ListSnapshot?,
     val loaded: Map<String, app.necessityq.domain.BranchPrices>,

@@ -261,26 +261,3 @@ object ListRules {
             .toSortedMap(compareBy { it.order })
             .map { (category, items) -> category to items.sortedBy { it.addedAtMillis } }
 }
-
-/**
- * Autocomplete for the quick-add box: the household's own items and the catalogue, by how well they fit what was
- * typed ([ItemSearch]), the household's first on a tie. A kind typed ("קוטג 5%", "פלפלים בכל מיני צבעים") is kept:
- * catalogue items are offered in it, and the household's items only when they are of it.
- */
-object Autocomplete {
-    fun complete(query: String, stats: Collection<ItemStats>, limit: Int = 6): List<ItemIdentity> {
-        val q = ItemSearch.query(query) ?: return emptyList()
-        val variantKey = q.variant?.let(HebrewText::matchKey)
-        val history = stats
-            .filter { variantKey == null || HebrewText.matchKey(it.identity.variant.orEmpty()) == variantKey }
-            .sortedByDescending { it.frequencyScore }
-            .map { it.identity }
-        val vocabulary = ItemSearch.vocabulary(history.map { it.name })
-        val fromHistory = history.map { it to listOf(it.name) }
-        val fromCatalog = Catalog.items.map { ItemIdentity(it.name, q.variant, it.category) to listOf(it.name) + it.aliases }
-        return ItemSearch.rank(q, fromHistory + fromCatalog, vocabulary) { it.second }
-            .map { it.first }
-            .distinctBy { it.id }
-            .take(limit)
-    }
-}
