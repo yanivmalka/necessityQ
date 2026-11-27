@@ -80,14 +80,27 @@ data class Pack(val pieces: Int = 1, val each: Quantity? = null) {
      * it is a single pack whose content says it all ("2 ליטר"), or when it is not a whole number of packs.
      */
     fun describe(q: Quantity): String {
+        packsOnly(q)?.let { return it }
         val n = packsIn(q) ?: return q.format()
         val whole = Math.round(n)
         if (abs(n - whole) > 1e-6 || whole < 1) return q.format()
         val packs = whole.toInt()
-        if (q.unit == QuantityUnit.PACKAGE) return if (pieces > 1 || each != null) "${q.format()} · ${packsText(packs)}" else q.format()
+        if (q.unit == QuantityUnit.PACKAGE) return if (each != null) "${q.format()} · ${packsText(packs)}" else q.format()
         if (pieces == 1 && each != null && packs == 1) return q.format()
         if (pieces == 1 && each == null) return q.format()
         return "${q.format()} · ${packsText(packs)}"
+    }
+
+    /**
+     * [q] in packs alone when this is a pack of pieces and [q] counts whole packs of it: a tray of 30 eggs is bought as
+     * "מארז 30", not as "30 יח'". Null otherwise.
+     */
+    fun packsOnly(q: Quantity): String? {
+        if (pieces < 2 || q.dimension != Dimension.COUNT) return null
+        val n = packsIn(q) ?: return null
+        val whole = Math.round(n)
+        if (abs(n - whole) > 1e-6 || whole < 1) return null
+        return packsText(whole.toInt())
     }
 
     /** "מארז 30", "2 מארזים של 30", "2 × 2 ליטר", "2 מארזים של 8 × 150 גרם". */
@@ -114,11 +127,18 @@ data class Pack(val pieces: Int = 1, val each: Quantity? = null) {
 data class PackChoices(val products: Map<String, Pack> = emptyMap(), val sizes: Map<String, Long> = emptyMap())
 
 /**
- * The amount of a line or a suggestion as shown: with its packs when the household's pack is known ("30 יח' ·
- * מארז 30", "4 ליטר · 2 × 2 ליטר"), else with the item's usual packs ([PackSizes.describe]).
+ * The amount of a line or a suggestion as shown: in packs when the household's pack is known ("מארז 30",
+ * "4 ליטר · 2 × 2 ליטר"), else with the item's usual packs ([PackSizes.describe]).
  */
 fun describeAmount(name: String, variant: String?, q: Quantity, pack: Pack?): String =
     pack?.describe(q) ?: PackSizes.describe(name, variant, q)
+
+/**
+ * The amount on the +/- of an item, short enough for it: packs of pieces as packs ("מארז 30", "2 מארזים של 12"),
+ * anything else as it is ("2 ליטר").
+ */
+fun stepperAmount(name: String, variant: String?, q: Quantity, pack: Pack?): String =
+    (if (pack != null) pack.packsOnly(q) else PackSizes.packLabel(name, variant, q)) ?: q.format()
 
 /** The pack of a product in a price file, from its amount and unit and from its name. */
 object ProductPacks {
@@ -225,5 +245,15 @@ object HouseholdPacks {
         }
         val anyFits = all.any { fits(it.second) }
         return all.map { (product, p) -> Offer(product, p, anyFits && fits(p)) }.sortedByDescending { it.fits }
+    }
+
+    /**
+     * What the product chooser lists: when some of [offers] are the household's size (a tray of 30), those alone — of
+     * every grade and brand (L and M, since none was chosen) — and the chosen product ([chosenCode]) whatever its
+     * size; a 12-egg pack is not what it is looking for. Every size when [otherSizes] is asked for, or when none fits.
+     */
+    fun visible(offers: List<Offer>, chosenCode: String?, otherSizes: Boolean): List<Offer> {
+        if (otherSizes || offers.none { it.fits }) return offers
+        return offers.filter { it.fits || it.product.code == chosenCode }
     }
 }

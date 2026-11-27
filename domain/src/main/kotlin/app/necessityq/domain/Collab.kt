@@ -472,9 +472,22 @@ object QuantitySteps {
         return defaultFor(unit)
     }
 
-    /** One tap on +/-: whole units for counts, 100 g/ml for small measures, 0.5 for kg/litre. Never goes below the first step. */
-    fun step(current: Quantity?, delta: Int): Quantity? {
-        if (current == null) return if (delta > 0) Quantity.pieces(1) else null
+    /**
+     * The first amount of [name] (one tap on "+" on an item with no amount), in the unit it is bought in: one pack of
+     * what is sold in packs of pieces (eggs, pittas: "1 חב'", never one egg), the smallest carton or bag of what is
+     * sold by volume or weight (milk: 1 ליטר, flour: 1 ק"ג), else one piece. [name] null: one piece.
+     */
+    fun firstFor(name: String?, variant: String? = null): Quantity {
+        val smallest = name?.let { PackSizes.smallestPack(it, variant) } ?: return Quantity.pieces(1)
+        return if (smallest.dimension == Dimension.COUNT) Quantity(1.0, QuantityUnit.PACKAGE) else smallest
+    }
+
+    /**
+     * One tap on +/-: whole units for counts, 100 g/ml for small measures, 0.5 for kg/litre. Never goes below the first
+     * step. From no amount, "+" gives the item's first amount ([firstFor]: a pack of eggs, a litre of milk).
+     */
+    fun step(current: Quantity?, delta: Int, name: String? = null, variant: String? = null): Quantity? {
+        if (current == null) return if (delta > 0) firstFor(name, variant) else null
         val size = when (current.unit) {
             QuantityUnit.PIECE, QuantityUnit.PACKAGE -> 1.0
             QuantityUnit.GRAM, QuantityUnit.MILLILITER -> 100.0

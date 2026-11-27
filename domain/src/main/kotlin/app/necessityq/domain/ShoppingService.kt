@@ -307,7 +307,7 @@ class ShoppingService(
 
     /** One tap on +/-: a whole pack of what the household buys ([pack]: a tray, a carton), else a unit. */
     suspend fun adjustQuantity(householdId: String, line: ListLine, delta: Int, pack: Pack? = null) {
-        val next = pack?.step(line.quantity, delta) ?: QuantitySteps.step(line.quantity, delta)
+        val next = pack?.step(line.quantity, delta) ?: QuantitySteps.step(line.quantity, delta, line.name, line.variant)
         if (next != line.quantity) changeQuantity(householdId, line, next)
     }
 
