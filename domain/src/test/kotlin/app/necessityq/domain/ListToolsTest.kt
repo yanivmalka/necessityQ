@@ -166,7 +166,8 @@ class ListToolsTest {
         assertEquals(listOf("a", "b", "c", "d"), quick("לח"))
         assertEquals(listOf("c"), quick("לחמית"))
         // the filter panel's own search still matches any part of a name
-        assertEquals(listOf("a", "b", "c", "d"), ListFilter(text = "לחם").apply(lines).map { it.id })
+        assertEquals(listOf("c"), ListFilter(text = "מית").apply(lines).map { it.id })
+        assertEquals(listOf("c"), quick("לחמית"))
     }
 
     @Test fun `filter and price estimate`() {
