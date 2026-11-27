@@ -325,6 +325,11 @@ async function sendAlerts(householdId: string, messageId: string, m: ChatMessage
  */
 const geminiKey = (): string => process.env.GEMINI_API_KEY ?? "";
 const geminiModel = (): string => process.env.GEMINI_MODEL || DEFAULT_MODEL;
+/**
+ * The Gemini client. v1beta explicitly: @google/genai 3.x calls v1 by default, where the "-latest" aliases and
+ * JSON-schema answers are not served ("models/gemini-flash-latest is not found for API version v1").
+ */
+const gemini = (): GoogleGenAI => new GoogleGenAI({ apiKey: geminiKey(), apiVersion: "v1beta" });
 
 /**
  * הבנת כוונה בהוספה לרשימה: reads free text the app did not understand ("משהו לכריכים לילדים") as grocery
@@ -356,7 +361,7 @@ export const interpretItems = onCall(
     });
     if (!allowed) throw new HttpsError("resource-exhausted", "daily limit reached");
 
-    const ai = new GoogleGenAI({ apiKey: geminiKey() });
+    const ai = gemini();
     const model = geminiModel();
     let items;
     try {
@@ -395,7 +400,7 @@ export const estimateBaseline = onCall(
     // no daily limit for now (a decision: one user while in development); the limits are decided with the
     // product's general model before launch (ROADMAP 0.6)
 
-    const ai = new GoogleGenAI({ apiKey: geminiKey() });
+    const ai = gemini();
     const model = geminiModel();
     let amounts;
     try {
@@ -447,7 +452,7 @@ export const suggestStarterList = onCall(
     });
     if (!allowed) throw new HttpsError("resource-exhausted", "daily limit reached");
 
-    const ai = new GoogleGenAI({ apiKey: geminiKey() });
+    const ai = gemini();
     const model = geminiModel();
     let items;
     try {

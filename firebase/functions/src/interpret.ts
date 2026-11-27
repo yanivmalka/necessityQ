@@ -10,8 +10,11 @@ import { createHash } from "crypto";
 import type { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 
-/** The model when none is configured (the GEMINI_MODEL parameter): Google's alias for its current Flash model. */
-export const DEFAULT_MODEL = "gemini-flash-latest";
+/**
+ * The model when none is configured (GEMINI_MODEL): a stable Flash model by its exact id. Not the "-latest" alias,
+ * which the API refused (NOT_FOUND) and which can change under the app without notice.
+ */
+export const DEFAULT_MODEL = "gemini-3.8-flash";
 /** Bump when the prompt or schema changes, so cached answers of the old prompt are not served. */
 export const PROMPT_VERSION = 1;
 export const MAX_TEXT = 200;
