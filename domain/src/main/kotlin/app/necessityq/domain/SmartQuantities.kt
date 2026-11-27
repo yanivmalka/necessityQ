@@ -73,11 +73,24 @@ object SmartQuantities {
         "בננות" to PerPerson(0.6, QuantityUnit.KILOGRAM, 0.5, estimated = true),
     )
 
-    /** The items the table has an amount for, in its order (a first list for a new household, see [TripSizer.starter]). */
-    val items: List<String> get() = perPerson.keys.toList()
+    /**
+     * The items there is an amount for, in this order (a first list for a new household, see [TripSizer.starter]):
+     * the table above, then every other basic product of the first-list survey ([FirstListSurvey.items], its rough
+     * estimate per adult and per home), except those only a home with a small child buys.
+     */
+    val items: List<String>
+        get() = perPerson.keys.toList() + FirstListSurvey.items.filter { !it.forBabiesOnly && it.name !in perPerson }.map { it.name }
 
     /** True when the amount for [name] is a rough estimate and not from a published figure. */
-    fun isEstimate(name: String): Boolean = perPerson[Catalog.lookup(name)?.name]?.estimated == true
+    fun isEstimate(name: String): Boolean {
+        val canonical = Catalog.lookup(name)?.name ?: return false
+        perPerson[canonical]?.let { return it.estimated }
+        return surveyItem(canonical) != null
+    }
+
+    /** A basic product of the survey the table above does not have. */
+    private fun surveyItem(canonical: String): SurveyItem? =
+        FirstListSurvey.items.firstOrNull { it.name == canonical && !it.forBabiesOnly }?.takeIf { canonical !in perPerson }
 
     /**
      * [cadenceDays]: how often the item is bought, when known (a purchase has to last that long); [people] from
@@ -85,11 +98,26 @@ object SmartQuantities {
      */
     fun forItem(name: String, cadenceDays: Double?, people: Double, calibration: Double = 1.0): Quantity? {
         if (people <= 0.0) return null
-        val norm = perPerson[Catalog.lookup(name)?.name ?: return null] ?: return null
+        val canonical = Catalog.lookup(name)?.name ?: return null
+        val norm = perPerson[canonical] ?: return surveyItem(canonical)?.let { fromSurvey(it, cadenceDays, people, calibration) }
         val weeks = ((cadenceDays ?: 7.0) / 7.0).coerceIn(0.5, 4.0)
         val raw = norm.perWeek * HouseholdSize.shared(people) * weeks * calibration
         val amount = (ceil(raw / norm.step) * norm.step).coerceAtLeast(norm.step)
         return Quantity(amount, norm.unit)
+    }
+
+    /**
+     * The survey's rough estimate ([SurveyItem.perAdult] for each adult portion, shared as in [HouseholdSize.shared],
+     * plus [SurveyItem.perHome]) for as long as a purchase lasts: the item's rhythm when known, else its period (a
+     * week for fresh food, a month for the pantry). Rounded up to its step.
+     */
+    private fun fromSurvey(item: SurveyItem, cadenceDays: Double?, people: Double, calibration: Double): Quantity? {
+        val perPeriod = item.perHome + item.perAdult * HouseholdSize.shared(people)
+        if (perPeriod <= 0.0) return null
+        val days = (cadenceDays ?: item.period.days.toDouble()).coerceIn(3.0, 60.0)
+        val raw = perPeriod * days / item.period.days * calibration
+        val amount = (ceil(raw / item.step - 1e-9) * item.step).coerceAtLeast(item.step)
+        return Quantity(amount, item.unit)
     }
 
     /**

@@ -2,6 +2,7 @@ package app.necessityq.domain
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -90,6 +91,18 @@ class SmartQuantitiesTest {
         assertTrue(eight > one) // still more in all
         assertTrue(eight / 8.0 < one) // but fewer each
         assertEquals(1.0, HouseholdSize.shared(1.0), 0.0)
+    }
+
+    @Test fun `every basic product has a first amount, not only the nine of the table`() {
+        // from the survey's estimate: 2 adults share, 0.3 kg of peppers each a week → 0.54 → 1 kg in steps of 0.5
+        assertEquals(Quantity(1.0, QuantityUnit.KILOGRAM), SmartQuantities.forItem("פלפל", null, 2.0))
+        assertEquals(Quantity(1.0, QuantityUnit.PACKAGE), SmartQuantities.forItem("פיתות", null, 2.0))
+        assertNotNull(SmartQuantities.forItem("נייר טואלט", null, 4.0))
+        assertTrue(SmartQuantities.isEstimate("פלפל"))
+        assertNull(SmartQuantities.forItem("חיתולים", null, 2.0)) // only for a home with a small child
+        val first = TripSizer(emptyList(), 4.0).starter(emptySet()).map { it.identity.name }
+        assertTrue(first.toString(), first.containsAll(listOf("חלב", "ביצים", "לחם", "פלפל", "אורז", "נייר טואלט", "סבון כלים")))
+        assertFalse(first.contains("חיתולים"))
     }
 }
 

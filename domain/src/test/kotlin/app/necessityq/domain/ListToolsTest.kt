@@ -152,6 +152,23 @@ class ListToolsTest {
         assertTrue(proposed.reason.contains("דחיתם לאחרונה"))
     }
 
+    @Test fun `typing a whole word in quick-add shows the breads on the list, not לחמית`() {
+        val lines = listOf(
+            line("a", "לחם", Category.BAKERY),
+            line("b", "לחם מלא", Category.BAKERY),
+            line("c", "לחמית", Category.BREAKFAST_SNACKS),
+            line("d", "לחמניות", Category.BAKERY),
+            line("e", "חלב", Category.DAIRY),
+        )
+        val quick = { t: String -> ListFilter(text = t, wholeWords = true).apply(lines).map { it.id } }
+        assertEquals(listOf("a", "b"), quick("לחם"))
+        // still being typed: every name that begins so
+        assertEquals(listOf("a", "b", "c", "d"), quick("לח"))
+        assertEquals(listOf("c"), quick("לחמית"))
+        // the filter panel's own search still matches any part of a name
+        assertEquals(listOf("a", "b", "c", "d"), ListFilter(text = "לחם").apply(lines).map { it.id })
+    }
+
     @Test fun `filter and price estimate`() {
         val lines = listOf(
             line("a", "חלב", Category.DAIRY, source = LineSource.AUTO, quantity = Quantity.pieces(2)),

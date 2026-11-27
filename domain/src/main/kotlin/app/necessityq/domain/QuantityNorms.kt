@@ -136,6 +136,17 @@ object QuantityNorms {
         val dim = quantity.dimension
         var limit = normFor(name, category).limitBase(dim)
         if (householdUsual != null && householdUsual.dimension == dim) limit = maxOf(limit, householdUsual.baseAmount * HOUSEHOLD_ROOM)
+        // the usual amount of an item sold in packs of pieces (eggs, pittas) is in pieces: "30 חב' ביצים" is 30 trays
+        val piecesInPack = if (quantity.unit == QuantityUnit.PACKAGE) PackSizes.smallestPack(name)?.takeIf { it.dimension == Dimension.COUNT }?.amount else null
+        if (piecesInPack != null && piecesInPack >= 2.0) {
+            val pieces = quantity.amount * piecesInPack
+            val level = when {
+                pieces > limit * ABSURD_FACTOR + EPS -> QuantityLevel.ABSURD
+                pieces > limit + EPS -> QuantityLevel.LARGE
+                else -> QuantityLevel.USUAL
+            }
+            return QuantityCheck(level, Quantity(limit, QuantityUnit.PIECE))
+        }
         val amount = quantity.baseAmount
         val level = when {
             amount > limit * ABSURD_FACTOR + EPS -> QuantityLevel.ABSURD
