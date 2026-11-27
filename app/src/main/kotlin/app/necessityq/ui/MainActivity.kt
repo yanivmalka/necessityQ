@@ -92,11 +92,11 @@ class MainActivity : ComponentActivity() {
         joinFrom(intent)
     }
 
-    /** A join link (necessityq://join?code=…) offers to join that household, in one tap. */
+    /** A join link (necessityq://join?invite=…) offers to join that household, in one tap; the link works once. */
     private fun joinFrom(intent: android.content.Intent?) {
-        val code = app.necessityq.domain.JoinLinks.codeFrom(intent?.dataString) ?: return
+        val token = app.necessityq.domain.JoinLinks.tokenFrom(intent?.dataString) ?: return
         intent?.data = null
-        vm.requestJoin(code)
+        vm.requestJoin(token)
     }
 
     /** A tapped צ'אט פוד notification opens its conversation. */
@@ -219,15 +219,15 @@ private fun Root(vm: AppViewModel) {
                     // a replayed first run shows the welcome page without creating anything
                     OnboardingScreen(vm, s.account, Modifier.padding(padding), demo = household != null)
                 }
-                // opened from a join link: one tap joins (the code can still be typed by hand)
+                // opened from a join link: one tap joins (the link is one-time)
                 val pendingJoin by vm.pendingJoin.collectAsStateWithLifecycle()
-                pendingJoin?.let { code ->
+                pendingJoin?.let { token ->
                     androidx.compose.material3.AlertDialog(
                         onDismissRequest = vm::consumeJoin,
                         title = { Text("הצטרפות לבית") },
-                        text = { Text("להצטרף לרשימת הקניות של הבית שהזמין אתכם (קוד $code)?") },
+                        text = { Text("להצטרף לרשימת הקניות של הבית שהזמין אתכם? הקישור חד-פעמי ויתבטל עם ההצטרפות.") },
                         confirmButton = {
-                            androidx.compose.material3.TextButton(onClick = { vm.joinHousehold(code); vm.consumeJoin() }) { Text("הצטרפות") }
+                            androidx.compose.material3.TextButton(onClick = { vm.joinHousehold(token); vm.consumeJoin() }) { Text("הצטרפות") }
                         },
                         dismissButton = { androidx.compose.material3.TextButton(onClick = vm::consumeJoin) { Text("לא עכשיו") } },
                     )
@@ -486,14 +486,13 @@ private fun Root(vm: AppViewModel) {
                 }
             // a join link while already in a household: joining another one means leaving this one first
             val pendingJoin by vm.pendingJoin.collectAsStateWithLifecycle()
-            pendingJoin?.let { code ->
+            pendingJoin?.let {
                 androidx.compose.material3.AlertDialog(
                     onDismissRequest = vm::consumeJoin,
-                    title = { Text(if (code == household.joinCode) "כבר בבית הזה" else "כבר יש לך בית") },
+                    title = { Text("כבר יש לך בית") },
                     text = {
                         Text(
-                            if (code == household.joinCode) "הקישור הוא לבית \"${household.name}\", שכבר הצטרפת אליו."
-                            else "כדי להצטרף לבית אחר צריך קודם לצאת מ\"${household.name}\" (בלשונית הבית, בבני הבית ושיתוף, יש \"יציאה מהבית\"), ואז לפתוח שוב את הקישור.",
+                            "כדי להצטרף לבית אחר צריך קודם לצאת מ\"${household.name}\" (בלשונית הבית, בבני הבית ושיתוף, יש \"יציאה מהבית\"), ואז לפתוח שוב את הקישור. הקישור לא נוצל.",
                         )
                     },
                     confirmButton = { androidx.compose.material3.TextButton(onClick = vm::consumeJoin) { Text("סגירה") } },

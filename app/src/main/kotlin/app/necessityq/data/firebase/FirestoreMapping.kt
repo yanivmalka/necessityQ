@@ -192,7 +192,6 @@ internal object FirestoreMapping {
         return Household(
             id = doc.id,
             name = doc.getString("name") ?: "הבית שלנו",
-            joinCode = doc.getString("joinCode") ?: "",
             members = (doc.get("members") as? List<String>) ?: emptyList(),
             ownerId = doc.getString("ownerId"),
         )

@@ -7,18 +7,18 @@ import org.junit.Test
 
 class MembersTest {
     @Test fun `legacy household without owner treats the first member as owner`() {
-        val h = Household("h", "בית", "ABC234", listOf("a", "b"))
+        val h = Household("h", "בית", listOf("a", "b"))
         assertTrue(h.isOwner("a"))
         assertFalse(h.isOwner("b"))
     }
 
     @Test fun `owner who is no longer a member falls back to the first member`() {
-        val h = Household("h", "בית", "ABC234", listOf("b", "c"), ownerId = "a")
+        val h = Household("h", "בית", listOf("b", "c"), ownerId = "a")
         assertEquals("b", h.effectiveOwnerId)
     }
 
     @Test fun `resolve lists the owner first and names unnamed members`() {
-        val h = Household("h", "בית", "ABC234", listOf("a", "b", "c"), ownerId = "b")
+        val h = Household("h", "בית", listOf("a", "b", "c"), ownerId = "b")
         val members = Members.resolve(h, mapOf("b" to ("יניב" to "y@x.com"), "c" to ("כרן" to null)))
         assertEquals(listOf("b", "c", "a"), members.map { it.userId })
         assertEquals(MemberRole.OWNER, members[0].role)
@@ -27,7 +27,7 @@ class MembersTest {
     }
 
     @Test fun `a family profile linked to an account gives the account its name`() {
-        val h = Household("h", "בית", "ABC234", listOf("a", "b", "c"), ownerId = "a")
+        val h = Household("h", "בית", listOf("a", "b", "c"), ownerId = "a")
         val members = Members.resolve(h, mapOf("a" to ("Yochai Cohen" to null), "b" to ("Adel" to null)))
         val family = listOf(
             FamilyMember("f1", "יוחאי", linkedUserId = "a"),

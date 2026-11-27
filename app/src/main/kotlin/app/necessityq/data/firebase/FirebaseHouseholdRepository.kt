@@ -28,22 +28,26 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import app.necessityq.domain.JoinLinks
 import app.necessityq.platform.AvatarCodec
 import java.security.SecureRandom
 
 /**
  * Firebase identity (anonymous, upgradable to a Google account) + household membership.
  *
- *   users/{uid}                   { householdId, displayName?, googleName?, email?, photoUrl?, photo?, googlePhoto? }
- *   households/{hid}              { name, joinCode, ownerId, members[], createdAt }
+ *   users/{uid}                   { householdId, joinToken?, displayName?, googleName?, email?, photoUrl?, photo?, googlePhoto? }
+ *   households/{hid}              { name, ownerId, members[], createdAt }
  *   households/{hid}/members/{uid} { displayName, email, photo }   (each member writes only their own)
  *
  * Pictures are small Base64 JPEGs: `photo` is one the user picked, `googlePhoto` a copy of the Google
  * account's picture (fetched once, so other members never need to reach Google for it).
- *   joinCodes/{code}              { householdId }
+ *   invites/{token}               { householdId, createdBy, createdAt, expiresAt, usedBy?, usedAt? }
  *
- * A member invites others by sharing the 6-character join code; only the owner can remove
- * participants, rename the household or rotate the code.
+ * Joining is only through a one-time invitation link: any member creates an invitation (a long random token,
+ * valid [JoinLinks.VALID_DAYS] days), and the first person who joins with it uses it up. The join is one batch —
+ * mark the invitation used, add the member, set the user's pointer — which the security rules accept only together
+ * (the user's transient `joinToken` names the invitation they claim). Only the owner can remove participants or
+ * rename the household.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class FirebaseHouseholdRepository(
@@ -194,33 +198,39 @@ class FirebaseHouseholdRepository(
     override suspend fun createHousehold(name: String): Household {
         val uid = requireUid()
         val householdRef = db.collection("households").document()
-        val code = newJoinCode()
-        val household = Household(householdRef.id, name.trim().ifBlank { "הבית שלנו" }, code, listOf(uid), ownerId = uid)
-        // household first: the join-code and user documents are validated against it by the security rules
+        val household = Household(householdRef.id, name.trim().ifBlank { "הבית שלנו" }, listOf(uid), ownerId = uid)
+        // household first: the user document is validated against it by the security rules
         householdRef.set(
             mapOf(
                 "name" to household.name,
-                "joinCode" to code,
                 "ownerId" to uid,
                 "members" to listOf(uid),
                 "createdAt" to FieldValue.serverTimestamp(),
             ),
         ).await()
-        db.batch()
-            .set(db.collection("joinCodes").document(code), mapOf("householdId" to householdRef.id))
-            .set(db.collection("users").document(uid), mapOf("householdId" to householdRef.id), SetOptions.merge())
-            .commit().await()
+        db.collection("users").document(uid).set(mapOf("householdId" to householdRef.id), SetOptions.merge()).await()
         return household
     }
 
-    override suspend fun joinHousehold(code: String): Household {
+    override suspend fun joinHousehold(inviteToken: String): Household {
         val uid = requireUid()
-        val normalized = code.trim().uppercase()
-        val codeDoc = db.collection("joinCodes").document(normalized).get().await()
-        val hid = codeDoc.getString("householdId") ?: error("קוד לא נמצא")
+        val token = inviteToken.trim()
+        require(JoinLinks.isToken(token)) { "הקישור אינו תקין" }
+        val inviteRef = db.collection("invites").document(token)
+        val invite = inviteRef.get().await()
+        val hid = invite.getString("householdId") ?: error("ההזמנה לא נמצאה, או שכבר נוצלה")
+        if (invite.getString("usedBy") != null) error("הקישור כבר נוצל. בקשו קישור חדש")
+        val expiresAt = invite.getTimestamp("expiresAt")?.toDate()?.time ?: 0L
+        if (expiresAt <= System.currentTimeMillis()) error("תוקף הקישור פג. בקשו קישור חדש")
         val householdRef = db.collection("households").document(hid)
-        householdRef.update("members", FieldValue.arrayUnion(uid)).await()
-        db.collection("users").document(uid).set(mapOf("householdId" to hid), SetOptions.merge()).await()
+        val userRef = db.collection("users").document(uid)
+        // one batch: the rules accept the member only together with the used-up invitation
+        db.batch()
+            .update(inviteRef, mapOf("usedBy" to uid, "usedAt" to FieldValue.serverTimestamp()))
+            .update(householdRef, "members", FieldValue.arrayUnion(uid))
+            .set(userRef, mapOf("householdId" to hid, "joinToken" to token), SetOptions.merge())
+            .commit().await()
+        runCatching { userRef.update("joinToken", FieldValue.delete()).await() }
         val snapshot = householdRef.get().await()
         return FirestoreMapping.householdFrom(snapshot) ?: error("משק הבית לא נמצא")
     }
@@ -295,21 +305,25 @@ class FirebaseHouseholdRepository(
             .commit().await()
     }
 
-    override suspend fun regenerateJoinCode(): String {
+    override suspend fun createInvite(): String {
         val (uid, household) = currentHousehold()
-        require(household.isOwner(uid)) { "רק מנהל הבית יכול להחליף את הקוד" }
-        val code = newJoinCode()
-        db.batch()
-            .set(db.collection("joinCodes").document(code), mapOf("householdId" to household.id))
-            .update(db.collection("households").document(household.id), "joinCode", code)
-            .also { if (household.joinCode.isNotBlank()) it.delete(db.collection("joinCodes").document(household.joinCode)) }
-            .commit().await()
-        return code
+        val token = newInviteToken()
+        val expires = java.util.Date(System.currentTimeMillis() + JoinLinks.VALID_DAYS * 24L * 60 * 60 * 1000)
+        db.collection("invites").document(token).set(
+            mapOf(
+                "householdId" to household.id,
+                "createdBy" to uid,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "expiresAt" to com.google.firebase.Timestamp(expires),
+            ),
+        ).await()
+        return token
     }
 
-    private fun newJoinCode(): String {
-        val alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" // no 0/O/1/I
+    /** 24 random characters (about 120 bits): cannot be guessed, so the link itself is the key. */
+    private fun newInviteToken(): String {
+        val alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
         val random = SecureRandom()
-        return (1..6).map { alphabet[random.nextInt(alphabet.length)] }.joinToString("")
+        return (1..24).map { alphabet[random.nextInt(alphabet.length)] }.joinToString("")
     }
 }

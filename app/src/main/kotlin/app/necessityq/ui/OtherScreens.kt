@@ -68,7 +68,6 @@ import kotlin.math.roundToInt
 @Composable
 fun OnboardingScreen(vm: AppViewModel, account: Account, modifier: Modifier = Modifier, demo: Boolean = false) {
     var name by remember { mutableStateOf("הבית שלנו") }
-    var code by remember { mutableStateOf("") }
     Column(
         modifier.fillMaxSize().fadingVerticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -111,19 +110,13 @@ fun OnboardingScreen(vm: AppViewModel, account: Account, modifier: Modifier = Mo
         Text("הצטרפות לבית קיים", style = MaterialTheme.typography.titleMedium)
         if (vm.isShared) {
             Text(
-                "מישהו מהבית שלח לכם קישור? פתחו אותו והצטרפות תהיה בנגיעה. אפשר גם להקליד את הקוד שבהודעה.",
+                "מצטרפים לבית רק דרך קישור הזמנה חד-פעמי. מישהו מהבית שלח לכם קישור? פתחו אותו והצטרפות תהיה בנגיעה.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            OutlinedTextField(
-                code, { code = it.uppercase().take(6) },
-                label = { Text("קוד הצטרפות (6 תווים)") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedButton(
-                onClick = { if (demo) vm.replayOnboardingDone() else vm.joinHousehold(code) },
-                enabled = demo || code.length == 6,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("הצטרפות") }
+            if (demo) {
+                OutlinedButton(onClick = { vm.replayOnboardingDone() }, modifier = Modifier.fillMaxWidth()) { Text("הצטרפות") }
+            }
         } else {
             Text(
                 "גרסה זו נבנתה ללא שרת סנכרון, ולכן הרשימה נשמרת במכשיר זה בלבד.",

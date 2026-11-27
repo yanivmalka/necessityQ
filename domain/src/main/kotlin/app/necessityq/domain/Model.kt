@@ -150,7 +150,6 @@ data class SuggestionSuppression(
 data class Household(
     val id: String,
     val name: String,
-    val joinCode: String,
     val members: List<String>,
     /** Households created before roles existed have no owner; the first member counts as owner. */
     val ownerId: String? = null,

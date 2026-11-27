@@ -1,36 +1,40 @@
 package app.necessityq.domain
 
 /**
- * Joining a household by link. The shared text carries a web link (it is clickable in every messaging app); the
- * page it opens hands the code to the app (`necessityq://join?code=…`), where one tap joins. The 6-character
- * code stays in the text as a fallback.
+ * Joining a household is only by a one-time link. The shared text carries a web link (clickable in every messaging
+ * app); the page it opens hands the invitation to the app (`necessityq://join?invite=…`), where one tap joins.
+ * The invitation is used up by the first person who joins with it, and expires after [VALID_DAYS] days.
  */
 object JoinLinks {
     /** The web page that opens the app (served from the repository's `docs/` folder by GitHub Pages). */
     const val PAGE = "https://yanivmalka.github.io/necessityQ/join.html"
     const val SCHEME = "necessityq"
     const val HOST = "join"
+    const val PARAM = "invite"
+    const val VALID_DAYS = 7
 
-    private val codeShape = Regex("^[A-Z0-9]{4,12}$")
+    private val tokenShape = Regex("^[A-Za-z0-9]{16,64}$")
 
-    fun link(code: String): String = "$PAGE?code=${code.trim().uppercase()}"
+    fun isToken(text: String): Boolean = tokenShape.matches(text)
 
-    /** The invitation text: the link, and the code for typing by hand. */
-    fun shareText(householdName: String, code: String): String =
-        "הצטרפו לרשימת הקניות של \"$householdName\" ב-necessityQ: ${link(code)}\n" +
-            "או בהקלדת הקוד באפליקציה: ${code.trim().uppercase()}"
+    fun link(token: String): String = "$PAGE?$PARAM=${token.trim()}"
+
+    /** The invitation text: only the link. */
+    fun shareText(householdName: String, token: String): String =
+        "הצטרפו לרשימת הקניות של \"$householdName\" ב-necessityQ: ${link(token)}\n" +
+            "הקישור חד-פעמי, ותקף ל-$VALID_DAYS ימים."
 
     /**
-     * The join code in a link that opened the app — `necessityq://join?code=…` or the web page's own address —
-     * or null when it is not a join link (or the code is not one).
+     * The invitation token in a link that opened the app — `necessityq://join?invite=…` or the web page's own
+     * address — or null when it is not a join link (or the token is not one).
      */
-    fun codeFrom(uri: String?): String? {
+    fun tokenFrom(uri: String?): String? {
         val text = uri?.trim() ?: return null
         val isJoin = text.startsWith("$SCHEME://$HOST", ignoreCase = true) || text.startsWith(PAGE, ignoreCase = true)
         if (!isJoin) return null
         val query = text.substringAfter('?', "").substringBefore('#')
-        val code = query.split('&').firstOrNull { it.startsWith("code=", ignoreCase = true) }?.substringAfter('=')
-            ?.trim()?.uppercase() ?: return null
-        return code.takeIf { codeShape.matches(it) }
+        val token = query.split('&').firstOrNull { it.startsWith("$PARAM=", ignoreCase = true) }?.substringAfter('=')
+            ?.trim() ?: return null
+        return token.takeIf { isToken(it) }
     }
 }

@@ -100,7 +100,6 @@ fun HouseholdScreen(
     var confirmLeave by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
     var memberToRemove by remember { mutableStateOf<Member?>(null) }
-    var confirmNewCode by remember { mutableStateOf(false) }
 
     Column(modifier) {
         TopAppBar(
@@ -137,21 +136,19 @@ fun HouseholdScreen(
             // the family's profiles (who eats, tastes, ratings) are managed here, with the participants
             FamilyCard(vm, onOpenMember = onOpenFamilyMember)
             if (vm.isShared) {
-                SectionTitle("קוד הצטרפות")
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(household.joinCode, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
-                    IconButton(onClick = {
-                        // a link that opens the app and joins in one tap; the code stays in the text as a fallback
-                        val text = app.necessityq.domain.JoinLinks.shareText(household.name, household.joinCode)
+                SectionTitle("הזמנה לבית")
+                // each tap makes a new link that opens the app and joins in one tap, and works for one person only
+                OutlinedButton(onClick = {
+                    vm.createInvite(household.name) { text ->
                         val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
-                        context.startActivity(Intent.createChooser(send, "שיתוף קוד"))
-                    }) { Icon(Icons.Default.Share, contentDescription = "שיתוף") }
-                    if (isOwner) {
-                        IconButton(onClick = { confirmNewCode = true }) {
-                            Icon(Icons.Default.Refresh, contentDescription = "קוד חדש")
-                        }
+                        context.startActivity(Intent.createChooser(send, "שליחת קישור הזמנה"))
                     }
+                }) {
+                    Icon(Icons.Default.Share, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("שליחת קישור הצטרפות חד-פעמי")
                 }
+                Text("הקישור מתבטל אחרי שמישהו מצטרף בעזרתו, ופג אחרי ${app.necessityq.domain.JoinLinks.VALID_DAYS} ימים. לכל אדם נוסף שולחים קישור חדש.", style = MaterialTheme.typography.bodySmall)
                 Text("כל שינוי ברשימה מופיע מיד אצל כל בני הבית, גם כשעובדים במקביל.", style = MaterialTheme.typography.bodySmall)
 
                 HorizontalDivider()
@@ -165,7 +162,7 @@ fun HouseholdScreen(
                     )
                 }
                 if (!isOwner) {
-                    Text("רק מנהל הבית יכול להסיר משתתפים או להחליף את הקוד.", style = MaterialTheme.typography.bodySmall)
+                    Text("רק מנהל הבית יכול להסיר משתתפים.", style = MaterialTheme.typography.bodySmall)
                 }
             } else {
                 Text("מצב מכשיר יחיד: הנתונים נשמרים במכשיר בלבד.", style = MaterialTheme.typography.bodyMedium)
@@ -221,18 +218,9 @@ fun HouseholdScreen(
         AlertDialog(
             onDismissRequest = { memberToRemove = null },
             title = { Text("להסיר את ${member.displayName}?") },
-            text = { Text("המשתתף לא יראה יותר את הרשימה. כדי שיחזור, יצטרך את קוד ההצטרפות.") },
+            text = { Text("המשתתף לא יראה יותר את הרשימה. כדי שיחזור, יצטרך קישור הזמנה חדש.") },
             confirmButton = { TextButton(onClick = { memberToRemove = null; vm.removeMember(member.userId) }) { Text("הסרה") } },
             dismissButton = { TextButton(onClick = { memberToRemove = null }) { Text("ביטול") } },
-        )
-    }
-    if (confirmNewCode) {
-        AlertDialog(
-            onDismissRequest = { confirmNewCode = false },
-            title = { Text("להחליף את קוד ההצטרפות?") },
-            text = { Text("הקוד הנוכחי יפסיק לעבוד. משתתפים קיימים לא מושפעים.") },
-            confirmButton = { TextButton(onClick = { confirmNewCode = false; vm.regenerateJoinCode() }) { Text("החלפה") } },
-            dismissButton = { TextButton(onClick = { confirmNewCode = false }) { Text("ביטול") } },
         )
     }
 }

@@ -6,7 +6,9 @@ import {
   initializeTestEnvironment,
   type RulesTestEnvironment,
 } from "@firebase/rules-unit-testing";
-import { arrayRemove, arrayUnion, deleteField, doc, getDoc, getDocs, collection, setDoc, updateDoc } from "firebase/firestore";
+import {
+  arrayRemove, arrayUnion, deleteDoc, deleteField, doc, getDoc, getDocs, collection, setDoc, updateDoc, writeBatch, serverTimestamp, Timestamp,
+} from "firebase/firestore";
 import { afterAll, beforeAll, beforeEach, describe, it } from "vitest";
 
 const HID = "house1";
@@ -14,6 +16,9 @@ const OWNER = "owner";
 const MEMBER = "member";
 const OTHER_MEMBER = "member2";
 const STRANGER = "stranger";
+const TOKEN = "Ab3dE5gH7jK9mN2pQ4rS6tUv";
+const EXPIRED = "Xx3dE5gH7jK9mN2pQ4rS6tUv";
+const inDays = (d: number) => Timestamp.fromMillis(Date.now() + d * 24 * 60 * 60 * 1000);
 
 let env: RulesTestEnvironment;
 
@@ -34,11 +39,11 @@ beforeEach(async () => {
     const db = ctx.firestore();
     await setDoc(doc(db, "households", HID), {
       name: "test",
-      joinCode: "ABC123",
       ownerId: OWNER,
       members: [OWNER, MEMBER, OTHER_MEMBER],
     });
-    await setDoc(doc(db, "joinCodes", "ABC123"), { householdId: HID });
+    await setDoc(doc(db, "invites", TOKEN), { householdId: HID, createdBy: OWNER, expiresAt: inDays(3) });
+    await setDoc(doc(db, "invites", EXPIRED), { householdId: HID, createdBy: OWNER, expiresAt: inDays(-1) });
     await setDoc(doc(db, "households", HID, "lines", "l1"), { name: "milk" });
   });
 });
@@ -115,15 +120,64 @@ describe("households: owner powers", () => {
   });
 });
 
-describe("join codes", () => {
-  it("a signed-in user may get a code but never list codes", async () => {
-    await assertSucceeds(getDoc(doc(dbAs(STRANGER), "joinCodes", "ABC123")));
-    await assertFails(getDocs(collection(dbAs(STRANGER), "joinCodes")));
+describe("one-time invitations", () => {
+  const join = (uid: string, token: string, hid = HID) => {
+    const db = dbAs(uid);
+    const batch = writeBatch(db);
+    batch.update(doc(db, "invites", token), { usedBy: uid, usedAt: serverTimestamp() });
+    batch.update(doc(db, "households", hid), { members: arrayUnion(uid) });
+    batch.set(doc(db, "users", uid), { householdId: hid, joinToken: token }, { merge: true });
+    return batch.commit();
+  };
+
+  it("a signed-in user may get an invitation by its token but never list them", async () => {
+    await assertSucceeds(getDoc(doc(dbAs(STRANGER), "invites", TOKEN)));
+    await assertFails(getDocs(collection(dbAs(STRANGER), "invites")));
   });
 
-  it("codes are never updated, and only the owner deletes them", async () => {
-    await assertFails(updateDoc(doc(dbAs(OWNER), "joinCodes", "ABC123"), { householdId: "other" }));
-    await assertFails(setDoc(doc(dbAs(MEMBER), "joinCodes", "ABC123"), { householdId: HID }));
+  it("a member creates an invitation for their own household, valid at most a week", async () => {
+    const mk = (uid: string, data: Record<string, unknown>) => setDoc(doc(dbAs(uid), "invites", "NewToken123456789012345"), data);
+    const ok = { householdId: HID, createdBy: MEMBER, createdAt: serverTimestamp(), expiresAt: inDays(7) };
+    await assertSucceeds(mk(MEMBER, ok));
+    await assertFails(mk(STRANGER, { ...ok, createdBy: STRANGER }));
+    await assertFails(mk(MEMBER, { ...ok, expiresAt: inDays(30) }));
+    await assertFails(mk(MEMBER, { ...ok, createdBy: OWNER }));
+  });
+
+  it("a stranger joins with a valid invitation, and it is used up", async () => {
+    await assertSucceeds(join(STRANGER, TOKEN));
+    await assertSucceeds(getDoc(doc(dbAs(STRANGER), "households", HID)));
+  });
+
+  it("the same invitation cannot be used twice", async () => {
+    await assertSucceeds(join(STRANGER, TOKEN));
+    await assertFails(join("second-stranger", TOKEN));
+  });
+
+  it("an expired invitation does not work", async () => {
+    await assertFails(join(STRANGER, EXPIRED));
+  });
+
+  it("adding yourself without an invitation is refused", async () => {
+    await assertFails(updateDoc(doc(dbAs(STRANGER), "households", HID), { members: arrayUnion(STRANGER) }));
+  });
+
+  it("an invitation to one household cannot open another", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "households", "house2"), { name: "other", ownerId: "someone", members: ["someone"] });
+    });
+    await assertFails(join(STRANGER, TOKEN, "house2"));
+  });
+
+  it("the old short join codes no longer exist as a way in", async () => {
+    await assertFails(getDoc(doc(dbAs(STRANGER), "joinCodes", "ABC123")));
+  });
+
+  it("an invitation is never edited otherwise, and only its creator or the owner revokes it", async () => {
+    await assertFails(updateDoc(doc(dbAs(OWNER), "invites", TOKEN), { householdId: "other" }));
+    await assertFails(setDoc(doc(dbAs(STRANGER), "invites", TOKEN), { householdId: HID }));
+    await assertFails(deleteDoc(doc(dbAs(MEMBER), "invites", TOKEN)));
+    await assertSucceeds(deleteDoc(doc(dbAs(OWNER), "invites", TOKEN)));
   });
 });
 
