@@ -310,9 +310,12 @@ fun ItemSheet(
             val priceInfo = rememberItemPriceInfo(vm, itemId, productName, productVariant)
             // "בחירת מוצר מדויק": one tap on the price card opens the products in a sheet
             var pickerOpen by remember(itemId) { mutableStateOf(false) }
-            BranchPriceSection(vm, itemId = itemId, info = priceInfo, onPick = { pickerOpen = true })
-            // the chosen product at every followed branch, like a stock ticker
-            BranchQuotesStrip(vm, chosen = priceInfo?.preferred)
+            // prices are opt-in ("מחירים על האריחים וסכום משוער"): with the feature off the page shows no price at all
+            if (features.isOn(app.necessityq.domain.Feature.PRICES, mode)) {
+                BranchPriceSection(vm, itemId = itemId, info = priceInfo, onPick = { pickerOpen = true })
+                // the chosen product at every followed branch, like a stock ticker
+                BranchQuotesStrip(vm, chosen = priceInfo?.preferred)
+            }
             // promotions on it at the followed branches: where and how much (the gift on its tile)
             if (features.isOn(app.necessityq.domain.Feature.PROMOS, mode)) ItemPromotions(vm, itemId)
             // how it compares with the household's other branches, from the gap chosen in the settings
