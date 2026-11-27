@@ -7,7 +7,7 @@ import { setGlobalOptions } from "firebase-functions/v2";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onMessagePublished } from "firebase-functions/v2/pubsub";
-import { defineSecret, defineString } from "firebase-functions/params";
+import { defineString } from "firebase-functions/params";
 import { GoogleGenAI } from "@google/genai";
 import { GoogleAuth } from "google-auth-library";
 import { guardConfig, parseNotification, shouldCut } from "./budget";
@@ -317,8 +317,11 @@ async function sendAlerts(householdId: string, messageId: string, m: ChatMessage
   return result.successCount;
 }
 
-/** The Gemini API key (Google AI Studio), set once with `firebase functions:secrets:set GEMINI_API_KEY`. */
-const geminiKey = defineSecret("GEMINI_API_KEY");
+/**
+ * The Gemini API key (Google AI Studio). Kept as the GitHub secret GEMINI_API_KEY; the deploy workflow writes it to
+ * functions/.env, so no command line is needed. Empty = not set up yet: the app then adds text as typed.
+ */
+const geminiKey = defineString("GEMINI_API_KEY", { default: "" });
 /** Which Gemini model reads (GEMINI_MODEL in functions/.env to change it without code). */
 const geminiModel = defineString("GEMINI_MODEL", { default: DEFAULT_MODEL });
 
@@ -327,9 +330,10 @@ const geminiModel = defineString("GEMINI_MODEL", { default: DEFAULT_MODEL });
  * items (see interpret.ts). Members of the household only; cached by text; a daily limit per household.
  */
 export const interpretItems = onCall(
-  { memory: "256MiB", timeoutSeconds: 60, invoker: "public", secrets: [geminiKey] },
+  { memory: "256MiB", timeoutSeconds: 60, invoker: "public" },
   async (req) => {
     if (!req.auth) throw new HttpsError("unauthenticated", "sign in first");
+    if (!geminiKey.value()) throw new HttpsError("failed-precondition", "GEMINI_API_KEY is not set");
     const request = validateRequest(req.data);
     if (typeof request === "string") throw new HttpsError("invalid-argument", request);
     const { text, people, householdId } = request;

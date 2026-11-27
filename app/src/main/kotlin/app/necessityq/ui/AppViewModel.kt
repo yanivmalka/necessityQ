@@ -154,7 +154,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             when {
                 proposals.isEmpty() -> {
                     _reading.value = null
-                    _messages.tryEmit(if (items == null) "אין חיבור להבנת הטקסט, נוסף כפי שנכתב" else "לא זוהה מוצר, נוסף כפי שנכתב")
+                    _messages.tryEmit(if (items == null) "הבנת הטקסט לא זמינה כרגע, נוסף כפי שנכתב" else "לא זוהה מוצר, נוסף כפי שנכתב")
                     launchSafe { container.service.addFromText(hid, uid, text, snapshot.value?.lines.orEmpty())?.let { _added.tryEmit(it.item.id) } }
                 }
                 // one item: added at once, with the amount typed when the reading gave none ("2 חלבב" → 2 × חלב)
