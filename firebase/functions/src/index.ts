@@ -28,6 +28,7 @@ import {
 import { Branch, Snapshot } from "./model";
 import { downloadTzameret, snapshotStats } from "./nutrition";
 import { DAILY_LIMIT, DEFAULT_MODEL, cacheKey, dayKey, readWithGemini, validateRequest } from "./interpret";
+import { baselineCacheKey, estimateWithGemini, validateBaselineRequest } from "./baseline";
 
 // Israeli region: several retailer portals refuse requests from abroad.
 setGlobalOptions({ region: "me-west1", maxInstances: 2 });
@@ -367,5 +368,46 @@ export const interpretItems = onCall(
     await cached.set({ text, people: people ?? null, items, model, at: FieldValue.serverTimestamp() });
     logger.info("interpret", { householdId, items: items.length });
     return { items, cached: false };
+  },
+);
+
+/**
+ * רשימה ראשונה למשפחה: the amounts the first-list survey proposes, estimated from the ages of the people at home
+ * (see baseline.ts). Members of the household only; cached by makeup and questions; no daily limit yet.
+ */
+export const estimateBaseline = onCall(
+  { memory: "256MiB", timeoutSeconds: 60, invoker: "public" },
+  async (req) => {
+    if (!req.auth) throw new HttpsError("unauthenticated", "sign in first");
+    if (!geminiKey()) throw new HttpsError("failed-precondition", "GEMINI_API_KEY is not set");
+    const request = validateBaselineRequest(req.data);
+    if (typeof request === "string") throw new HttpsError("invalid-argument", request);
+    const { ages, items, householdId } = request;
+    const household = db.doc(`households/${householdId}`);
+    const members = ((await household.get()).get("members") as string[] | undefined) ?? [];
+    if (!members.includes(req.auth.uid)) throw new HttpsError("permission-denied", "not a member");
+
+    const cached = db.doc(`baselineCache/${baselineCacheKey(ages, items)}`);
+    const hit = await cached.get();
+    if (hit.exists) return { amounts: hit.get("amounts") ?? {}, cached: true };
+
+    // no daily limit for now (a decision: one user while in development); the limits are decided with the
+    // product's general model before launch (ROADMAP 0.6)
+
+    const ai = new GoogleGenAI({ apiKey: geminiKey() });
+    const model = geminiModel();
+    let amounts;
+    try {
+      amounts = await estimateWithGemini(ai, model, ages, items);
+    } catch (e) {
+      logger.error("baseline failed", { householdId, error: e instanceof Error ? e.message : String(e) });
+      throw new HttpsError("unavailable", "could not estimate right now");
+    }
+    // no household or user in the cache: only the ages and the estimate
+    if (Object.keys(amounts).length > 0) {
+      await cached.set({ ages: [...ages].sort((a, b) => a - b), amounts, model, at: FieldValue.serverTimestamp() });
+    }
+    logger.info("baseline", { householdId, items: Object.keys(amounts).length });
+    return { amounts, cached: false };
   },
 );

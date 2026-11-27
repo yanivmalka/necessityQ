@@ -6,12 +6,16 @@ import app.necessityq.domain.DishKind
 import app.necessityq.domain.FamilyMember
 import app.necessityq.domain.Flavor
 import app.necessityq.domain.FlavorPref
+import app.necessityq.domain.BaselineAmount
 import app.necessityq.domain.Gender
+import app.necessityq.domain.HouseholdBaseline
+import app.necessityq.domain.HouseholdMakeup
 import app.necessityq.domain.ListMemory
 import app.necessityq.domain.MealData
 import app.necessityq.domain.MealPlan
 import app.necessityq.domain.MealSlot
 import app.necessityq.domain.PlannedMeal
+import app.necessityq.domain.QuantityUnit
 import app.necessityq.domain.Rating
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -56,6 +60,15 @@ object MealJson {
     )
     @Serializable private data class P(val day: Int, val slot: String, val dishId: String, val audience: List<String> = emptyList(), val servings: Int? = null)
     @Serializable private data class O(val epochDay: Long, val slot: String, val dishId: String? = null, val audience: List<String> = emptyList(), val servings: Int? = null)
+    /** One answer of the first-list survey: [amount] of [unit] (a [QuantityUnit] name) every [days]; 0 = not bought. */
+    @Serializable private data class BA(val amount: Double, val unit: String, val days: Int)
+    /** The first-list survey ([HouseholdBaseline]); [ages] only when the home was described in the survey. */
+    @Serializable private data class B(
+        val filledAt: Long,
+        val amounts: Map<String, BA> = emptyMap(),
+        val ages: List<Int>? = null,
+        val skipped: Boolean = false,
+    )
     @Serializable private data class Root(
         val members: List<M> = emptyList(),
         val dishes: List<D> = emptyList(),
@@ -69,6 +82,7 @@ object MealJson {
         val pantry: List<String> = emptyList(),
         val buy: List<String> = emptyList(),
         val packs: Map<String, Long> = emptyMap(),
+        val baseline: B? = null,
     )
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -106,6 +120,9 @@ object MealJson {
             pantry = data.pantry.toList(),
             buy = data.buy.toList(),
             packs = data.packs,
+            baseline = data.baseline?.let { b ->
+                B(b.filledAtMillis, b.amounts.mapValues { (_, a) -> BA(a.amount, a.unit.name, a.periodDays) }, b.makeup?.ages, b.skipped)
+            },
         ),
     )
 
@@ -147,6 +164,18 @@ object MealJson {
             pantry = r.pantry.toSet(),
             buy = r.buy.toSet(),
             packs = r.packs,
+            baseline = r.baseline?.let { b ->
+                HouseholdBaseline(
+                    filledAtMillis = b.filledAt,
+                    amounts = b.amounts.mapNotNull { (name, a) ->
+                        val unit = enumOrNull<QuantityUnit>(a.unit) ?: return@mapNotNull null
+                        if (!a.amount.isFinite() || a.amount < 0.0 || a.days <= 0) return@mapNotNull null
+                        name to BaselineAmount(a.amount, unit, a.days)
+                    }.toMap(),
+                    makeup = b.ages?.let { HouseholdMakeup(it.filter { age -> age in 0..120 }) },
+                    skipped = b.skipped,
+                )
+            },
         )
     }
 }

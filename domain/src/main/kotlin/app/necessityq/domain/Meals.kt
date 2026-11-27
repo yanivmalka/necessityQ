@@ -183,6 +183,8 @@ data class MealData(
     val buy: Set<String> = emptySet(),
     /** The pack size the household buys, per item ([PackSizes.keyFor] → size in grams / ml / pieces); none = whatever fits. */
     val packs: Map<String, Long> = emptyMap(),
+    /** The first-list survey's answers ([FirstListSurvey]); null until it was filled in or skipped. */
+    val baseline: HouseholdBaseline? = null,
 ) {
     /** Left off the list: marked "יש בבית", or a staple the household has not said it needs ([Staples]). */
     fun isAtHome(ingredient: ScaledIngredient): Boolean = isAtHome(ingredient.base, ingredient.quantity)

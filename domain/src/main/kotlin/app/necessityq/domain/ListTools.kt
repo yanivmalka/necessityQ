@@ -67,7 +67,7 @@ data class GeneratedItem(
  *
  * [GenerateMode.DUE] is the same list as the "בניית רשימה לשבוע" card ([SuggestionEngine.forNextTrip]), preselected;
  * items whose rhythm is still a guess are shown below it, not preselected. A household with no history yet gets a
- * first list from its size ([TripSizer.starter]). Amounts come from [TripSizer], as everywhere else.
+ * first list from the survey's answers or its size ([TripSizer.starter]). Amounts come from [TripSizer], as everywhere else.
  */
 object ListGenerator {
     fun propose(
@@ -86,9 +86,11 @@ object ListGenerator {
         rejections: Map<String, Int> = emptyMap(),
         /** The size of the household ([HouseholdSize.people]); 0 when unknown. */
         people: Double = 0.0,
+        /** The first-list survey's answers ([FirstListSurvey]), when it was filled in. */
+        baseline: HouseholdBaseline? = null,
     ): List<GeneratedItem> {
         val onList = current.filter { it.status == LineStatus.NEEDED }.map { it.itemId }.toSet()
-        val sizer = TripSizer(stats, people)
+        val sizer = TripSizer(stats, people, baseline)
         val horizon = horizonDays.toInt()
         val proposed = when (mode) {
             GenerateMode.DUE -> {

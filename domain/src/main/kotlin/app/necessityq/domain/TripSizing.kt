@@ -10,14 +10,20 @@ data class SizedQuantity(val quantity: Quantity?, val note: String? = null)
 /**
  * The one place the amounts of proposed lines are worked out (suggestion cards, quick-add chips, the week's list,
  * the list from past purchases), so they all agree:
- *  1. one purchase: what the household usually buys ([ItemStats.typicalQuantity]); with no amount on record, the
+ *  1. one purchase: what the household usually buys ([ItemStats.typicalQuantity]); with no amount on record, what it
+ *     said it buys in the first-list survey ([HouseholdBaseline], for as long as a purchase lasts), else the
  *     per-person table ([SmartQuantities]) for the size of the household ([HouseholdSize]);
  *  2. a household that grew or shrank since it bought the usual amount: the amount follows it (people now ÷ then);
  *  3. a list for a stretch of days (horizonDays): an item that runs out more often than that is bought several times;
  *  4. a computed amount is rounded to what a shop sells (whole pieces, whole packs). An amount the household really
  *     bought is kept as it is.
  */
-class TripSizer(stats: Collection<ItemStats>, val people: Double) {
+class TripSizer(
+    stats: Collection<ItemStats>,
+    val people: Double,
+    /** The first-list survey's answers, when it was filled in. */
+    private val baseline: HouseholdBaseline? = null,
+) {
     private val byId = stats.associateBy { it.itemId }
     private val calibration = SmartQuantities.calibration(stats, people)
 
@@ -34,8 +40,16 @@ class TripSizer(stats: Collection<ItemStats>, val people: Double) {
                 notes += "מותאם ל־${peopleText(people)}"
             }
         } else {
-            val table = SmartQuantities.forItem(identity.name, stats?.cadenceDays, people, calibration)
-            if (table != null) {
+            val told = baseline?.amountFor(identity.name)
+            val table = if (told != null) null else SmartQuantities.forItem(identity.name, stats?.cadenceDays, people, calibration)
+            if (told != null) {
+                val days = stats?.cadenceDays ?: told.periodDays.toDouble()
+                q = told.forDays(days)
+                if (q != null) {
+                    computed = true
+                    notes += if (stats?.cadenceDays == null && told.periodDays == SurveyPeriod.MONTH.days) "$SURVEY_NOTE · לחודש" else SURVEY_NOTE
+                }
+            } else if (table != null) {
                 q = table
                 computed = true
                 notes += (if (SmartQuantities.isEstimate(identity.name)) "הערכה לפי " else "לפי ") + peopleText(people)
@@ -63,10 +77,25 @@ class TripSizer(stats: Collection<ItemStats>, val people: Double) {
     }
 
     /**
-     * A first list for a household with no history yet: the staples the per-person table knows, for a week, for
-     * the size of the household. Empty when the household's size is unknown (no family profiles).
+     * A first list for a household with no history yet: what it said it buys in the first-list survey (the weekly
+     * items for a week, the monthly ones for a month), or, without the survey, the staples the per-person table
+     * knows, for a week, for the size of the household. Empty when neither is known.
      */
     fun starter(skip: Set<String>): List<Suggestion> {
+        val told = baseline?.amounts?.filterValues { it.amount > 0.0 }.orEmpty()
+        if (told.isNotEmpty()) {
+            val order = FirstListSurvey.items.map { it.name }
+            return told.keys.sortedBy { order.indexOf(it).let { i -> if (i < 0) Int.MAX_VALUE else i } }.mapNotNull { name ->
+                val def = Catalog.lookup(name)
+                val identity = ItemIdentity(def?.name ?: name, null, def?.category ?: Category.OTHER)
+                if (identity.id in skip) return@mapNotNull null
+                val sized = size(identity, null, 7)
+                Suggestion(
+                    itemId = identity.id, identity = identity, kind = SuggestionKind.RUNNING_LOW,
+                    quantity = sized.quantity, score = 1.0, reason = SURVEY_STARTER_REASON, quantityNote = sized.note,
+                )
+            }
+        }
         if (people <= 0.0) return emptyList()
         return SmartQuantities.items.mapNotNull { name ->
             val def = Catalog.lookup(name) ?: return@mapNotNull null
@@ -84,6 +113,11 @@ class TripSizer(stats: Collection<ItemStats>, val people: Double) {
         /** A household this much bigger or smaller than when it bought the usual amount gets a new amount. */
         const val SCALE_THRESHOLD = 0.15
         const val STARTER_REASON = "רשימה ראשונה לפי גודל הבית"
+        const val SURVEY_STARTER_REASON = "רשימה ראשונה לפי השאלון"
+        const val SURVEY_NOTE = "לפי השאלון"
+
+        /** True for a line of a first list ([starter]). */
+        fun isStarter(reason: String?): Boolean = reason == STARTER_REASON || reason == SURVEY_STARTER_REASON
 
         /** How many purchases of an item a list for [horizonDays] needs: one, or more when it runs out sooner. */
         fun timesIn(horizonDays: Int?, cadenceDays: Double?): Int {

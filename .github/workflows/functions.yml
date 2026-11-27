@@ -53,7 +53,7 @@ jobs:
           if [ -z "$FIREBASE_TOKEN_JSON" ] || [ -z "$FIREBASE_PROJECT_ID" ]; then
             echo "Firebase deploy secrets not set; skipping."; exit 0
           fi
-          # the Gemini key for interpretItems (GitHub secret GEMINI_API_KEY); without it the function answers "not set up"
+          # the Gemini key for interpretItems and estimateBaseline (GitHub secret GEMINI_API_KEY); without it they answer "not set up"
           if [ -n "$GEMINI_API_KEY" ]; then
             printf 'GEMINI_API_KEY=%s\n' "$GEMINI_API_KEY" >> firebase/functions/.env
           else

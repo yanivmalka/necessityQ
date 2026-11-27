@@ -92,7 +92,7 @@ service cloud.firestore {
       match /lines/{id} { allow read, write: if isMember(hid); }
       match /purchases/{id} { allow read, write: if isMember(hid); }
       match /suppressions/{id} { allow read, write: if isMember(hid); }
-      // daily count of quick-add readings (the limit): server only, so it can't be reset from a phone
+      // daily count of model questions (quick-add readings, first-list estimates): server only, so it can't be reset from a phone
       match /usage/{id} { allow read, write: if false; }
     }
 
@@ -106,5 +106,7 @@ service cloud.firestore {
     match /geocodeCache/{key} { allow read, write: if false; }
     // readings of quick-add text (functions/src/interpret.ts): server only
     match /interpretCache/{key} { allow read, write: if false; }
+    // first-list estimates by household makeup (functions/src/baseline.ts): server only
+    match /baselineCache/{key} { allow read, write: if false; }
   }
 }

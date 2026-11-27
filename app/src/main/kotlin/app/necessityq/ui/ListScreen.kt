@@ -740,7 +740,7 @@ fun ListScreen(
                 item(key = "trip") {
                     TripListCard(
                         snap.tripList.size,
-                        starter = snap.tripList.all { it.reason == app.necessityq.domain.TripSizer.STARTER_REASON },
+                        starter = snap.tripList.all { app.necessityq.domain.TripSizer.isStarter(it.reason) },
                         onBuild = { showGenerate = true },
                     )
                 }
@@ -824,11 +824,12 @@ fun ListScreen(
                         )
                         if (filter.isActive) {
                             TextButton(onClick = { vm.setFilter(ListFilter()) }) { Text("ניקוי הסינון") }
-                        } else if (snap.stats.isNotEmpty()) {
+                        } else if (!shopping) {
+                            // a new household builds its first list here: the one-time survey, then the list
                             FilledTonalButton(onClick = { showGenerate = true }) {
                                 Icon(Icons.Default.AutoAwesome, null, Modifier.size(18.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("יצירת רשימה מקניות עבר")
+                                Text(if (snap.stats.isNotEmpty()) "יצירת רשימה מקניות עבר" else "בניית רשימה ראשונה")
                             }
                         }
                     }
@@ -1803,8 +1804,14 @@ private fun FilterSection(title: String, content: @Composable () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun GenerateSheet(vm: AppViewModel, onDismiss: () -> Unit) {
+    // the first time a list is built: the one-time survey of how much the household buys, before the proposal
+    var surveyOpen by remember { mutableStateOf(vm.shouldAskSurvey()) }
+    // the survey's answers just given (the saved ones come back a moment later)
+    var answered by remember { mutableStateOf<app.necessityq.domain.HouseholdBaseline?>(null) }
     var mode by remember { mutableStateOf(GenerateMode.DUE) }
-    val proposal = remember(mode) { vm.proposeList(mode) }
+    val proposal = remember(mode, answered, surveyOpen) {
+        if (surveyOpen) emptyList() else answered?.let { vm.proposeList(mode, it) } ?: vm.proposeList(mode)
+    }
     var chosen by remember(proposal) { mutableStateOf(proposal.filter { it.preselected }.map { it.identity.id }.toSet()) }
     // amounts changed in the review, by item id (null value = "no amount")
     var quantities by remember(proposal) { mutableStateOf<Map<String, Quantity?>>(emptyMap()) }
@@ -1814,6 +1821,11 @@ private fun GenerateSheet(vm: AppViewModel, onDismiss: () -> Unit) {
     var undoAdded by remember { mutableStateOf<(() -> Unit)?>(null) }
     // fully open at once (as every other sheet): in the half-open state a drag on the list moved the sheet, not the list
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        if (surveyOpen) {
+            val done = { b: app.necessityq.domain.HouseholdBaseline -> vm.saveSurvey(b); answered = b; surveyOpen = false }
+            FirstListSurveyContent(vm, saved = answered ?: vm.meals.value.baseline, onSave = done, onSkip = done)
+            return@ModalBottomSheet
+        }
         val added = result
         if (added != null) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1839,7 +1851,10 @@ private fun GenerateSheet(vm: AppViewModel, onDismiss: () -> Unit) {
             return@ModalBottomSheet
         }
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("רשימה מקניות עבר", style = MaterialTheme.typography.titleLarge)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("רשימה מקניות עבר", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                TextButton(onClick = { surveyOpen = true }) { Text("שאלון הכמויות") }
+            }
             Text(
                 "בדקו מה יתווסף: אפשר לבטל סימון ולשנות כמות לפני ההוספה. מה שהוצע מראש והסרתם, האפליקציה תזכור ותציע פחות. " +
                     "הפריטים יסומנו \"אוטומטי\".",
@@ -2448,7 +2463,7 @@ private fun TripListCard(count: Int, starter: Boolean, onBuild: () -> Unit) {
         Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(8.dp))
         Text(
-            if (starter) "רשימה ראשונה לשבוע ($count מוצרים לפי גודל הבית) · "
+            if (starter) "רשימה ראשונה ($count מוצרים לפי הבית שלכם) · "
             else "בניית רשימה לשבוע ($count מוצרים לפי הקצב שלכם) · ",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onPrimaryContainer,
