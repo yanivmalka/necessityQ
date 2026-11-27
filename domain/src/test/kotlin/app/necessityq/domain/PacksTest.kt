@@ -75,6 +75,22 @@ class PacksTest {
         assertFalse(HouseholdPacks.offers(milk, null, null).any { it.fits })
     }
 
+    @Test fun `a household that buys trays of 30 is shown trays of 30 only, of every grade`() {
+        val trays = listOf(product("ביצים 12 יח'", code = "a"), product("ביצים L 30 יח'", code = "b"), product("ביצים M 30 יח'", code = "c"))
+        val offers = HouseholdPacks.offers(trays, Pack(30), null)
+        assertEquals(listOf("b", "c"), HouseholdPacks.visible(offers, null, otherSizes = false).map { it.product.code })
+        // asked for: every size
+        assertEquals(listOf("b", "c", "a"), HouseholdPacks.visible(offers, null, otherSizes = true).map { it.product.code })
+        // the chosen product is always shown, whatever its size
+        assertEquals(listOf("b", "c", "a"), HouseholdPacks.visible(offers, "a", otherSizes = false).map { it.product.code })
+        // no size known: nothing is hidden
+        val free = HouseholdPacks.offers(trays, null, null)
+        assertEquals(3, HouseholdPacks.visible(free, null, otherSizes = false).size)
+        // the size on the list counts too: "חלב 2 ליטר" hides the 1 L cartons
+        val milk = listOf(product("חלב 3% 1 ליטר", code = "1"), product("חלב 3% 2 ליטר", code = "2"))
+        assertEquals(listOf("2"), HouseholdPacks.visible(HouseholdPacks.offers(milk, null, liters(2.0)), null, false).map { it.product.code })
+    }
+
     @Test fun `computed amounts follow the household's pack`() {
         val id = ItemIdentity.fromText("יוגורט")
         val free = TripSizer(emptyList(), 4.0).size(id, null).quantity!!

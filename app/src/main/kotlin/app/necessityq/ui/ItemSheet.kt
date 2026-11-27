@@ -896,6 +896,8 @@ private fun SimilarProducts(
     var pct by remember(itemId) { mutableStateOf<String?>(null) }
     var size by remember(itemId) { mutableStateOf<String?>(null) }
     var all by remember(itemId) { mutableStateOf(false) }
+    // other sizes than the household's are hidden until asked for (a tray of 30: no 12-egg packs)
+    var otherSizes by remember(itemId) { mutableStateOf(false) }
     // the size the household buys (its chosen product, or what it always buys), else the amount on the list:
     // the products in that size first, each with its size, so it is clear which is which
     val snap by vm.snapshot.collectAsStateWithLifecycle()
@@ -914,11 +916,19 @@ private fun SimilarProducts(
             )
             return@Column
         }
+        val offers = remember(info, pack, wanted) { app.necessityq.domain.HouseholdPacks.offers(info.candidates, pack, wanted) }
+        val visible = remember(offers, info.preferred, otherSizes) { app.necessityq.domain.HouseholdPacks.visible(offers, info.preferred?.code, otherSizes) }
+        val hidden = offers.size - visible.size
+        val shownProducts = remember(visible) { visible.map { it.product } }
         primary?.let {
-            Text("ב${it.title} · ${info.candidates.size} מוצרים", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val inSize = visible.firstOrNull { it.fits }?.pack?.label()?.takeIf { hidden > 0 }
+            Text(
+                "ב${it.title} · ${visible.size} מוצרים" + (inSize?.let { s -> " בגודל $s" } ?: ""),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
-        val brands = remember(info) { app.necessityq.domain.ItemPrices.brands(info.candidates) }
-        val percents = remember(info) { app.necessityq.domain.ItemPrices.percents(info.candidates) }
+        val brands = remember(shownProducts) { app.necessityq.domain.ItemPrices.brands(shownProducts) }
+        val percents = remember(shownProducts) { app.necessityq.domain.ItemPrices.percents(shownProducts) }
         if (brands.size > 1) {
             // the companies: the common ones first, then the less known; one line that scrolls sideways
             val brandRow = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -938,15 +948,14 @@ private fun SimilarProducts(
                 percents.forEach { p -> FilterChip(selected = pct == p, onClick = { pct = if (pct == p) null else p }, label = { Text(p) }) }
             }
         }
-        val offers = remember(info, pack, wanted) { app.necessityq.domain.HouseholdPacks.offers(info.candidates, pack, wanted) }
-        val sizes = remember(offers) { offers.mapNotNull { it.pack?.label() }.distinct() }
+        val sizes = remember(visible) { visible.mapNotNull { it.pack?.label() }.distinct() }
         if (sizes.size > 1) {
             Row(Modifier.fillMaxWidth().fadingHorizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 FilterChip(selected = size == null, onClick = { size = null }, label = { Text("כל הגדלים") })
                 sizes.forEach { s -> FilterChip(selected = size == s, onClick = { size = if (size == s) null else s }, label = { Text(s) }) }
             }
         }
-        val filtered = offers.filter { o ->
+        val filtered = visible.filter { o ->
             val c = o.product
             (brand == null || c.brand.trim() == brand) && (pct == null || app.necessityq.domain.ItemPrices.hasPercent(c, pct!!)) &&
                 (size == null || o.pack?.label() == size)
@@ -965,6 +974,11 @@ private fun SimilarProducts(
             BranchProductRow(c, chosen, size = o.pack?.label(), onChoose = { vm.setPreferredProduct(itemId, if (chosen) null else c.code); if (!chosen) onChosen() })
         }
         if (filtered.isEmpty()) Text("אין מוצרים לבחירה הזו", style = MaterialTheme.typography.bodySmall)
+        if (hidden > 0) {
+            androidx.compose.material3.TextButton(onClick = { otherSizes = true }) { Text("גדלים אחרים ($hidden)") }
+        } else if (otherSizes) {
+            androidx.compose.material3.TextButton(onClick = { otherSizes = false; size = null }) { Text("רק הגודל שלי") }
+        }
         if (!all && filtered.size > FIRST_PRODUCTS) {
             androidx.compose.material3.TextButton(onClick = { all = true }) { Text("עוד ${filtered.size - FIRST_PRODUCTS} מוצרים") }
         }

@@ -246,4 +246,14 @@ object HouseholdPacks {
         val anyFits = all.any { fits(it.second) }
         return all.map { (product, p) -> Offer(product, p, anyFits && fits(p)) }.sortedByDescending { it.fits }
     }
+
+    /**
+     * What the product chooser lists: when some of [offers] are the household's size (a tray of 30), those alone — of
+     * every grade and brand (L and M, since none was chosen) — and the chosen product ([chosenCode]) whatever its
+     * size; a 12-egg pack is not what it is looking for. Every size when [otherSizes] is asked for, or when none fits.
+     */
+    fun visible(offers: List<Offer>, chosenCode: String?, otherSizes: Boolean): List<Offer> {
+        if (otherSizes || offers.none { it.fits }) return offers
+        return offers.filter { it.fits || it.product.code == chosenCode }
+    }
 }
