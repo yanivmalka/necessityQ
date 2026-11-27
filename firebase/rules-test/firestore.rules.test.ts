@@ -94,15 +94,23 @@ describe("households: leaving", () => {
 });
 
 describe("households: joining", () => {
-  it("a signed-in user may add only themselves", async () => {
-    await assertSucceeds(updateDoc(doc(dbAs(STRANGER), "households", HID), { members: arrayUnion(STRANGER) }));
+  // a valid, unused invitation is claimed in the same batch, but the household change is more than adding oneself
+  const joinWith = (change: Record<string, unknown>) => {
+    const db = dbAs(STRANGER);
+    const batch = writeBatch(db);
+    batch.update(doc(db, "invites", TOKEN), { usedBy: STRANGER, usedAt: serverTimestamp() });
+    batch.update(doc(db, "households", HID), change);
+    batch.set(doc(db, "users", STRANGER), { householdId: HID, joinToken: TOKEN }, { merge: true });
+    return batch.commit();
+  };
+
+  it("a plain signed-in user cannot add themselves without an invitation", async () => {
+    await assertFails(updateDoc(doc(dbAs(STRANGER), "households", HID), { members: arrayUnion(STRANGER) }));
   });
 
   it("a joiner may not add somebody else or change the owner", async () => {
-    await assertFails(updateDoc(doc(dbAs(STRANGER), "households", HID), { members: arrayUnion("friend") }));
-    await assertFails(
-      updateDoc(doc(dbAs(STRANGER), "households", HID), { members: arrayUnion(STRANGER), ownerId: STRANGER }),
-    );
+    await assertFails(joinWith({ members: arrayUnion("friend") }));
+    await assertFails(joinWith({ members: arrayUnion(STRANGER), ownerId: STRANGER }));
   });
 
   it("a stranger cannot rename the household", async () => {
