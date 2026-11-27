@@ -38,34 +38,41 @@ class ItemSearchTest {
         )
     }
 
-    private fun names(items: List<ItemIdentity>) = items.map { it.displayName }
+    private fun names(items: List<Completion>) = items.map { it.identity.displayName }
+
+    private fun groups(text: String, stats: List<ItemStats> = emptyList(), products: List<BranchProduct>? = shelf) =
+        QuickAddCompletions.build(text, stats, products)
+
+    private fun List<CompletionGroup>.all() = flatMap { names(it.items) }
+    private fun List<CompletionGroup>.of(category: Category) = firstOrNull { it.category == category }?.let { names(it.items) }.orEmpty()
 
     @Test
-    fun `bread is bread, not crackers that begin with the same letters`() {
-        val mine = names(Autocomplete.complete("לחם", emptyList()))
-        assertEquals("לחם", mine.first())
-        assertFalse(mine.toString(), mine.contains("לחמית"))
-        val store = names(ItemSearch.storeItems(shelf, "לחם"))
-        assertFalse(store.toString(), store.any { it.startsWith("לחמית") })
-        assertTrue(store.toString(), store.contains("לחם אחיד פרוס"))
-        // "פירורי לחם" is crumbs: it may come, but after the breads
-        assertTrue(store.toString(), store.indexOf("לחם אחיד פרוס") < store.indexOf("פירורי לחם").let { if (it < 0) Int.MAX_VALUE else it })
+    fun `bread first in its own section, and related products in theirs`() {
+        val g = groups("לחם")
+        assertEquals(Category.BAKERY, g.first().category)
+        assertTrue(g.first().main)
+        val bread = names(g.first().items)
+        assertEquals("לחם", bread.first())
+        assertTrue(bread.toString(), bread.contains("לחם אחיד פרוס"))
+        assertFalse(bread.toString(), bread.any { it.startsWith("לחמית") })
+        // not dropped: crackers and crumbs are offered, each under its own section, after the bread
+        assertTrue(g.toString(), g.of(Category.BREAKFAST_SNACKS).any { it.startsWith("לחמית") })
+        assertTrue(g.toString(), g.of(Category.PANTRY).any { it.startsWith("פירורי לחם") })
+        assertEquals(1, g.count { it.main })
     }
 
     @Test
     fun `a word still being typed may begin longer words`() {
-        val mine = names(Autocomplete.complete("לח", emptyList()))
-        assertTrue(mine.toString(), mine.containsAll(listOf("לחם", "לחמית")))
-        assertTrue(names(ItemSearch.storeItems(shelf, "לח")).any { it.startsWith("לחמית") })
+        assertTrue(groups("לח").all().containsAll(listOf("לחם", "לחמית")))
     }
 
     @Test
     fun `drumsticks are not chocolate milk`() {
-        val mine = names(Autocomplete.complete("שוקיים", emptyList()))
-        assertEquals("שוקיים", mine.first())
-        assertFalse(mine.toString(), mine.any { it.startsWith("שוקו") })
-        val store = names(ItemSearch.storeItems(shelf, "שוקיים"))
-        assertEquals(listOf("שוקיים עוף טרי"), store)
+        val g = groups("שוקיים")
+        assertEquals(Category.MEAT_FISH, g.first().category)
+        assertEquals("שוקיים", names(g.first().items).first())
+        assertTrue(g.of(Category.MEAT_FISH).toString(), g.of(Category.MEAT_FISH).contains("שוקיים עוף טרי"))
+        assertFalse(g.all().toString(), g.all().any { it.startsWith("שוקו") })
         assertEquals(Category.MEAT_FISH, ItemIdentity.fromText("שוקי עוף").category)
     }
 
@@ -78,10 +85,14 @@ class ItemSearchTest {
         assertEquals("פלפל צבעוני", ItemIdentity.fromText("פלפלים צבעוניים").displayName)
         assertEquals("פלפל צבעוני", ItemIdentity.fromText("פלפל בצבעים שונים").displayName)
 
-        assertEquals("פלפל צבעוני", Autocomplete.complete("פלפלים בכל מיני צבעים", emptyList()).first().displayName)
-        // the coloured ones first; black pepper (a spice) is not one of them
-        val store = names(ItemSearch.storeItems(shelf, "פלפלים בכל מיני צבעים"))
-        assertEquals(setOf("פלפל אדום", "פלפל צהוב", "פלפל ירוק חריף"), store.take(3).toSet())
+        val g = groups("פלפלים בכל מיני צבעים")
+        val produce = names(g.first().items)
+        assertEquals(Category.PRODUCE, g.first().category)
+        assertEquals("פלפל צבעוני", produce.first())
+        assertTrue(produce.toString(), produce.containsAll(listOf("פלפל אדום", "פלפל צהוב", "פלפל ירוק חריף")))
+        // black pepper is a spice: offered under the pantry, not with the vegetables
+        assertFalse(produce.toString(), produce.any { it.startsWith("פלפל שחור") })
+        assertTrue(g.toString(), g.of(Category.PANTRY).any { it.startsWith("פלפל שחור") })
 
         // and its price is the coloured peppers' (the mix narrows nothing)
         val index = ProductIndex("b", 0, shelf)
@@ -90,29 +101,30 @@ class ItemSearchTest {
 
     @Test
     fun `milk is not halva, and a percent typed is kept`() {
-        val store = names(ItemSearch.storeItems(shelf, "חלב"))
-        assertFalse(store.toString(), store.any { it.startsWith("חלבה") })
-        assertEquals(listOf("קוטג' 5%"), names(ItemSearch.storeItems(shelf, "קוטג 5%")))
-        assertEquals("קוטג' 5%", Autocomplete.complete("קוטג 5%", emptyList()).first().displayName)
+        val milk = groups("חלב")
+        assertEquals(Category.DAIRY, milk.first().category)
+        assertFalse(milk.first().items.toString(), names(milk.first().items).any { it.startsWith("חלבה") })
+        val cottage = groups("קוטג 5%")
+        assertEquals("קוטג' 5%", names(cottage.first().items).first())
+        assertFalse(cottage.all().toString(), cottage.all().any { it.contains("9%") })
     }
 
     @Test
-    fun `the household's own items are found by whole words too`() {
-        val stats = listOf(
-            stats("לחמית"),
-            stats("לחם מלא"),
-            stats("קוטג 9%"),
-        )
-        val bread = names(Autocomplete.complete("לחם", stats))
-        assertFalse(bread.toString(), bread.contains("לחמית"))
+    fun `the household's own items are found by whole words too, and come first on a tie`() {
+        val stats = listOf(stats("לחמית"), stats("לחם מלא"), stats("קוטג 9%"))
+        val g = groups("לחם", stats, products = null)
+        val bread = names(g.first().items)
         assertTrue(bread.toString(), bread.containsAll(listOf("לחם", "לחם מלא")))
+        assertFalse(bread.toString(), bread.contains("לחמית"))
+        assertTrue(g.of(Category.BREAKFAST_SNACKS).contains("לחמית"))
+        assertEquals(Completion.Source.MINE, g.first().items.first { it.identity.name == "לחם מלא" }.source)
         // a different kind than the one typed is not offered as it
-        assertEquals(listOf("קוטג' 5%"), names(Autocomplete.complete("קוטג 5%", stats)))
+        assertEquals(listOf("קוטג' 5%"), groups("קוטג 5%", stats, products = null).all())
     }
 
     @Test
     fun `extra words that match nothing still find the item`() {
-        assertEquals("פלפל", Autocomplete.complete("פלפלים טריים מהשוק", emptyList()).first().displayName)
+        assertEquals("פלפל", groups("פלפלים טריים מהשוק", products = null).first().items.first().identity.displayName)
     }
 
     @Test
